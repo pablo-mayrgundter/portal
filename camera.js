@@ -29,6 +29,7 @@ import {PoseIllustration} from './illustrationGen/illustration';
 import {Skeleton, facePartName2Index} from './illustrationGen/skeleton';
 import {FileUtils} from './utils/fileUtils';
 
+import * as pabloSVG from './resources/illustration/pablo.svg';
 import * as girlSVG from './resources/illustration/girl.svg';
 import * as boySVG from './resources/illustration/boy.svg';
 import * as abstractSVG from './resources/illustration/abstract.svg';
@@ -58,6 +59,7 @@ let nmsRadius = 30.0;
 let mobile = false;
 const stats = new Stats();
 const avatarSvgs = {
+  'pablo': pabloSVG.default,
   'girl': girlSVG.default,
   'boy': boySVG.default,
   'abstract': abstractSVG.default,
@@ -112,7 +114,7 @@ const defaultInputResolution = 200;
 const guiState = {
   avatarSVG: Object.keys(avatarSvgs)[0],
   debug: {
-    showDetectionDebug: true,
+    showDetectionDebug: false,
     showIllustrationDebug: false,
   },
 };
@@ -136,6 +138,7 @@ function setupGui(cameras) {
   output.add(guiState.debug, 'showDetectionDebug');
   output.add(guiState.debug, 'showIllustrationDebug');
   output.open();
+  gui.close();
 }
 
 /**
@@ -166,7 +169,7 @@ function detectPoseInRealTime(video) {
     stats.begin();
 
     let poses = [];
-   
+
     videoCtx.clearRect(0, 0, videoWidth, videoHeight);
     // Draw video
     videoCtx.save();
@@ -224,8 +227,8 @@ function detectPoseInRealTime(video) {
     }
 
     canvasScope.project.activeLayer.scale(
-      canvasWidth / videoWidth, 
-      canvasHeight / videoHeight, 
+      canvasWidth / videoWidth,
+      canvasHeight / videoHeight,
       new canvasScope.Point(0, 0));
 
     // End monitoring code for frames per second
@@ -244,7 +247,7 @@ function setupCanvas() {
     canvasHeight = canvasWidth;
     videoWidth *= 0.7;
     videoHeight *= 0.7;
-  }  
+  }
 
   canvasScope = paper.default;
   let canvas = document.querySelector('.illustration-canvas');;
@@ -288,8 +291,7 @@ export async function bindPage() {
   }
 
   setupGui([], posenet);
-  setupFPS();
-  
+  //setupFPS();
   toggleLoadingUI(false);
   detectPoseInRealTime(video, posenet);
 }
@@ -304,5 +306,5 @@ async function parseSVG(target) {
   illustration = new PoseIllustration(canvasScope);
   illustration.bindSkeleton(skeleton, svgScope);
 }
-    
+
 bindPage();
