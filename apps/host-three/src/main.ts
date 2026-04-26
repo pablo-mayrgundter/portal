@@ -5,7 +5,7 @@ import {
   makePortalPlane,
   setPortalTexture,
   updateCoupledCamera
-} from '@spatial/portal-three'
+} from '@portal/portal-three'
 import { createWorldA } from './world-a'
 import { createWorldB } from './world-b'
 import { attachBasicFlyControls } from './controls'

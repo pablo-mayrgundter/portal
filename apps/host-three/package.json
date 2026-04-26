@@ -1,5 +1,5 @@
 {
-  "name": "@spatial/host-three",
+  "name": "@portal/host-three",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,8 +9,8 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@spatial/portal-core": "0.1.0",
-    "@spatial/portal-three": "0.1.0",
+    "@portal/portal-core": "0.1.0",
+    "@portal/portal-three": "0.1.0",
     "three": "^0.180.0"
   },
   "devDependencies": {

@@ -5,7 +5,7 @@ import {
   type PortalAnchor,
   type PortalPose,
   type Vec3
-} from '@spatial/portal-core'
+} from '@portal/portal-core'
 
 const asAnchor = (object: THREE.Object3D, normal = new THREE.Vector3(0, 0, 1)): PortalAnchor => {
   const worldPos = new THREE.Vector3()
