@@ -1,5 +1,5 @@
 {
-  "name": "@spatial/portal-core",
+  "name": "@portal/portal-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
