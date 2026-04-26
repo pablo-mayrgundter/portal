@@ -1,10 +1,10 @@
-# Spatial Portal
+# Portal
 
 Live 3D portals between independent browser worlds.
 
 This is a demo lab for browser-native **spatial portals**: live views into other 3D web apps, with camera, input, and eventually avatar/world-state handoff.
 
-The later, more general protocol/project name may be **WorldLink**. For now this repo is the concrete demo: one spatial portal, then many.
+The later, more general protocol/project name may be **WorldLink**. For now this repo is the concrete demo: one portal, then many.
 
 ## Thesis
 
@@ -19,7 +19,7 @@ Modern 3D web apps often sit on incompatible render stacks:
 - custom WebGPU renderers
 - neural / splat / streamed world renderers
 
-Each framework provides power, but also creates an integration boundary. Spatial Portal explores a hypermedia alternative: keep engines sovereign, but make the seams explicit.
+Each framework provides power, but also creates an integration boundary. Portal explores a hypermedia alternative: keep engines sovereign, but make the seams explicit.
 
 A portal is not just a flat HTML page texture on a cube. It is a **live 3D scene endpoint**:
 
@@ -201,10 +201,10 @@ Experiments:
 
 ## Core types
 
-### SpatialPortal
+### Portal
 
 ```ts
-type SpatialPortal = {
+type Portal = {
   id: string
   href: string
   sourceAnchor: Transform
