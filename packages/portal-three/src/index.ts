@@ -160,7 +160,7 @@ export const detectPortalCrossing = (
   const dPrev = prev.clone().sub(portalPos).dot(n)
   const dCurr = curr.clone().sub(portalPos).dot(n)
 
-  if (dPrev * dCurr >= 0) {
+  if (dPrev === dCurr || Math.sign(dPrev) === Math.sign(dCurr)) {
     return { crossed: false, signedDistance: dCurr, t: 0 }
   }
 
@@ -193,10 +193,20 @@ void main() {
 const portalFragmentShader = `
 uniform sampler2D portalTexture;
 varying vec4 vClipPos;
+
+vec3 linearToSRGB(vec3 value) {
+  return mix(
+    pow(value, vec3(0.41666)) * 1.055 - vec3(0.055),
+    value * 12.92,
+    vec3(lessThanEqual(value, vec3(0.0031308)))
+  );
+}
+
 void main() {
   vec2 ndc = vClipPos.xy / vClipPos.w;
   vec2 uv = ndc * 0.5 + 0.5;
-  gl_FragColor = texture2D(portalTexture, uv);
+  vec4 color = texture2D(portalTexture, uv);
+  gl_FragColor = vec4(linearToSRGB(color.rgb), color.a);
 }
 `
 

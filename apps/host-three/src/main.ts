@@ -42,8 +42,6 @@ const initialH = Math.max(1, Math.floor(window.innerHeight * renderer.getPixelRa
 
 const targetForA = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
 const targetForB = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
-targetForA.texture.colorSpace = renderer.outputColorSpace
-targetForB.texture.colorSpace = renderer.outputColorSpace
 setPortalTexture(portalA, targetForA.texture)
 setPortalTexture(portalB, targetForB.texture)
 
@@ -90,16 +88,9 @@ const frame = () => {
 
   const crossing = detectPortalCrossing(prevPos, hostCamera.position, here.portal)
   if (crossing.crossed) {
-    const crossPoint = prevPos.clone().lerp(hostCamera.position, crossing.t)
-    hostCamera.position.copy(crossPoint)
-    hostCamera.updateMatrixWorld()
-
     const traversed = computeTraversalPose(hostCamera, here.portal, there.portal)
-    const newForward = new THREE.Vector3(...traversed.forward).normalize()
     hostCamera.position.set(...traversed.position)
-    hostCamera.position.addScaledVector(newForward, 0.01)
-    controls.setOrientationFromForward(newForward)
-
+    controls.setOrientationFromForward(new THREE.Vector3(...traversed.forward))
     const swap = here
     here = there
     there = swap
