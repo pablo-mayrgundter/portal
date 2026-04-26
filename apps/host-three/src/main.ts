@@ -18,10 +18,10 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
 app.appendChild(renderer.domElement)
 
-const hostCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 120)
+const hostCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 200)
 hostCamera.position.set(0, 1.6, 5.5)
 
-const portalCamera = new THREE.PerspectiveCamera(70, 1, 0.1, 120)
+const portalCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
 
 const { scene: worldA } = createWorldA()
 const { scene: worldB, tick: tickWorldB } = createWorldB()
@@ -37,8 +37,11 @@ portalB.position.set(0, 1.6, 0)
 portalB.rotation.y = Math.PI
 worldB.add(portalB)
 
-const targetForA = new THREE.WebGLRenderTarget(1024, 1024, { depthBuffer: true, stencilBuffer: false })
-const targetForB = new THREE.WebGLRenderTarget(1024, 1024, { depthBuffer: true, stencilBuffer: false })
+const initialW = Math.max(1, Math.floor(window.innerWidth * renderer.getPixelRatio()))
+const initialH = Math.max(1, Math.floor(window.innerHeight * renderer.getPixelRatio()))
+
+const targetForA = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
+const targetForB = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
 setPortalTexture(portalA, targetForA.texture)
 setPortalTexture(portalB, targetForB.texture)
 
@@ -58,13 +61,19 @@ let there: WorldNode = nodeB
 const controls = attachBasicFlyControls(hostCamera, renderer.domElement)
 
 const onResize = () => {
-  renderer.setSize(window.innerWidth, window.innerHeight)
-  hostCamera.aspect = window.innerWidth / window.innerHeight
+  const w = window.innerWidth
+  const h = window.innerHeight
+  renderer.setSize(w, h)
+  hostCamera.aspect = w / h
   hostCamera.updateProjectionMatrix()
+  const pr = renderer.getPixelRatio()
+  const tw = Math.max(1, Math.floor(w * pr))
+  const th = Math.max(1, Math.floor(h * pr))
+  targetForA.setSize(tw, th)
+  targetForB.setSize(tw, th)
 }
 window.addEventListener('resize', onResize)
 
-const portalAspect = portalSize.x / portalSize.y
 const clock = new THREE.Clock()
 const prevPos = new THREE.Vector3().copy(hostCamera.position)
 
@@ -88,8 +97,6 @@ const frame = () => {
   }
 
   updateCoupledCamera(hostCamera, here.portal, there.portal, portalCamera)
-  portalCamera.aspect = portalAspect
-  portalCamera.updateProjectionMatrix()
 
   renderer.setRenderTarget(here.target)
   renderer.render(there.scene, portalCamera)
