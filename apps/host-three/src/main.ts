@@ -76,6 +76,9 @@ window.addEventListener('resize', onResize)
 
 const clock = new THREE.Clock()
 const prevPos = new THREE.Vector3().copy(hostCamera.position)
+const prevHostPos = new THREE.Vector3().copy(hostCamera.position)
+const motionDelta = new THREE.Vector3()
+const predictedCamera = new THREE.PerspectiveCamera()
 
 const frame = () => {
   const dt = clock.getDelta()
@@ -94,15 +97,27 @@ const frame = () => {
     const swap = here
     here = there
     there = swap
+    prevHostPos.copy(hostCamera.position)
   }
 
-  updateCoupledCamera(hostCamera, here.portal, there.portal, portalCamera)
+  motionDelta.copy(hostCamera.position).sub(prevHostPos)
+  predictedCamera.fov = hostCamera.fov
+  predictedCamera.aspect = hostCamera.aspect
+  predictedCamera.near = hostCamera.near
+  predictedCamera.far = hostCamera.far
+  predictedCamera.position.copy(hostCamera.position).add(motionDelta)
+  predictedCamera.quaternion.copy(hostCamera.quaternion)
+  predictedCamera.updateMatrixWorld(true)
+
+  updateCoupledCamera(predictedCamera, here.portal, there.portal, portalCamera)
 
   renderer.setRenderTarget(here.target)
   renderer.render(there.scene, portalCamera)
   renderer.setRenderTarget(null)
 
   renderer.render(here.scene, hostCamera)
+
+  prevHostPos.copy(hostCamera.position)
   requestAnimationFrame(frame)
 }
 
