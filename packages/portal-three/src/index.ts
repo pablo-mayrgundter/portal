@@ -142,6 +142,7 @@ export const computeTraversalPose = (
 export type PortalCrossing = {
   crossed: boolean
   signedDistance: number
+  t: number
 }
 
 export const detectPortalCrossing = (
@@ -159,8 +160,8 @@ export const detectPortalCrossing = (
   const dPrev = prev.clone().sub(portalPos).dot(n)
   const dCurr = curr.clone().sub(portalPos).dot(n)
 
-  if (dPrev === dCurr || Math.sign(dPrev) === Math.sign(dCurr)) {
-    return { crossed: false, signedDistance: dCurr }
+  if (dPrev * dCurr >= 0) {
+    return { crossed: false, signedDistance: dCurr, t: 0 }
   }
 
   const t = dPrev / (dPrev - dCurr)
@@ -177,7 +178,7 @@ export const detectPortalCrossing = (
   const halfH = size ? size.y / 2 : 1.5
 
   const inside = Math.abs(lx) <= halfW && Math.abs(ly) <= halfH
-  return { crossed: inside, signedDistance: dCurr }
+  return { crossed: inside, signedDistance: dCurr, t }
 }
 
 const portalVertexShader = `
