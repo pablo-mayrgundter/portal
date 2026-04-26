@@ -2,6 +2,8 @@ export type Vec3 = [number, number, number]
 
 export type PortalPose = {
   position: Vec3
+  forward?: Vec3
+  up?: Vec3
 }
 
 export type PortalAnchor = {
@@ -49,17 +51,25 @@ const project = (v: Vec3, basis: Basis): Vec3 => [dot(v, basis.right), dot(v, ba
 const unproject = (v: Vec3, basis: Basis): Vec3 =>
   add(add(scale(basis.right, v[0]), scale(basis.up, v[1])), scale(basis.normal, v[2]))
 
+const mirrorAcrossPortal = (v: Vec3): Vec3 => [-v[0], v[1], -v[2]]
+
+const transferDirection = (dir: Vec3, sourceBasis: Basis, targetBasis: Basis): Vec3 =>
+  normalize(unproject(mirrorAcrossPortal(project(dir, sourceBasis)), targetBasis))
+
 export const couplePoseAcrossPortal = (pose: PortalPose, config: CoupledPoseConfig): PortalPose => {
   const sourceBasis = toBasis(config.source)
   const targetBasis = toBasis(config.target)
 
   const relative = sub(pose.position, config.source.position)
-  const inSourcePortalSpace = project(relative, sourceBasis)
+  const positionInSource = project(relative, sourceBasis)
+  const positionMapped = mirrorAcrossPortal(positionInSource)
 
-  // Mirror depth and lateral axis so the portal behaves like a window.
-  const mapped: Vec3 = [-inSourcePortalSpace[0], inSourcePortalSpace[1], -inSourcePortalSpace[2]]
-
-  return {
-    position: add(config.target.position, unproject(mapped, targetBasis))
+  const result: PortalPose = {
+    position: add(config.target.position, unproject(positionMapped, targetBasis))
   }
+
+  if (pose.forward) result.forward = transferDirection(pose.forward, sourceBasis, targetBasis)
+  if (pose.up) result.up = transferDirection(pose.up, sourceBasis, targetBasis)
+
+  return result
 }
