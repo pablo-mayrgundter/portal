@@ -5,7 +5,10 @@
   "type": "module",
   "main": "./src/index.ts",
   "dependencies": {
-    "three": "^0.180.0",
-    "@spatial/portal-core": "0.1.0"
+    "@spatial/portal-core": "0.1.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.184.0"
   }
 }

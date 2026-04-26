@@ -45,5 +45,11 @@ export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTM
     }
   }
 
-  return { update }
+  const setOrientationFromForward = (forward: THREE.Vector3) => {
+    const f = forward.clone().normalize()
+    pitch = Math.asin(THREE.MathUtils.clamp(f.y, -1, 1))
+    yaw = Math.atan2(-f.x, -f.z)
+  }
+
+  return { update, setOrientationFromForward }
 }

@@ -1,5 +1,11 @@
 import * as THREE from 'three'
-import { makePortalPlane, setPortalTexture, updateCoupledCamera } from '@spatial/portal-three'
+import {
+  computeTraversalPose,
+  detectPortalCrossing,
+  makePortalPlane,
+  setPortalTexture,
+  updateCoupledCamera
+} from '@spatial/portal-three'
 import { createWorldA } from './world-a'
 import { createWorldB } from './world-b'
 import { attachBasicFlyControls } from './controls'
@@ -20,20 +26,34 @@ const portalCamera = new THREE.PerspectiveCamera(70, 1, 0.1, 120)
 const { scene: worldA } = createWorldA()
 const { scene: worldB, tick: tickWorldB } = createWorldB()
 
-const sourcePortal = makePortalPlane(new THREE.Vector2(2.6, 3.2))
-sourcePortal.position.set(0, 1.6, -3.5)
-worldA.add(sourcePortal)
+const portalSize = new THREE.Vector2(2.6, 3.2)
 
-const targetAnchor = new THREE.Object3D()
-targetAnchor.position.set(0, 1.6, 0)
-targetAnchor.rotation.y = Math.PI
-worldB.add(targetAnchor)
+const portalA = makePortalPlane(portalSize)
+portalA.position.set(0, 1.6, -3.5)
+worldA.add(portalA)
 
-const portalTarget = new THREE.WebGLRenderTarget(1024, 1024, {
-  depthBuffer: true,
-  stencilBuffer: false
-})
-setPortalTexture(sourcePortal, portalTarget.texture)
+const portalB = makePortalPlane(portalSize)
+portalB.position.set(0, 1.6, 0)
+portalB.rotation.y = Math.PI
+worldB.add(portalB)
+
+const targetForA = new THREE.WebGLRenderTarget(1024, 1024, { depthBuffer: true, stencilBuffer: false })
+const targetForB = new THREE.WebGLRenderTarget(1024, 1024, { depthBuffer: true, stencilBuffer: false })
+setPortalTexture(portalA, targetForA.texture)
+setPortalTexture(portalB, targetForB.texture)
+
+type WorldNode = {
+  scene: THREE.Scene
+  portal: THREE.Mesh
+  target: THREE.WebGLRenderTarget
+  tick?: (t: number) => void
+}
+
+const nodeA: WorldNode = { scene: worldA, portal: portalA, target: targetForA }
+const nodeB: WorldNode = { scene: worldB, portal: portalB, target: targetForB, tick: tickWorldB }
+
+let here: WorldNode = nodeA
+let there: WorldNode = nodeB
 
 const controls = attachBasicFlyControls(hostCamera, renderer.domElement)
 
@@ -44,26 +64,38 @@ const onResize = () => {
 }
 window.addEventListener('resize', onResize)
 
+const portalAspect = portalSize.x / portalSize.y
 const clock = new THREE.Clock()
+const prevPos = new THREE.Vector3().copy(hostCamera.position)
 
 const frame = () => {
   const dt = clock.getDelta()
   const t = clock.elapsedTime
 
+  prevPos.copy(hostCamera.position)
   controls.update(dt)
-  tickWorldB(t)
+  nodeA.tick?.(t)
+  nodeB.tick?.(t)
 
-  updateCoupledCamera(hostCamera, sourcePortal, targetAnchor, portalCamera)
+  const crossing = detectPortalCrossing(prevPos, hostCamera.position, here.portal)
+  if (crossing.crossed) {
+    const traversed = computeTraversalPose(hostCamera, here.portal, there.portal)
+    hostCamera.position.set(...traversed.position)
+    controls.setOrientationFromForward(new THREE.Vector3(...traversed.forward))
+    const swap = here
+    here = there
+    there = swap
+  }
 
-  const portalAspect = 2.6 / 3.2
+  updateCoupledCamera(hostCamera, here.portal, there.portal, portalCamera)
   portalCamera.aspect = portalAspect
   portalCamera.updateProjectionMatrix()
 
-  renderer.setRenderTarget(portalTarget)
-  renderer.render(worldB, portalCamera)
+  renderer.setRenderTarget(here.target)
+  renderer.render(there.scene, portalCamera)
   renderer.setRenderTarget(null)
 
-  renderer.render(worldA, hostCamera)
+  renderer.render(here.scene, hostCamera)
   requestAnimationFrame(frame)
 }
 
