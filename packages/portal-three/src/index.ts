@@ -181,55 +181,142 @@ export const detectPortalCrossing = (
   return { crossed: inside, signedDistance: dCurr, t }
 }
 
-const portalVertexShader = `
-varying vec4 vClipPos;
-void main() {
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  vClipPos = projectionMatrix * mvPosition;
-  gl_Position = vClipPos;
-}
-`
-
-const portalFragmentShader = `
-uniform sampler2D portalTexture;
-varying vec4 vClipPos;
-
-vec3 linearToSRGB(vec3 value) {
-  return mix(
-    pow(value, vec3(0.41666)) * 1.055 - vec3(0.055),
-    value * 12.92,
-    vec3(lessThanEqual(value, vec3(0.0031308)))
-  );
-}
-
-void main() {
-  vec2 ndc = vClipPos.xy / vClipPos.w;
-  vec2 uv = ndc * 0.5 + 0.5;
-  vec4 color = texture2D(portalTexture, uv);
-  gl_FragColor = vec4(linearToSRGB(color.rgb), color.a);
-}
-`
-
 export const makePortalPlane = (size = new THREE.Vector2(2, 3)): THREE.Mesh => {
   const geometry = new THREE.PlaneGeometry(size.x, size.y)
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      portalTexture: { value: null }
-    },
-    vertexShader: portalVertexShader,
-    fragmentShader: portalFragmentShader,
-    side: THREE.FrontSide
-  })
+  const material = new THREE.MeshBasicMaterial({ visible: false })
   const mesh = new THREE.Mesh(geometry, material)
   mesh.name = 'portal-plane'
   mesh.userData.portalSize = size.clone()
   return mesh
 }
 
-export const setPortalTexture = (mesh: THREE.Mesh, texture: THREE.Texture): void => {
-  const material = mesh.material
-  if (material instanceof THREE.ShaderMaterial) {
-    material.uniforms.portalTexture.value = texture
-    material.uniformsNeedUpdate = true
+const portalOverlayVertexShader = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`
+
+const portalOverlayFragmentShader = `
+uniform sampler2D portalTexture;
+uniform vec3 portalPos;
+uniform vec3 portalNormal;
+uniform vec3 portalRight;
+uniform vec3 portalUp;
+uniform float portalHalfW;
+uniform float portalHalfH;
+uniform vec3 hostCameraPos;
+uniform mat4 hostInverseViewProjection;
+uniform mat4 hostViewMatrix;
+uniform mat4 hostProjectionMatrix;
+
+varying vec2 vUv;
+
+vec3 linearToSRGB(vec3 v) {
+  return mix(
+    pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
+    v * 12.92,
+    vec3(lessThanEqual(v, vec3(0.0031308)))
+  );
+}
+
+void main() {
+  if (dot(hostCameraPos - portalPos, portalNormal) < 0.0) discard;
+
+  vec4 farClipPos = hostInverseViewProjection * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 rayDir = normalize(farClipPos.xyz / farClipPos.w - hostCameraPos);
+
+  float denom = dot(rayDir, portalNormal);
+  if (denom > -1e-6) discard;
+  float t = dot(portalPos - hostCameraPos, portalNormal) / denom;
+  if (t < 0.0) discard;
+
+  vec3 hitPos = hostCameraPos + t * rayDir;
+  vec3 hitRel = hitPos - portalPos;
+  float lx = dot(hitRel, portalRight);
+  float ly = dot(hitRel, portalUp);
+  if (abs(lx) > portalHalfW || abs(ly) > portalHalfH) discard;
+
+  vec4 hitClip = hostProjectionMatrix * hostViewMatrix * vec4(hitPos, 1.0);
+  gl_FragDepth = (hitClip.z / hitClip.w) * 0.5 + 0.5;
+
+  vec4 color = texture2D(portalTexture, vUv);
+  gl_FragColor = vec4(linearToSRGB(color.rgb), 1.0);
+}
+`
+
+export type PortalOverlay = {
+  scene: THREE.Scene
+  camera: THREE.OrthographicCamera
+  update: (
+    anchor: THREE.Object3D,
+    hostCamera: THREE.PerspectiveCamera,
+    texture: THREE.Texture
+  ) => void
+}
+
+export const makePortalOverlay = (): PortalOverlay => {
+  const uniforms = {
+    portalTexture: { value: null as THREE.Texture | null },
+    portalPos: { value: new THREE.Vector3() },
+    portalNormal: { value: new THREE.Vector3() },
+    portalRight: { value: new THREE.Vector3() },
+    portalUp: { value: new THREE.Vector3() },
+    portalHalfW: { value: 1.0 },
+    portalHalfH: { value: 1.5 },
+    hostCameraPos: { value: new THREE.Vector3() },
+    hostInverseViewProjection: { value: new THREE.Matrix4() },
+    hostViewMatrix: { value: new THREE.Matrix4() },
+    hostProjectionMatrix: { value: new THREE.Matrix4() }
   }
+
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: portalOverlayVertexShader,
+    fragmentShader: portalOverlayFragmentShader,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide
+  })
+
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material)
+  mesh.frustumCulled = false
+
+  const scene = new THREE.Scene()
+  scene.add(mesh)
+
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+
+  const _viewProj = new THREE.Matrix4()
+  const _localNormal = new THREE.Vector3(0, 0, 1)
+  const _localRight = new THREE.Vector3(1, 0, 0)
+  const _localUp = new THREE.Vector3(0, 1, 0)
+  const _quat = new THREE.Quaternion()
+
+  const update = (
+    anchor: THREE.Object3D,
+    hostCam: THREE.PerspectiveCamera,
+    texture: THREE.Texture
+  ): void => {
+    const size = anchor.userData.portalSize as THREE.Vector2 | undefined
+    uniforms.portalHalfW.value = size ? size.x / 2 : 1
+    uniforms.portalHalfH.value = size ? size.y / 2 : 1.5
+
+    anchor.getWorldPosition(uniforms.portalPos.value)
+    anchor.getWorldQuaternion(_quat)
+    uniforms.portalNormal.value.copy(_localNormal).applyQuaternion(_quat)
+    uniforms.portalRight.value.copy(_localRight).applyQuaternion(_quat)
+    uniforms.portalUp.value.copy(_localUp).applyQuaternion(_quat)
+
+    uniforms.portalTexture.value = texture
+
+    hostCam.getWorldPosition(uniforms.hostCameraPos.value)
+    _viewProj.multiplyMatrices(hostCam.projectionMatrix, hostCam.matrixWorldInverse)
+    uniforms.hostInverseViewProjection.value.copy(_viewProj).invert()
+    uniforms.hostViewMatrix.value.copy(hostCam.matrixWorldInverse)
+    uniforms.hostProjectionMatrix.value.copy(hostCam.projectionMatrix)
+  }
+
+  return { scene, camera, update }
 }

@@ -2,8 +2,8 @@ import * as THREE from 'three'
 import {
   computeTraversalPose,
   detectPortalCrossing,
+  makePortalOverlay,
   makePortalPlane,
-  setPortalTexture,
   updateCoupledCamera
 } from '@portal/portal-three'
 import { createWorldA } from './world-a'
@@ -42,8 +42,8 @@ const initialH = Math.max(1, Math.floor(window.innerHeight * renderer.getPixelRa
 
 const targetForA = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
 const targetForB = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
-setPortalTexture(portalA, targetForA.texture)
-setPortalTexture(portalB, targetForB.texture)
+
+const portalOverlay = makePortalOverlay()
 
 type WorldNode = {
   scene: THREE.Scene
@@ -103,6 +103,11 @@ const frame = () => {
   renderer.setRenderTarget(null)
 
   renderer.render(here.scene, hostCamera)
+
+  portalOverlay.update(here.portal, hostCamera, here.target.texture)
+  renderer.autoClear = false
+  renderer.render(portalOverlay.scene, portalOverlay.camera)
+  renderer.autoClear = true
 
   requestAnimationFrame(frame)
 }
