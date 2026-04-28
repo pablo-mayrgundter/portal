@@ -68,6 +68,8 @@ export type IframeTargetConfig = {
   hostOrigin?: string
   /** Optional render hook called once per frame just before rendering (for animation). */
   tick?: (time: number) => void
+  /** If true, log received pose + applied matrices once per second to console. */
+  log?: boolean
 }
 
 export type IframeTarget = {
@@ -97,8 +99,11 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   let pendingPose: PortalSetPoseMessage | null = null
   let raf = 0
   let running = false
+  let lastLog = 0
   const lookTarget = new THREE.Vector3()
   const hostOrigin = config.hostOrigin ?? '*'
+  const fmt = (a: ArrayLike<number>) =>
+    `[${Array.from(a, (n) => n.toFixed(3)).join(', ')}]`
 
   const sendReady = (): void => {
     const msg: PortalReadyMessage = {
@@ -164,6 +169,16 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       view: matToArray(camera.matrixWorldInverse)
     }
     parent.postMessage(frame, hostOrigin, [colorBitmap, depthBitmap])
+
+    if (config.log && msg.time - lastLog > 1) {
+      lastLog = msg.time
+      console.log('[iframe] received pose pos:', fmt(pose.position))
+      console.log('[iframe] received pose fwd:', fmt(pose.forward ?? [0, 0, -1]))
+      console.log('[iframe] received pose up: ', fmt(pose.up ?? [0, 1, 0]))
+      console.log('[iframe] viewport:', viewport.width, 'x', viewport.height)
+      console.log('[iframe] applied camera.position:', fmt(camera.position.toArray()))
+      console.log('[iframe] sent view (matrixWorldInverse):', fmt(frame.view))
+    }
   }
 
   const loop = (): void => {
@@ -213,6 +228,7 @@ uniform sampler2D iframeDepth;
 uniform mat4 iframeViewProjectionInverse;
 uniform vec3 destinationPortalPos;
 uniform vec3 destinationKeptNormal;
+uniform int debugMode;
 
 varying vec2 vUv;
 
@@ -226,19 +242,42 @@ vec3 linearToSRGB(vec3 v) {
 
 void main() {
   float depth01 = unpackRGBAToDepth(texture2D(iframeDepth, vUv));
+
+  // debugMode == 2: visualize unpacked depth as grayscale.
+  // Lets us see whether depth values look smooth/sensible per-pixel.
+  if (debugMode == 2) {
+    gl_FragColor = vec4(vec3(depth01), 1.0);
+    return;
+  }
+
   vec4 ndc = vec4(vUv * 2.0 - 1.0, depth01 * 2.0 - 1.0, 1.0);
   vec4 worldPos4 = iframeViewProjectionInverse * ndc;
   vec3 worldPos = worldPos4.xyz / worldPos4.w;
 
-  // Discard fragments that are NOT past the destination portal plane.
-  // destinationKeptNormal points toward the kept side (away from iframe camera).
-  float distFromPlane = dot(worldPos - destinationPortalPos, destinationKeptNormal);
-  if (distFromPlane < 0.0) discard;
+  // debugMode == 3: visualize reconstructed iframe-world position as color.
+  // Each axis mod 1.0 → R/G/B; if reconstruction works the color should
+  // change smoothly with geometry distance/orientation.
+  if (debugMode == 3) {
+    gl_FragColor = vec4(fract(worldPos * 0.25 + 0.5), 1.0);
+    return;
+  }
+
+  // debugMode == 1: skip depth-clip; just blit color. Lets us see if iframe
+  // content placement is correct independent of the clip logic.
+  if (debugMode != 1) {
+    float distFromPlane = dot(worldPos - destinationPortalPos, destinationKeptNormal);
+    if (distFromPlane < 0.0) discard;
+  }
 
   vec4 colorSample = texture2D(iframeColor, vUv);
   gl_FragColor = vec4(linearToSRGB(colorSample.rgb), 1.0);
 }
 `
+
+export type CompositorDebugMode = 'off' | 'noclip' | 'depth' | 'worldpos'
+
+const debugModeToInt = (m: CompositorDebugMode): number =>
+  m === 'noclip' ? 1 : m === 'depth' ? 2 : m === 'worldpos' ? 3 : 0
 
 export type IframeEndpointConfig = {
   iframe: HTMLIFrameElement
@@ -246,6 +285,17 @@ export type IframeEndpointConfig = {
   iframeOrigin?: string
   /** Stencil ref the iframe's compositor should test against. Must match the host's stencil-mask ref. */
   stencilRef?: number
+  /**
+   * Compositor debug visualization mode (default 'off' = normal compositing).
+   * - 'noclip': skip depth-clip; show all iframe content. If the parallax
+   *   issue persists with 'noclip', it's a content/placement problem; if it
+   *   only appears in 'off' mode, the depth-clip is the culprit.
+   * - 'depth':  show unpacked depth as grayscale. Bands or noise here mean
+   *   the depth pack/unpack round-trip is broken.
+   * - 'worldpos': show reconstructed iframe-world position as RGB. Smooth
+   *   color gradients across geometry mean reconstruction is working.
+   */
+  debugMode?: CompositorDebugMode
 }
 
 export type IframePortalEndpoint = PortalEndpoint & {
@@ -283,13 +333,15 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   depthTexture.generateMipmaps = false
 
   const stencilRef = config.stencilRef ?? PORTAL_STENCIL_REF
+  const debugModeInt = debugModeToInt(config.debugMode ?? 'off')
 
   const uniforms = {
     iframeColor: { value: colorTexture },
     iframeDepth: { value: depthTexture },
     iframeViewProjectionInverse: { value: new THREE.Matrix4() },
     destinationPortalPos: { value: new THREE.Vector3() },
-    destinationKeptNormal: { value: new THREE.Vector3() }
+    destinationKeptNormal: { value: new THREE.Vector3() },
+    debugMode: { value: debugModeInt }
   }
 
   const material = new THREE.ShaderMaterial({

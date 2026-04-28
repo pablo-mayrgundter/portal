@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { makeIframeTarget } from '@portal/portal-iframe'
 import type { PortalAnchor } from '@portal/portal-core'
 
+const LOG = new URLSearchParams(location.search).get('log') === '1'
+
 // "World B"-style red room with floating spheres. The destination portal sits
 // at the origin facing -z (so the host's portal anchor mirrors into it).
 const scene = new THREE.Scene()
@@ -42,6 +44,7 @@ const anchor: PortalAnchor = {
 const target = makeIframeTarget({
   scene,
   anchor,
+  log: LOG,
   tick(t) {
     swarm.forEach((m, idx) => {
       m.position.y = 1.1 + Math.sin(t * 1.2 + idx * 0.3) * 0.5

@@ -1,12 +1,43 @@
 import * as THREE from 'three'
 import { couplePoseAcrossPortal, type Mat4 } from '@portal/portal-core'
-import { makeIframeEndpoint } from '@portal/portal-iframe'
+import {
+  makeIframeEndpoint,
+  type CompositorDebugMode
+} from '@portal/portal-iframe'
 import {
   makeLocalEndpoint,
   makePortalPlane,
   makePortalStencilMask
 } from '@portal/portal-three'
 import { attachBasicFlyControls } from './controls'
+
+// ---------------------------------------------------------------------------
+// Debug toggles via URL params, e.g. http://localhost:5173/?debug=noclip&log=1
+//
+// debug=off       (default) normal compositing
+// debug=noclip    show iframe color WITHOUT depth-clip — if parallax issue
+//                 persists with this, the bug is in placement/projection,
+//                 not the depth-clip itself.
+// debug=depth     show unpacked depth as grayscale — bands/noise/blank
+//                 mean the depth pack/unpack round-trip is broken.
+// debug=worldpos  reconstructed iframe-world position as RGB — smooth color
+//                 gradients across visible geometry mean reconstruction is
+//                 working.
+//
+// log=1           periodically (1 Hz) log host's outgoing pose + projection,
+//                 and the iframe target periodically logs what it received and
+//                 the matrices it sent back. Lets us verify round-trip.
+// ---------------------------------------------------------------------------
+const params = new URLSearchParams(location.search)
+const DEBUG_MODE = (params.get('debug') ?? 'off') as CompositorDebugMode
+const LOG = params.get('log') === '1'
+
+// Forward host's URL params to the iframe so the iframe target can pick up the
+// same flags (LOG, etc.) without us hard-coding its URL in index.html.
+const iframeForUrl = document.querySelector<HTMLIFrameElement>('#target-iframe')
+if (iframeForUrl && location.search) {
+  iframeForUrl.src = `/target.html${location.search}`
+}
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
@@ -55,7 +86,9 @@ const hostEndpoint = makeLocalEndpoint({ scene: hostScene, anchor: hostAnchor })
 
 // The iframe-portal endpoint: declares its anchor over postMessage, sends
 // frames back when we ask.
-const iframeEndpoint = makeIframeEndpoint({ iframe })
+const iframeEndpoint = makeIframeEndpoint({ iframe, debugMode: DEBUG_MODE })
+
+if (DEBUG_MODE !== 'off') console.log('[host] compositor debug mode:', DEBUG_MODE)
 
 const stencilMask = makePortalStencilMask()
 
@@ -77,6 +110,8 @@ const stencilBg = new THREE.Color()
 const camPos = new THREE.Vector3()
 const camFwd = new THREE.Vector3()
 const camUp = new THREE.Vector3()
+
+let lastLogTime = 0
 
 const frame = () => {
   const dt = clock.getDelta()
@@ -113,6 +148,20 @@ const frame = () => {
       viewport: { width, height },
       time
     })
+
+    if (LOG && time - lastLogTime > 1) {
+      lastLogTime = time
+      const fmt = (a: number[]) => `[${a.map((n) => n.toFixed(3)).join(', ')}]`
+      console.log('[host] sourceAnchor:', sourceAnchor)
+      console.log('[host] targetAnchor:', targetAnchor)
+      console.log('[host] hostPos:', fmt([camPos.x, camPos.y, camPos.z]))
+      console.log('[host] hostFwd:', fmt([camFwd.x, camFwd.y, camFwd.z]))
+      console.log('[host] hostUp: ', fmt([camUp.x, camUp.y, camUp.z]))
+      console.log('[host] coupled pos:', fmt(coupled.position))
+      console.log('[host] coupled fwd:', fmt(coupled.forward ?? [0, 0, -1]))
+      console.log('[host] coupled up: ', fmt(coupled.up ?? [0, 1, 0]))
+      console.log('[host] viewport:', width, 'x', height)
+    }
   }
 
   // --- Render: source scene, then stencil mask, then iframe composite.
