@@ -50,13 +50,15 @@ const DEBUG_MODE = (params.get('debug') ?? 'off') as CompositorDebugMode
 const COMPOSE_RAW = params.get('compose') === 'raw'
 const FREEZE = params.get('freeze') === '1'
 const LOG = params.get('log') === '1'
-// predict=0 disables; default 1 (one frame ahead — matches the iframe's typical
-// 1-RAF round-trip). Higher values may help if the iframe runs slower than host.
+// Default 0: with the iframe rendering synchronously in its message handler
+// (no RAF wait), round-trip is ~instant and prediction tends to over-shoot.
+// Override with ?predict=1 if the iframe's hosting tab/browser introduces lag
+// (e.g., RAF throttling on a backgrounded tab, slow GPU readback).
 const PREDICT = (() => {
   const raw = params.get('predict')
-  if (raw === null) return 1
+  if (raw === null) return 0
   const n = Number(raw)
-  return Number.isFinite(n) ? n : 1
+  return Number.isFinite(n) ? n : 0
 })()
 
 // Forward host's URL params to the iframe so the iframe target can pick up the

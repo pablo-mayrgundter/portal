@@ -258,7 +258,7 @@ omitted.
 | `?debug=clip` | Per-pixel depth-clip decision: green = would keep, red = would discard, brightness ∝ \|distFromPlane\|. |
 | `?compose=raw` | Bypass stencil + depth-clip entirely, blit the iframe's full framebuffer over the host viewport. Use to compare directly against `dev:three`. |
 | `?freeze=1` | Capture the coupled pose once on first ready, then keep sending the same pose. Lets you walk around while the iframe content is held fixed. |
-| `?predict=N` | Number of frames to extrapolate the host pose ahead. Default `1`. `?predict=0` disables. Higher values may help if the iframe runs slower than host. |
+| `?predict=N` | Number of frames to extrapolate the host pose ahead. Default `0` (with sync iframe rendering, round-trip is near-instant and prediction tends to over-shoot). Set `?predict=1` if the iframe runs slower than host (e.g., RAF-throttled in a backgrounded tab). |
 | `?scene=grid` | Replace the iframe's swarm scene with a static cube lattice (no animation, predictable geometry) for cleaner alignment debugging. |
 | `?log=1` | 1 Hz console logging on both halves: pose round-trip, viewport, applied camera basis, view matrix. |
 

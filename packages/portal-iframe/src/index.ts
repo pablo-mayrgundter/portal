@@ -514,6 +514,20 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
       win.postMessage(msg, config.iframeOrigin ?? '*')
     },
     renderAsDestination(renderer) {
+      // TODO: screen-space reprojection to eliminate residual round-trip lag.
+      // The compositor knows iframe's view*projection (lastViewProjection,
+      // sent in 'portal:frame') AND can be given the host's CURRENT view*
+      // projection at composite time. For each fragment: reconstruct iframe-
+      // world position from depth (already done for the depth-clip), then
+      // reproject through host_currentVP to get the screen position the
+      // iframe pixel SHOULD have at the host's "now" pose. Sample iframe
+      // color at that NDC instead of vUv. This cancels translation lag
+      // independent of round-trip time and hides per-frame timing jitter
+      // (especially useful for strafe, where lateral motion produces ~2x
+      // more visible NDC delta per meter than forward motion). Rotation
+      // reprojection requires a bit more care — sample-position depends on
+      // both the position delta AND the orientation delta; works cleanly
+      // for small per-frame rotations and degrades gracefully for large.
       if (pendingColor && pendingDepth) {
         colorTexture.image = pendingColor
         colorTexture.needsUpdate = true
