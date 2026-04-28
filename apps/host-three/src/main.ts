@@ -1,9 +1,11 @@
 import * as THREE from 'three'
 import {
+  applyPortalStencilTest,
+  clearPortalStencilTest,
   computeTraversalPose,
   detectPortalCrossing,
-  makePortalOverlay,
   makePortalPlane,
+  makePortalStencilMask,
   updateCoupledCamera
 } from '@portal/portal-three'
 import { createWorldA } from './world-a'
@@ -13,9 +15,10 @@ import { attachBasicFlyControls } from './controls'
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
 
-const renderer = new THREE.WebGLRenderer({ antialias: true })
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.autoClear = false
 app.appendChild(renderer.domElement)
 
 const hostCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 200)
@@ -37,23 +40,16 @@ portalB.position.set(0, 1.6, 0)
 portalB.rotation.y = Math.PI
 worldB.add(portalB)
 
-const initialW = Math.max(1, Math.floor(window.innerWidth * renderer.getPixelRatio()))
-const initialH = Math.max(1, Math.floor(window.innerHeight * renderer.getPixelRatio()))
-
-const targetForA = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
-const targetForB = new THREE.WebGLRenderTarget(initialW, initialH, { depthBuffer: true, stencilBuffer: false })
-
-const portalOverlay = makePortalOverlay()
+const stencilMask = makePortalStencilMask()
 
 type WorldNode = {
   scene: THREE.Scene
   portal: THREE.Mesh
-  target: THREE.WebGLRenderTarget
   tick?: (t: number) => void
 }
 
-const nodeA: WorldNode = { scene: worldA, portal: portalA, target: targetForA }
-const nodeB: WorldNode = { scene: worldB, portal: portalB, target: targetForB, tick: tickWorldB }
+const nodeA: WorldNode = { scene: worldA, portal: portalA }
+const nodeB: WorldNode = { scene: worldB, portal: portalB, tick: tickWorldB }
 
 let here: WorldNode = nodeA
 let there: WorldNode = nodeB
@@ -66,16 +62,15 @@ const onResize = () => {
   renderer.setSize(w, h)
   hostCamera.aspect = w / h
   hostCamera.updateProjectionMatrix()
-  const pr = renderer.getPixelRatio()
-  const tw = Math.max(1, Math.floor(w * pr))
-  const th = Math.max(1, Math.floor(h * pr))
-  targetForA.setSize(tw, th)
-  targetForB.setSize(tw, th)
 }
 window.addEventListener('resize', onResize)
 
 const clock = new THREE.Clock()
 const prevPos = new THREE.Vector3().copy(hostCamera.position)
+const fallbackBackground = new THREE.Color(0, 0, 0)
+
+const backgroundColor = (scene: THREE.Scene): THREE.Color =>
+  scene.background instanceof THREE.Color ? scene.background : fallbackBackground
 
 const frame = () => {
   const dt = clock.getDelta()
@@ -96,18 +91,24 @@ const frame = () => {
     there = swap
   }
 
-  updateCoupledCamera(hostCamera, here.portal, there.portal, portalCamera)
+  updateCoupledCamera(hostCamera, here.portal, there.portal, portalCamera, undefined, true)
 
-  renderer.setRenderTarget(here.target)
-  renderer.render(there.scene, portalCamera)
   renderer.setRenderTarget(null)
+  renderer.clear(true, true, true)
 
   renderer.render(here.scene, hostCamera)
 
-  portalOverlay.update(here.portal, hostCamera, here.target.texture)
-  renderer.autoClear = false
-  renderer.render(portalOverlay.scene, portalOverlay.camera)
-  renderer.autoClear = true
+  stencilMask.update(here.portal, hostCamera, backgroundColor(there.scene))
+  renderer.render(stencilMask.scene, stencilMask.camera)
+
+  renderer.clearDepth()
+
+  const savedBackground = there.scene.background
+  there.scene.background = null
+  applyPortalStencilTest(there.scene)
+  renderer.render(there.scene, portalCamera)
+  clearPortalStencilTest(there.scene)
+  there.scene.background = savedBackground
 
   requestAnimationFrame(frame)
 }

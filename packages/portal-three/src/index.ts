@@ -104,7 +104,8 @@ export const updateCoupledCamera = (
   sourcePortal: THREE.Object3D,
   targetPortal: THREE.Object3D,
   targetCamera: THREE.PerspectiveCamera,
-  portalNormal = new THREE.Vector3(0, 0, 1)
+  portalNormal = new THREE.Vector3(0, 0, 1),
+  applyOblique = false
 ): void => {
   targetCamera.fov = viewerCamera.fov
   targetCamera.aspect = viewerCamera.aspect
@@ -123,7 +124,7 @@ export const updateCoupledCamera = (
   targetCamera.updateMatrixWorld()
   targetCamera.updateProjectionMatrix()
 
-  applyObliqueNearPlane(targetCamera, targetPortal, portalNormal)
+  if (applyOblique) applyObliqueNearPlane(targetCamera, targetPortal, portalNormal)
 }
 
 export type TraversalPose = {
@@ -190,7 +191,7 @@ export const makePortalPlane = (size = new THREE.Vector2(2, 3)): THREE.Mesh => {
   return mesh
 }
 
-const portalOverlayVertexShader = `
+const portalStencilMaskVertexShader = `
 varying vec2 vUv;
 void main() {
   vUv = uv;
@@ -198,8 +199,7 @@ void main() {
 }
 `
 
-const portalOverlayFragmentShader = `
-uniform sampler2D portalTexture;
+const portalStencilMaskFragmentShader = `
 uniform vec3 portalPos;
 uniform vec3 portalNormal;
 uniform vec3 portalRight;
@@ -210,6 +210,7 @@ uniform vec3 hostCameraPos;
 uniform mat4 hostInverseViewProjection;
 uniform mat4 hostViewMatrix;
 uniform mat4 hostProjectionMatrix;
+uniform vec3 destinationBackground;
 
 varying vec2 vUv;
 
@@ -241,24 +242,24 @@ void main() {
   vec4 hitClip = hostProjectionMatrix * hostViewMatrix * vec4(hitPos, 1.0);
   gl_FragDepth = (hitClip.z / hitClip.w) * 0.5 + 0.5;
 
-  vec4 color = texture2D(portalTexture, vUv);
-  gl_FragColor = vec4(linearToSRGB(color.rgb), 1.0);
+  gl_FragColor = vec4(linearToSRGB(destinationBackground), 1.0);
 }
 `
 
-export type PortalOverlay = {
+export type PortalStencilMask = {
   scene: THREE.Scene
   camera: THREE.OrthographicCamera
   update: (
     anchor: THREE.Object3D,
     hostCamera: THREE.PerspectiveCamera,
-    texture: THREE.Texture
+    destinationBackground: THREE.Color
   ) => void
 }
 
-export const makePortalOverlay = (): PortalOverlay => {
+export const PORTAL_STENCIL_REF = 1
+
+export const makePortalStencilMask = (stencilRef = PORTAL_STENCIL_REF): PortalStencilMask => {
   const uniforms = {
-    portalTexture: { value: null as THREE.Texture | null },
     portalPos: { value: new THREE.Vector3() },
     portalNormal: { value: new THREE.Vector3() },
     portalRight: { value: new THREE.Vector3() },
@@ -268,16 +269,24 @@ export const makePortalOverlay = (): PortalOverlay => {
     hostCameraPos: { value: new THREE.Vector3() },
     hostInverseViewProjection: { value: new THREE.Matrix4() },
     hostViewMatrix: { value: new THREE.Matrix4() },
-    hostProjectionMatrix: { value: new THREE.Matrix4() }
+    hostProjectionMatrix: { value: new THREE.Matrix4() },
+    destinationBackground: { value: new THREE.Vector3(0, 0, 0) }
   }
 
   const material = new THREE.ShaderMaterial({
     uniforms,
-    vertexShader: portalOverlayVertexShader,
-    fragmentShader: portalOverlayFragmentShader,
+    vertexShader: portalStencilMaskVertexShader,
+    fragmentShader: portalStencilMaskFragmentShader,
     depthTest: true,
-    depthWrite: true,
-    side: THREE.DoubleSide
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    stencilWrite: true,
+    stencilFunc: THREE.AlwaysStencilFunc,
+    stencilRef,
+    stencilFail: THREE.KeepStencilOp,
+    stencilZFail: THREE.KeepStencilOp,
+    stencilZPass: THREE.ReplaceStencilOp,
+    stencilWriteMask: 0xff
   })
 
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material)
@@ -297,7 +306,7 @@ export const makePortalOverlay = (): PortalOverlay => {
   const update = (
     anchor: THREE.Object3D,
     hostCam: THREE.PerspectiveCamera,
-    texture: THREE.Texture
+    destinationBackground: THREE.Color
   ): void => {
     const size = anchor.userData.portalSize as THREE.Vector2 | undefined
     uniforms.portalHalfW.value = size ? size.x / 2 : 1
@@ -309,14 +318,48 @@ export const makePortalOverlay = (): PortalOverlay => {
     uniforms.portalRight.value.copy(_localRight).applyQuaternion(_quat)
     uniforms.portalUp.value.copy(_localUp).applyQuaternion(_quat)
 
-    uniforms.portalTexture.value = texture
-
     hostCam.getWorldPosition(uniforms.hostCameraPos.value)
     _viewProj.multiplyMatrices(hostCam.projectionMatrix, hostCam.matrixWorldInverse)
     uniforms.hostInverseViewProjection.value.copy(_viewProj).invert()
     uniforms.hostViewMatrix.value.copy(hostCam.matrixWorldInverse)
     uniforms.hostProjectionMatrix.value.copy(hostCam.projectionMatrix)
+
+    uniforms.destinationBackground.value.set(
+      destinationBackground.r,
+      destinationBackground.g,
+      destinationBackground.b
+    )
   }
 
   return { scene, camera, update }
+}
+
+const forEachMaterial = (scene: THREE.Object3D, fn: (mat: THREE.Material) => void): void => {
+  scene.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh || !mesh.material) return
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const mat of mats) fn(mat)
+  })
+}
+
+export const applyPortalStencilTest = (
+  scene: THREE.Object3D,
+  stencilRef = PORTAL_STENCIL_REF
+): void => {
+  forEachMaterial(scene, (mat) => {
+    mat.stencilWrite = true
+    mat.stencilFunc = THREE.EqualStencilFunc
+    mat.stencilRef = stencilRef
+    mat.stencilFail = THREE.KeepStencilOp
+    mat.stencilZFail = THREE.KeepStencilOp
+    mat.stencilZPass = THREE.KeepStencilOp
+    mat.stencilWriteMask = 0
+  })
+}
+
+export const clearPortalStencilTest = (scene: THREE.Object3D): void => {
+  forEachMaterial(scene, (mat) => {
+    mat.stencilWrite = false
+  })
 }
