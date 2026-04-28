@@ -204,13 +204,15 @@ frame's pose against the *current* frame's stencil. Visible during fast
 rotation as iframe content sliding within the door. Sending a one-frame
 extrapolation cancels the lag at steady angular velocities.
 
-**Why `antialias: false` on the iframe renderer?** The depth pass packs
+**Why two render targets and a blit pass?** The depth pass packs
 `gl_FragCoord.z` into RGBA bytes. MSAA averages those *bytes* across coverage
 samples at silhouettes, which is not a homomorphism on the depth packing —
-decoded depth at every antialiased edge sat near the far plane and fully
-defeated the host's depth-clip. We accept jaggier color edges; a future fix is
-a non-MSAA `RenderTarget` for the depth pass while keeping AA on the color
-pass.
+decoded depth at every antialiased edge would sit near the far plane and
+defeat the host's depth-clip. So the iframe renders color into a `samples=4`
+`WebGLRenderTarget` (auto-resolved on sample) and depth into a separate non-
+MSAA RT with `NearestFilter`, then blits each to the canvas via a fullscreen
+quad before `transferToImageBitmap`. Color gets MSAA, depth bytes survive
+exactly. Cost: two extra fullscreen-quad blits per frame.
 
 **Why is the iframe DOM hidden offscreen instead of `display: none`?**
 `display: none` would prevent the iframe from running at all (some browsers

@@ -89,19 +89,57 @@ const matToArray = (m: THREE.Matrix4): Mat4 => Array.from(m.elements)
 export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const camera = new THREE.PerspectiveCamera()
   const offscreen = new OffscreenCanvas(1, 1)
-  // antialias: false is REQUIRED. The depth pass packs gl_FragCoord.z into RGBA
-  // bytes; with MSAA enabled, the renderer averages those packed bytes across
-  // samples at edge pixels, which yields garbage depth (bytes wrap at integer
-  // boundaries — averaging is not a homomorphism). The decoded "depth" at every
-  // antialiased silhouette would then sit near the far plane, defeating the
-  // host's per-pixel depth-clip and showing geometry that should be discarded.
-  // We accept jaggier color edges as the cost of correct depth-clip behavior.
+  // Canvas itself: no MSAA. We do MSAA on a render target for the color pass
+  // (so we get AA edges) and render depth into a separate non-MSAA RT (so the
+  // packed-depth bytes are preserved exactly). The canvas is just the staging
+  // surface that transferToImageBitmap snapshots; both passes blit their RT
+  // here via a fullscreen quad.
   const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: false })
 
   const depthMaterial = new THREE.ShaderMaterial({
     vertexShader: depthPackVertexShader,
     fragmentShader: depthPackFragmentShader
   })
+
+  // Color RT with multisampling — three.js auto-resolves on sample. samples=4
+  // is a reasonable middle (coverage > 1, not too expensive on integrated GPUs).
+  const colorRT = new THREE.WebGLRenderTarget(1, 1, { samples: 4 })
+  // Depth RT with NO multisampling and NEAREST filtering: we MUST NOT average
+  // the packed-depth bytes (averaging is not a homomorphism on the packing —
+  // see depth-pack notes). NEAREST filter on the blit ensures byte-exact copy.
+  const depthRT = new THREE.WebGLRenderTarget(1, 1, {
+    samples: 0,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    generateMipmaps: false
+  })
+
+  // Fullscreen blit setup: a single ShaderMaterial whose texture uniform we
+  // swap between color and depth RTs each pass.
+  const blitMaterial = new THREE.ShaderMaterial({
+    uniforms: { tex: { value: null as THREE.Texture | null } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D tex;
+      varying vec2 vUv;
+      void main() {
+        gl_FragColor = texture2D(tex, vUv);
+      }
+    `,
+    depthTest: false,
+    depthWrite: false
+  })
+  const blitMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blitMaterial)
+  blitMesh.frustumCulled = false
+  const blitScene = new THREE.Scene()
+  blitScene.add(blitMesh)
+  const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
   let pendingPose: PortalSetPoseMessage | null = null
   let raf = 0
@@ -137,6 +175,8 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       offscreen.width = viewport.width
       offscreen.height = viewport.height
       renderer.setSize(viewport.width, viewport.height, false)
+      colorRT.setSize(viewport.width, viewport.height)
+      depthRT.setSize(viewport.width, viewport.height)
     }
 
     camera.position.set(pose.position[0], pose.position[1], pose.position[2])
@@ -163,15 +203,24 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     applyObliqueClipFromAnchor(camera, config.anchor)
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
 
-    // Color pass
+    // Color pass: scene → MSAA colorRT → blit to canvas → ImageBitmap.
     config.scene.overrideMaterial = null
+    renderer.setRenderTarget(colorRT)
     renderer.render(config.scene, camera)
+    renderer.setRenderTarget(null)
+    blitMaterial.uniforms.tex.value = colorRT.texture
+    renderer.render(blitScene, blitCamera)
     const colorBitmap = offscreen.transferToImageBitmap()
 
-    // Depth-as-RGBA pass
+    // Depth-as-RGBA pass: scene+depthMaterial → non-MSAA depthRT → blit
+    // (NEAREST filter, fullscreen quad → byte-exact copy) → ImageBitmap.
     config.scene.overrideMaterial = depthMaterial
+    renderer.setRenderTarget(depthRT)
     renderer.render(config.scene, camera)
+    renderer.setRenderTarget(null)
     config.scene.overrideMaterial = null
+    blitMaterial.uniforms.tex.value = depthRT.texture
+    renderer.render(blitScene, blitCamera)
     const depthBitmap = offscreen.transferToImageBitmap()
 
     const frame: PortalFrameMessage = {
