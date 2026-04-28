@@ -9,6 +9,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@portal/portal-controls": "0.1.0",
     "@portal/portal-core": "0.1.0",
     "@portal/portal-three": "0.1.0",
     "three": "^0.180.0"

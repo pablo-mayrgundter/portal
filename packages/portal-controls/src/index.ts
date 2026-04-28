@@ -1,21 +1,35 @@
 import * as THREE from 'three'
 
-export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTMLElement) => {
+export type FlyControls = {
+  update: (dt: number) => void
+  setOrientationFromForward: (forward: THREE.Vector3) => void
+}
+
+export type FlyControlsOptions = {
+  /** World-units per second when a movement key is held. Default: 4. */
+  moveSpeed?: number
+  /** Radians of yaw/pitch per pixel of pointer drag. Default: 0.0025. */
+  lookSensitivity?: number
+}
+
+// Keyboard WASD + drag-to-look, with an on-screen WASD pad auto-mounted on
+// touch devices. Drag-look uses Pointer Events so it works with both mouse and
+// touch from the same code path.
+export const attachBasicFlyControls = (
+  camera: THREE.PerspectiveCamera,
+  dom: HTMLElement,
+  opts: FlyControlsOptions = {}
+): FlyControls => {
+  const moveSpeed = opts.moveSpeed ?? 4
+  const lookSensitivity = opts.lookSensitivity ?? 0.0025
+
   let yaw = 0
   let pitch = 0
-  let dragging = false
   const keys = new Set<string>()
 
-  dom.addEventListener('mousedown', () => {
-    dragging = true
-  })
-  window.addEventListener('mouseup', () => {
-    dragging = false
-  })
-  window.addEventListener('mousemove', (e) => {
-    if (!dragging) return
-    yaw -= e.movementX * 0.0025
-    pitch -= e.movementY * 0.0025
+  attachLookControls(dom, (dx, dy) => {
+    yaw -= dx * lookSensitivity
+    pitch -= dy * lookSensitivity
     pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch))
   })
 
@@ -42,7 +56,7 @@ export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTM
 
     velocity.y = 0
     if (velocity.lengthSq() > 0) {
-      velocity.normalize().multiplyScalar(4 * dt)
+      velocity.normalize().multiplyScalar(moveSpeed * dt)
       camera.position.add(velocity)
     }
   }
@@ -56,9 +70,47 @@ export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTM
   return { update, setOrientationFromForward }
 }
 
+// Single-pointer drag-to-look on `dom`. Tracks the pointerId that started the
+// drag so a second finger (e.g., on the WASD pad, which lives outside `dom`)
+// doesn't disturb look. We compute deltas from clientX/Y rather than reading
+// movementX/Y because synthesized touch pointer events don't reliably populate
+// those fields.
+const attachLookControls = (
+  dom: HTMLElement,
+  onMove: (dx: number, dy: number) => void
+) => {
+  let activePointer: number | null = null
+  let lastX = 0
+  let lastY = 0
+
+  dom.addEventListener('pointerdown', (e) => {
+    if (activePointer !== null) return
+    activePointer = e.pointerId
+    lastX = e.clientX
+    lastY = e.clientY
+    if (e.pointerType !== 'mouse') {
+      try { dom.setPointerCapture(e.pointerId) } catch {}
+    }
+  })
+
+  const end = (e: PointerEvent) => {
+    if (e.pointerId !== activePointer) return
+    activePointer = null
+  }
+  window.addEventListener('pointerup', end)
+  window.addEventListener('pointercancel', end)
+  window.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== activePointer) return
+    const dx = e.clientX - lastX
+    const dy = e.clientY - lastY
+    lastX = e.clientX
+    lastY = e.clientY
+    onMove(dx, dy)
+  })
+}
+
 // On-screen WASD pad for touch devices. Each button maps to the same KeyboardEvent
-// `code` that `attachBasicFlyControls` listens for, so the movement code path is
-// identical to a physical keyboard.
+// `code` the keyboard listener uses, so the movement integration is identical.
 const attachMobileWasdPad = (keys: Set<string>) => {
   const isTouch = typeof window !== 'undefined'
     && (('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0)
