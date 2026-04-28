@@ -36,8 +36,9 @@ Working in the cooperative-same-origin case:
 - continuous traversal across the portal plane (no flicker, no double-rendering)
 - stencil-mask + oblique near-plane clip so destination geometry past the portal renders directly to the canvas with native MSAA, source geometry in front of the portal occludes correctly, and source/destination compose without a texture intermediate
 - two cooperating worlds (`world-a`, `world-b`) and a host that walks between them
+- a `PortalEndpoint` abstraction with two implementations: a local-three endpoint and an iframe endpoint that runs the destination world in a separate frame and ships color + packed-RGBA depth back over `postMessage`
 
-Still entirely same-origin / single-engine. Iframe, headless, WebRTC, and multi-engine hosting are all roadmap.
+Both demos are same-origin. Cross-origin iframes, traversal across iframe portals, headless / WebRTC / multi-engine hosting are all still roadmap.
 
 ## Design notes
 
@@ -168,40 +169,24 @@ const result = link.frame({ renderer, hostCamera, dt })
 2. **Camera-coupled portal**: portal-camera mirrored across the portal pair so the through-portal view matches the post-traversal direct view.
 3. **Traversable portal**: detect plane crossing within the door extent, mirror the host pose across the pair, swap which scene is "here".
 4. **Halfspace stencil rendering**: per-pixel ray-vs-door test, stencil mask, direct destination render with oblique clip — replaces the earlier door-mesh-as-texture-quad approach.
+5. **`PortalEndpoint` + `PortalLink` abstraction.** Type lives in `portal-core`. `makeLocalEndpoint` lives in `portal-three` and bounds the hidden contracts. `makePortalLink` consumes two endpoints and exposes `frame(...)`. Host shrinks to: instantiate two endpoints, instantiate a link, call `link.frame(...)` each tick.
+6. **Iframe portal (basic, one-way)** — see [`apps/host-iframe-demo/README.md`](./apps/host-iframe-demo/README.md) for the full data-flow walkthrough.
+
+   Second implementation of `PortalEndpoint`. The iframe is a *render-from-this-pose* service; the host owns the portal geometry. Each frame the host posts the mirrored pose + its projection matrix; the iframe renders to an `OffscreenCanvas` and posts back color + packed-RGBA NDC depth as transferable `ImageBitmap`s. The host composites via a fullscreen quad with stencil test and a depth-clip that reconstructs iframe-world position from depth and discards anything not past the destination plane. Same per-pixel correctness as the local case, with the iframe knowing nothing about portal geometry.
+
+   What's deliberately not in the basic version: traversal across the iframe portal, integration with the existing local-pair `PortalLink`, and origin-restricted `postMessage`.
 
 ### Next
-
-5. **`PortalEndpoint` + `PortalLink` abstraction.** Type lives in `portal-core`. `makeLocalEndpoint` lives in `portal-three` and bounds the hidden contracts. `makePortalLink` consumes two endpoints and exposes `frame(...)`. Host shrinks to: instantiate two endpoints, instantiate a link, call `link.frame(...)` each tick.
-
-6. **Iframe portal.** Second implementation of `PortalEndpoint`. The iframe is a *render-from-this-pose* service; the host owns the portal geometry. Per-stage breakdown:
-
-   | Stage | Local endpoint | Iframe endpoint |
-   |---|---|---|
-   | Source render | host renders `here.scene` with `hostCamera` | unchanged |
-   | Halfspace mask | shader: per-pixel ray-vs-door, host camera + anchor pose | unchanged — anchor is pose data, host owns the camera |
-   | Destination view | three.js camera mirrored across the pair, oblique near-plane | host sends mirrored pose to iframe; iframe renders to its own surface; **no portal-aware clipping in the iframe** |
-   | Destination composite | direct `renderer.render(there.scene, portalCamera)` with stencil-tested materials | fullscreen quad textured with iframe's color frame, **also sampling iframe-returned NDC depth**; quad shader reconstructs world position from depth + the projection/view matrices the host sent and discards pixels not past the destination portal plane |
-   | Background fill | mask shader writes destination `Color` | mask shader writes whatever the iframe declared as its background |
-   | Traversal | swap `here`/`there`, mirror host pose | host calls `endpoint.enter(state)`; iframe takes over |
-
-   Wire format: color + NDC depth + the matrices we already sent. Sketch:
-
-   ```ts
-   type PortalMessage =
-     | { type: 'portal:ready'; anchor: PortalAnchor; background: Color3; capabilities: PortalCapabilities }
-     | { type: 'portal:setPose'; pose: PortalPose; projection: Mat4; viewport: Viewport; time: number }
-     | { type: 'portal:frame'; color: ImageBitmap; depth: ArrayBuffer; format: 'ndc24' | 'ndc16' }
-     | { type: 'portal:pointer'; event: PortalPointerEvent }
-     | { type: 'portal:enter'; state: PortalState }
-   ```
 
 7. **Headless / offscreen render endpoint.** Same `PortalEndpoint` contract but the implementation is a renderer with no window — `OffscreenCanvas` in a worker, or even a node-side renderer feeding frames over a websocket. Useful for compute-heavy worlds (splats, baked light) and for testing the protocol without a DOM.
 
 8. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
 
-9. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real.
+9. **Iframe-portal traversal.** Walking through an iframe portal hands state to the iframe via `endpoint.enter(state)`; the iframe takes over as the new "here." Symmetric reverse-handoff for walking back.
 
-10. **Scene merging.** Past simple preview: shared physics or selection across worlds, recursive portals, depth/occlusion sharing where it's possible to share at all.
+10. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real.
+
+11. **Scene merging.** Past simple preview: shared physics or selection across worlds, recursive portals, depth/occlusion sharing where it's possible to share at all.
 
 ## Core types
 
