@@ -28,6 +28,21 @@ export const createWorldB = () => {
     swarm.push(m)
   }
 
+  // Diagnostic markers (kept commented for re-enable during portal alignment
+  // debugging — see git log for the iframe Y-flip / oblique-clip work).
+  // Mirrored in iframe demo's target.ts. Host should see cyan at door center
+  // and magenta equally offset left/right, regardless of viewing angle.
+  // const markerMat = (hex: number) => new THREE.MeshBasicMaterial({ color: hex })
+  // const cyanMarker = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.05), markerMat(0x00ffff))
+  // cyanMarker.position.set(0, 1.6, -0.05)
+  // scene.add(cyanMarker)
+  // const magLeft = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), markerMat(0xff00ff))
+  // magLeft.position.set(-1, 1.6, -0.05)
+  // scene.add(magLeft)
+  // const magRight = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), markerMat(0xff00ff))
+  // magRight.position.set(1, 1.6, -0.05)
+  // scene.add(magRight)
+
   const tick = (t: number) => {
     swarm.forEach((m, idx) => {
       m.position.y = 1.1 + Math.sin(t * 1.2 + idx * 0.3) * 0.5

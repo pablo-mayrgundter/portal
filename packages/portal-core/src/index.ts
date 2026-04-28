@@ -17,6 +17,14 @@ export type PortalAnchor = {
 export type ColorRGB = { r: number; g: number; b: number }
 
 /**
+ * Column-major 4x4 matrix in 16 contiguous numbers (matches THREE.Matrix4.elements
+ * and WebGL uniform layout). Used to ship projection/view matrices over the wire.
+ */
+export type Mat4 = readonly number[]
+
+export type Viewport = { width: number; height: number }
+
+/**
  * Common contract every portal-side endpoint conforms to, regardless of whether
  * it's a local THREE.Scene, an iframe, an offscreen renderer, or a WebRTC peer.
  *
@@ -31,6 +39,52 @@ export interface PortalEndpoint {
   tick?(t: number): void
   enter?(state: unknown): void
 }
+
+/**
+ * Wire protocol for an iframe (or any postMessage-style) portal endpoint.
+ *
+ * Lifecycle:
+ *   - Iframe boots, sets up its scene + portal anchor, and posts `portal:ready`
+ *     announcing its anchor pose, background color, and viewport.
+ *   - Each frame, host posts `portal:setPose` with the mirrored host pose, the
+ *     projection matrix the host wants the iframe to use, and a viewport size.
+ *   - Iframe renders from that pose into its own offscreen surface and posts
+ *     `portal:frame` back with color + packed-RGBA depth bitmaps and the
+ *     view/projection matrices it actually used (so the host can reconstruct
+ *     world position from depth in its compositor).
+ *
+ * Frames are pipelined: host sends pose for frame N, uses iframe's frame N-1
+ * (or whichever is the latest available) for compositing.
+ */
+export type PortalReadyMessage = {
+  type: 'portal:ready'
+  anchor: PortalAnchor
+  background: ColorRGB
+  viewport: Viewport
+}
+
+export type PortalSetPoseMessage = {
+  type: 'portal:setPose'
+  pose: PortalPose
+  projection: Mat4
+  viewport: Viewport
+  time: number
+}
+
+export type PortalFrameMessage = {
+  type: 'portal:frame'
+  color: ImageBitmap
+  depth: ImageBitmap
+  width: number
+  height: number
+  projection: Mat4
+  view: Mat4
+}
+
+export type PortalMessage =
+  | PortalReadyMessage
+  | PortalSetPoseMessage
+  | PortalFrameMessage
 
 export type CoupledPoseConfig = {
   source: PortalAnchor
