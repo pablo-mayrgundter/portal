@@ -207,6 +207,23 @@ const sendTraverse = (mirroredPose: PortalPose): void => {
   iframe.contentWindow.postMessage(msg, '*')
 }
 
+// Apply the visibility swap (host hidden, iframe fullscreen). Idempotent.
+let traverseAckTimer: number | null = null
+let traverseAckApplied = false
+const applyHandoffCss = (): void => {
+  if (traverseAckApplied) return
+  traverseAckApplied = true
+  if (traverseAckTimer !== null) {
+    window.clearTimeout(traverseAckTimer)
+    traverseAckTimer = null
+  }
+  document.body.classList.add('handed-off')
+  iframe.classList.add('fullscreen')
+  iframe.contentWindow?.focus()
+  controls.clearKeys()
+  if (LOG) console.log('[host] traversal: applied CSS swap')
+}
+
 // Handle reverse-traversal messages (iframe → host). When the user walks
 // back through the iframe portal in worldB, the iframe mirrors its pose
 // into worldA coords and posts here. Restore visibility, apply the pose,
@@ -215,7 +232,12 @@ const reverseLookTarget = new THREE.Vector3()
 window.addEventListener('message', (ev) => {
   if (ev.source !== iframe.contentWindow) return
   const data = ev.data
-  if (!data || typeof data !== 'object' || data.type !== 'portal:traverse') return
+  if (!data || typeof data !== 'object') return
+  if (data.type === 'portal:traverse-ack') {
+    applyHandoffCss()
+    return
+  }
+  if (data.type !== 'portal:traverse') return
   const pose = data.pose as PortalPose
   hostCamera.position.set(pose.position[0], pose.position[1], pose.position[2])
   if (pose.up) hostCamera.up.set(pose.up[0], pose.up[1], pose.up[2])
@@ -251,6 +273,7 @@ window.addEventListener('message', (ev) => {
   // Reset traversal state so the user can step through the host portal again.
   handedOff = false
   prevHostInitialized = false
+  traverseAckApplied = false
   if (LOG) console.log('[host] reverse traversal: resumed source role at', pose)
 })
 
@@ -314,18 +337,15 @@ const frame = () => {
           { source: sourceAnchor, target: targetAnchor }
         )
         sendTraverse(mirrored)
+        // Stop driving the iframe (no more setPose) but DON'T apply visibility
+        // CSS yet — wait for portal:traverse-ack so the iframe can render its
+        // first source frame before we swap. Otherwise we expose an empty
+        // iframe canvas for a frame, visible as a dark flash. Fallback timer
+        // forces the swap if ack never arrives (slow iframe, etc.).
         handedOff = true
-        document.body.classList.add('handed-off')
-        iframe.classList.add('fullscreen')
-        // Move keyboard focus into the iframe so the user's first WASD lands
-        // on the iframe's controls, not on the now-inactive host listeners.
-        iframe.contentWindow?.focus()
-        // Drop any keys still tracked by host's controls — focus has moved,
-        // so the keyup that eventually releases them will go to the iframe
-        // (or be missed entirely). Without this clear the host comes back
-        // from reverse-traversal with stale keys and phantom movement.
-        controls.clearKeys()
-        if (LOG) console.log('[host] traversal: handed off to iframe at', mirrored)
+        if (LOG) console.log('[host] traversal: awaiting iframe ack', mirrored)
+        if (traverseAckTimer !== null) window.clearTimeout(traverseAckTimer)
+        traverseAckTimer = window.setTimeout(applyHandoffCss, 250)
       }
     }
     prevHostWorldPos.copy(hostCamera.position)

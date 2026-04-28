@@ -95,11 +95,24 @@ export type PortalTraverseMessage = {
   pose: PortalPose
 }
 
+/**
+ * Acknowledgment from the receiver of `portal:traverse`. Sent only AFTER the
+ * receiver has rendered its first source-mode frame, so the sender knows it's
+ * safe to swap visibility (hide self / show peer) without exposing an
+ * unrendered canvas mid-swap. Without this handshake the sender's CSS swap
+ * commits a frame before the receiver has paint-ready content, producing a
+ * brief dark/empty flash at the moment of crossing.
+ */
+export type PortalTraverseAckMessage = {
+  type: 'portal:traverse-ack'
+}
+
 export type PortalMessage =
   | PortalReadyMessage
   | PortalSetPoseMessage
   | PortalFrameMessage
   | PortalTraverseMessage
+  | PortalTraverseAckMessage
 
 export type CoupledPoseConfig = {
   source: PortalAnchor

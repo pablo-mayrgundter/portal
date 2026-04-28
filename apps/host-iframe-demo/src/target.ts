@@ -10,6 +10,7 @@ import {
   type Mat4,
   type PortalAnchor,
   type PortalMessage,
+  type PortalTraverseAckMessage,
   type PortalTraverseMessage
 } from '@portal/portal-core'
 import { attachBasicFlyControls } from './controls'
@@ -398,6 +399,12 @@ const activateSourceMode = (initialPose: {
   sourceMode = true
   sourceClock.start()
   sourceRaf = requestAnimationFrame(sourceFrame)
+
+  // Tell the host we're ready: it's been holding off on its CSS swap (host
+  // hidden / iframe fullscreen) until we have content to show. This handshake
+  // is what eliminates the dark flash at the moment of crossing.
+  const ack: PortalTraverseAckMessage = { type: 'portal:traverse-ack' }
+  parent.postMessage(ack, '*')
   if (LOG) console.log('[iframe] activated source mode at pose', initialPose)
 }
 
