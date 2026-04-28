@@ -73,3 +73,95 @@ export const couplePoseAcrossPortal = (pose: PortalPose, config: CoupledPoseConf
 
   return result
 }
+
+export type SegmentPlaneIntersection = {
+  crossed: boolean
+  signedDistanceCurr: number
+  t: number
+  point: Vec3
+}
+
+export const intersectSegmentWithPlane = (
+  prev: Vec3,
+  curr: Vec3,
+  planePos: Vec3,
+  planeNormal: Vec3
+): SegmentPlaneIntersection => {
+  const n = normalize(planeNormal)
+  const dPrev = dot(sub(prev, planePos), n)
+  const dCurr = dot(sub(curr, planePos), n)
+  if (dPrev === dCurr || Math.sign(dPrev) === Math.sign(dCurr)) {
+    return { crossed: false, signedDistanceCurr: dCurr, t: 0, point: curr }
+  }
+  const t = dPrev / (dPrev - dCurr)
+  const point: Vec3 = [
+    prev[0] + (curr[0] - prev[0]) * t,
+    prev[1] + (curr[1] - prev[1]) * t,
+    prev[2] + (curr[2] - prev[2]) * t
+  ]
+  return { crossed: true, signedDistanceCurr: dCurr, t, point }
+}
+
+export const projectOntoPlaneRect = (
+  point: Vec3,
+  planePos: Vec3,
+  planeRight: Vec3,
+  planeUp: Vec3
+): { x: number; y: number } => {
+  const local = sub(point, planePos)
+  return { x: dot(local, planeRight), y: dot(local, planeUp) }
+}
+
+export type DoorCrossing = {
+  crossed: boolean
+  inDoor: boolean
+  signedDistanceCurr: number
+  t: number
+  hitLocal: { x: number; y: number }
+}
+
+export const intersectSegmentWithDoor = (
+  prev: Vec3,
+  curr: Vec3,
+  anchor: PortalAnchor,
+  halfWidth: number,
+  halfHeight: number
+): DoorCrossing => {
+  const basis = toBasis(anchor)
+  const planeHit = intersectSegmentWithPlane(prev, curr, anchor.position, basis.normal)
+  if (!planeHit.crossed) {
+    return {
+      crossed: false,
+      inDoor: false,
+      signedDistanceCurr: planeHit.signedDistanceCurr,
+      t: planeHit.t,
+      hitLocal: { x: 0, y: 0 }
+    }
+  }
+  const hitLocal = projectOntoPlaneRect(planeHit.point, anchor.position, basis.right, basis.up)
+  const inDoor = Math.abs(hitLocal.x) <= halfWidth && Math.abs(hitLocal.y) <= halfHeight
+  return {
+    crossed: inDoor,
+    inDoor,
+    signedDistanceCurr: planeHit.signedDistanceCurr,
+    t: planeHit.t,
+    hitLocal
+  }
+}
+
+export type ObliqueClipPlane = { normal: Vec3; constant: number }
+
+export const obliqueClipPlaneForCamera = (
+  cameraPos: Vec3,
+  portalPos: Vec3,
+  portalNormal: Vec3
+): ObliqueClipPlane => {
+  let normal = normalize(portalNormal)
+  let constant = -dot(normal, portalPos)
+  const camDistance = dot(normal, cameraPos) + constant
+  if (camDistance > 0) {
+    normal = [-normal[0], -normal[1], -normal[2]]
+    constant = -constant
+  }
+  return { normal, constant }
+}

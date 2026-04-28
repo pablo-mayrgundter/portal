@@ -1,13 +1,15 @@
 import * as THREE from 'three'
 import {
   couplePoseAcrossPortal,
+  intersectSegmentWithDoor,
+  obliqueClipPlaneForCamera,
   type CoupledPoseConfig,
   type PortalAnchor,
   type PortalPose,
   type Vec3
 } from '@portal/portal-core'
 
-const asAnchor = (object: THREE.Object3D, normal = new THREE.Vector3(0, 0, 1)): PortalAnchor => {
+export const asAnchor = (object: THREE.Object3D, normal = new THREE.Vector3(0, 0, 1)): PortalAnchor => {
   const worldPos = new THREE.Vector3()
   const worldQuat = new THREE.Quaternion()
   object.getWorldPosition(worldPos)
@@ -69,13 +71,16 @@ const applyObliqueNearPlane = (
   const camPos = new THREE.Vector3()
   camera.getWorldPosition(camPos)
 
-  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(worldNormal, portalPos)
+  const oblique = obliqueClipPlaneForCamera(
+    [camPos.x, camPos.y, camPos.z],
+    [portalPos.x, portalPos.y, portalPos.z],
+    [worldNormal.x, worldNormal.y, worldNormal.z]
+  )
 
-  if (plane.distanceToPoint(camPos) > 0) {
-    plane.normal.negate()
-    plane.constant = -plane.constant
-  }
-
+  const plane = new THREE.Plane(
+    new THREE.Vector3(oblique.normal[0], oblique.normal[1], oblique.normal[2]),
+    oblique.constant
+  )
   plane.applyMatrix4(camera.matrixWorldInverse)
 
   const clipPlane = new THREE.Vector4(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant)
@@ -152,34 +157,18 @@ export const detectPortalCrossing = (
   portal: THREE.Object3D,
   portalNormal = new THREE.Vector3(0, 0, 1)
 ): PortalCrossing => {
-  const portalPos = new THREE.Vector3()
-  const portalQuat = new THREE.Quaternion()
-  portal.getWorldPosition(portalPos)
-  portal.getWorldQuaternion(portalQuat)
-
-  const n = portalNormal.clone().applyQuaternion(portalQuat).normalize()
-  const dPrev = prev.clone().sub(portalPos).dot(n)
-  const dCurr = curr.clone().sub(portalPos).dot(n)
-
-  if (dPrev === dCurr || Math.sign(dPrev) === Math.sign(dCurr)) {
-    return { crossed: false, signedDistance: dCurr, t: 0 }
-  }
-
-  const t = dPrev / (dPrev - dCurr)
-  const crossPoint = prev.clone().lerp(curr, t)
-
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(portalQuat)
-  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(portalQuat)
-  const local = crossPoint.sub(portalPos)
-  const lx = local.dot(right)
-  const ly = local.dot(up)
-
+  const anchor = asAnchor(portal, portalNormal)
   const size = portal.userData.portalSize as THREE.Vector2 | undefined
   const halfW = size ? size.x / 2 : 1
   const halfH = size ? size.y / 2 : 1.5
-
-  const inside = Math.abs(lx) <= halfW && Math.abs(ly) <= halfH
-  return { crossed: inside, signedDistance: dCurr, t }
+  const result = intersectSegmentWithDoor(
+    [prev.x, prev.y, prev.z],
+    [curr.x, curr.y, curr.z],
+    anchor,
+    halfW,
+    halfH
+  )
+  return { crossed: result.crossed, signedDistance: result.signedDistanceCurr, t: result.t }
 }
 
 export const makePortalPlane = (size = new THREE.Vector2(2, 3)): THREE.Mesh => {
