@@ -3,6 +3,7 @@ import {
   couplePoseAcrossPortal,
   type Mat4,
   type PortalPose,
+  type PortalTraverseMessage,
   type Viewport
 } from '@portal/portal-core'
 import {
@@ -10,6 +11,7 @@ import {
   type CompositorDebugMode
 } from '@portal/portal-iframe'
 import {
+  detectPortalCrossing,
   makeLocalEndpoint,
   makePortalPlane,
   makePortalStencilMask
@@ -167,6 +169,18 @@ const sentPose: PortalPose = { position: sentPos, forward: sentFwd, up: sentUp }
 const currentPose: PortalPose = { position: currPos, forward: currFwd, up: currUp }
 let havePrev = false
 
+// Track host position frame-to-frame so we can detect crossings of the host
+// portal plane within the door extent. Set after the first frame.
+const prevHostWorldPos = new THREE.Vector3()
+let prevHostInitialized = false
+let handedOff = false
+
+const sendTraverse = (mirroredPose: PortalPose): void => {
+  if (!iframe.contentWindow) return
+  const msg: PortalTraverseMessage = { type: 'portal:traverse', pose: mirroredPose }
+  iframe.contentWindow.postMessage(msg, '*')
+}
+
 const extrapInto = (
   out: [number, number, number],
   prev: readonly number[],
@@ -197,6 +211,52 @@ const frame = () => {
   const time = clock.elapsedTime
 
   controls.update(dt)
+
+  // --- traversal detection: if the host stepped through the door rectangle
+  // since last frame, hand off to the iframe and stop driving the host scene.
+  if (!handedOff && iframeEndpoint.isReady()) {
+    if (!prevHostInitialized) {
+      prevHostWorldPos.copy(hostCamera.position)
+      prevHostInitialized = true
+    } else {
+      const targetAnchor = iframeEndpoint.getAnchor()
+      const sourceAnchor = hostEndpoint.getAnchor()
+      const halfWidth = sourceAnchor.halfWidth ?? 1
+      const halfHeight = sourceAnchor.halfHeight ?? 1.5
+      const crossing = detectPortalCrossing(
+        prevHostWorldPos,
+        hostCamera.position,
+        hostAnchor
+      )
+      if (crossing.crossed) {
+        // Mirror the current host pose across the portal pair into iframe
+        // coords and ship it as the iframe's starting camera state.
+        hostCamera.getWorldPosition(camPos)
+        camFwd.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
+        camUp.set(0, 1, 0).applyQuaternion(hostCamera.quaternion)
+        const mirrored = couplePoseAcrossPortal(
+          {
+            position: [camPos.x, camPos.y, camPos.z],
+            forward: [camFwd.x, camFwd.y, camFwd.z],
+            up: [camUp.x, camUp.y, camUp.z]
+          },
+          { source: sourceAnchor, target: targetAnchor }
+        )
+        sendTraverse(mirrored)
+        handedOff = true
+        document.body.classList.add('handed-off')
+        iframe.classList.add('fullscreen')
+        if (LOG) console.log('[host] traversal: handed off to iframe at', mirrored)
+      }
+      void halfWidth; void halfHeight
+    }
+    prevHostWorldPos.copy(hostCamera.position)
+  }
+
+  if (handedOff) {
+    requestAnimationFrame(frame)
+    return
+  }
 
   // --- iframe pose handoff: ask the iframe to render from the mirrored pose.
   if (iframeEndpoint.isReady()) {

@@ -38,6 +38,20 @@
         pointer-events: none;
         border: 0;
       }
+      /* After portal traversal the iframe takes over as "here" — fill the
+         viewport, take pointer events, and let the iframe's own canvas + its
+         own controls drive the user. */
+      #target-iframe.fullscreen {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: auto;
+        z-index: 10;
+      }
+      /* Host canvas hidden once the iframe takes over. */
+      body.handed-off #app { display: none; }
     </style>
   </head>
   <body>

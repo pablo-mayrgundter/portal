@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { makeIframeTarget } from '@portal/portal-iframe'
-import type { PortalAnchor } from '@portal/portal-core'
+import type { PortalAnchor, PortalMessage } from '@portal/portal-core'
+import { attachBasicFlyControls } from './controls'
 
 const params = new URLSearchParams(location.search)
 const LOG = params.get('log') === '1'
@@ -128,11 +129,91 @@ const buildGrid = (): SceneBundle => {
 const bundle = SCENE === 'grid' ? buildGrid() : buildSwarm()
 if (LOG) console.log('[iframe] scene:', SCENE)
 
-const target = makeIframeTarget({
+const destinationTarget = makeIframeTarget({
   scene: bundle.scene,
   anchor,
   log: LOG,
   tick: bundle.tick
 })
+destinationTarget.start()
 
-target.start()
+// ---------------------------------------------------------------------------
+// Source-mode rendering (activated on portal:traverse). Builds a visible
+// canvas + controls + frame loop in the iframe document so the user can drive
+// a camera in worldB after stepping through the host's portal. No portal back
+// to worldA yet — that's the next iteration. Refresh to reset.
+// ---------------------------------------------------------------------------
+
+const displayCanvas = document.querySelector<HTMLCanvasElement>('#display')
+if (!displayCanvas) throw new Error('Missing #display canvas in target.html')
+
+let sourceMode = false
+let sourceRaf = 0
+const sourceCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
+let sourceRenderer: THREE.WebGLRenderer | null = null
+let sourceControls: ReturnType<typeof attachBasicFlyControls> | null = null
+const sourceClock = new THREE.Clock()
+const sourceLookTarget = new THREE.Vector3()
+
+const onSourceResize = (): void => {
+  if (!sourceRenderer) return
+  const w = window.innerWidth
+  const h = window.innerHeight
+  sourceRenderer.setSize(w, h)
+  sourceCamera.aspect = w / h
+  sourceCamera.updateProjectionMatrix()
+}
+
+const sourceFrame = (): void => {
+  if (!sourceMode || !sourceRenderer || !sourceControls) return
+  bundle.tick?.(sourceClock.elapsedTime)
+  sourceControls.update(sourceClock.getDelta())
+  sourceRenderer.render(bundle.scene, sourceCamera)
+  sourceRaf = requestAnimationFrame(sourceFrame)
+}
+
+const activateSourceMode = (initialPose: {
+  position: [number, number, number]
+  forward?: [number, number, number]
+  up?: [number, number, number]
+}): void => {
+  if (sourceMode) return
+  // Tear down destination mode — no more bitmap sends.
+  destinationTarget.stop()
+
+  // Build the visible-canvas renderer lazily so we don't pay for it in the
+  // common case where traversal never happens.
+  sourceRenderer = new THREE.WebGLRenderer({ canvas: displayCanvas, antialias: true })
+  sourceRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+
+  // Apply initial camera pose (already in iframe-world coords — host mirrored
+  // it across the portal pair before posting).
+  sourceCamera.position.set(initialPose.position[0], initialPose.position[1], initialPose.position[2])
+  if (initialPose.up) sourceCamera.up.set(initialPose.up[0], initialPose.up[1], initialPose.up[2])
+  if (initialPose.forward) {
+    sourceLookTarget.set(
+      initialPose.position[0] + initialPose.forward[0],
+      initialPose.position[1] + initialPose.forward[1],
+      initialPose.position[2] + initialPose.forward[2]
+    )
+    sourceCamera.lookAt(sourceLookTarget)
+  }
+
+  sourceControls = attachBasicFlyControls(sourceCamera, displayCanvas)
+  document.body.classList.add('source-mode')
+  onSourceResize()
+  window.addEventListener('resize', onSourceResize)
+
+  sourceMode = true
+  sourceClock.start()
+  sourceRaf = requestAnimationFrame(sourceFrame)
+  if (LOG) console.log('[iframe] activated source mode at pose', initialPose)
+}
+
+window.addEventListener('message', (ev) => {
+  const msg = ev.data as PortalMessage
+  if (!msg || typeof msg !== 'object') return
+  if (msg.type === 'portal:traverse') {
+    activateSourceMode(msg.pose as Parameters<typeof activateSourceMode>[0])
+  }
+})

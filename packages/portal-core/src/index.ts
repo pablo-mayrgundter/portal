@@ -81,10 +81,25 @@ export type PortalFrameMessage = {
   view: Mat4
 }
 
+/**
+ * Traversal handoff. When the user crosses a portal door, the active page
+ * sends this to its peer. The peer adopts the supplied pose as its starting
+ * camera state, becomes the visible / source side, and the sender becomes
+ * inactive (or transitions to destination role).
+ *
+ * The pose is in the receiver's world coordinates — the sender mirrors it
+ * across the portal pair before posting.
+ */
+export type PortalTraverseMessage = {
+  type: 'portal:traverse'
+  pose: PortalPose
+}
+
 export type PortalMessage =
   | PortalReadyMessage
   | PortalSetPoseMessage
   | PortalFrameMessage
+  | PortalTraverseMessage
 
 export type CoupledPoseConfig = {
   source: PortalAnchor
