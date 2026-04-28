@@ -375,8 +375,24 @@ const activateSourceMode = (initialPose: {
   }
 
   sourceControls = attachBasicFlyControls(sourceCamera, displayCanvas)
-  document.body.classList.add('source-mode')
   onSourceResize()
+
+  // Render the first source-mode frame SYNCHRONOUSLY before showing #display.
+  // Without this, body.source-mode reveals an empty canvas (dark page bg
+  // visible through it) for ~1 frame until the first sourceFrame RAF fires —
+  // that's the "dark flash" at the moment of crossing.
+  // Portal-back compositing is skipped here because hostPeerEndpoint usually
+  // hasn't received its first frame yet from the host destination service;
+  // the next RAF picks that up. So this initial render is just worldB
+  // without the door-back hole, which is fine for one frame.
+  bundle.tick?.(syncedTime())
+  sourceCamera.updateMatrixWorld(true)
+  sourceRenderer.setRenderTarget(null)
+  sourceRenderer.clear(true, true, true)
+  sourceRenderer.render(bundle.scene, sourceCamera)
+
+  // NOW show #display — it has content, no flash.
+  document.body.classList.add('source-mode')
   window.addEventListener('resize', onSourceResize)
 
   sourceMode = true

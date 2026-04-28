@@ -233,6 +233,14 @@ window.addEventListener('message', (ev) => {
     const f = new THREE.Vector3(pose.forward[0], pose.forward[1], pose.forward[2])
     controls.setOrientationFromForward?.(f)
   }
+  // Render the host scene at the new pose synchronously BEFORE unhiding it,
+  // so the user doesn't see the host canvas's stale (pre-traversal) content
+  // for one frame while waiting for the next RAF.
+  hostCamera.updateMatrixWorld(true)
+  renderer.setRenderTarget(null)
+  renderer.clear(true, true, true)
+  hostEndpoint.renderAsSource(renderer, hostCamera)
+
   document.body.classList.remove('handed-off')
   iframe.classList.remove('fullscreen')
   // Pull focus back to the host window so keyboard goes to host controls.
