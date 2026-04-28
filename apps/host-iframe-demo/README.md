@@ -81,12 +81,14 @@ if iframeEndpoint.isReady():
                                                        culled at render time, not
                                                        just by the host's depth-clip
                                                        — see "why both clips" below)
-                                                     render scene to OffscreenCanvas
+                                                     render scene ONCE → sceneRT
+                                                       (color attachment + sampleable
+                                                       DepthTexture, no MSAA)
+                                                     blit sceneRT.texture → canvas
                                                      transferToImageBitmap → COLOR
-                                                     scene.overrideMaterial = depthMaterial
-                                                     render scene again
+                                                     blit pack(sceneRT.depthTexture.r) →
+                                                       canvas
                                                      transferToImageBitmap → DEPTH
-                                                     scene.overrideMaterial = null
 
                                                 ◀──  parent.postMessage({
                                                        type: 'portal:frame',
@@ -204,15 +206,20 @@ frame's pose against the *current* frame's stencil. Visible during fast
 rotation as iframe content sliding within the door. Sending a one-frame
 extrapolation cancels the lag at steady angular velocities.
 
-**Why two render targets and a blit pass?** The depth pass packs
-`gl_FragCoord.z` into RGBA bytes. MSAA averages those *bytes* across coverage
-samples at silhouettes, which is not a homomorphism on the depth packing —
-decoded depth at every antialiased edge would sit near the far plane and
-defeat the host's depth-clip. So the iframe renders color into a `samples=4`
-`WebGLRenderTarget` (auto-resolved on sample) and depth into a separate non-
-MSAA RT with `NearestFilter`, then blits each to the canvas via a fullscreen
-quad before `transferToImageBitmap`. Color gets MSAA, depth bytes survive
-exactly. Cost: two extra fullscreen-quad blits per frame.
+**Why one scene render + depth-texture sampling?** Naively the iframe would
+render the scene twice (once for color, once with an override material that
+packs `gl_FragCoord.z` into RGBA). That double-renders all geometry every
+frame and dominates iframe latency. Instead we render the scene once into a
+`WebGLRenderTarget` whose depth attachment is a sampleable `DepthTexture`,
+then derive both bitmaps via cheap fullscreen-quad blits: color blit just
+copies `sceneRT.texture`; depth blit samples `sceneRT.depthTexture.r` and
+runs the depth-pack function. Halves the per-frame iframe scene work.
+
+Tradeoff: WebGL2 depth textures aren't compatible with multisampled FBOs
+without extension gymnastics, so the RT is non-MSAA — color edges are jaggy.
+A future pass can add FXAA in the color blit shader to recover most of the
+perceived AA quality at fragment-shader cost (much cheaper than a second full
+scene render).
 
 **Why is the iframe DOM hidden offscreen instead of `display: none`?**
 `display: none` would prevent the iframe from running at all (some browsers

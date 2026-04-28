@@ -16,29 +16,9 @@ import type {
 // ---------------------------------------------------------------------------
 // Depth packing: encode/decode a [0, 1] depth value across an RGBA texel so we
 // can ship NDC depth as an ImageBitmap. Mirrors the classic three.js packing.
+// The pack side is inlined in the iframe target's depthBlitMaterial; the
+// unpack side is consumed by the host's compositor.
 // ---------------------------------------------------------------------------
-
-const depthPackVertexShader = `
-void main() {
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`
-
-const depthPackFragmentShader = `
-const float PackUpscale = 256.0 / 255.0;
-const vec3 PackFactors = vec3(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0);
-const vec3 ShiftRight8 = vec3(1.0/256.0);
-
-vec4 packDepthToRGBA(float v) {
-  vec4 r = vec4(fract(v * PackFactors), v);
-  r.yzw -= r.xyz * ShiftRight8;
-  return r * PackUpscale;
-}
-
-void main() {
-  gl_FragColor = packDepthToRGBA(gl_FragCoord.z);
-}
-`
 
 const unpackDepthGLSL = `
 const float UnpackDownscale = 255.0 / 256.0;
@@ -89,34 +69,25 @@ const matToArray = (m: THREE.Matrix4): Mat4 => Array.from(m.elements)
 export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const camera = new THREE.PerspectiveCamera()
   const offscreen = new OffscreenCanvas(1, 1)
-  // Canvas itself: no MSAA. We do MSAA on a render target for the color pass
-  // (so we get AA edges) and render depth into a separate non-MSAA RT (so the
-  // packed-depth bytes are preserved exactly). The canvas is just the staging
-  // surface that transferToImageBitmap snapshots; both passes blit their RT
-  // here via a fullscreen quad.
   const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: false })
 
-  const depthMaterial = new THREE.ShaderMaterial({
-    vertexShader: depthPackVertexShader,
-    fragmentShader: depthPackFragmentShader
-  })
-
-  // Color RT with multisampling — three.js auto-resolves on sample. samples=4
-  // is a reasonable middle (coverage > 1, not too expensive on integrated GPUs).
-  const colorRT = new THREE.WebGLRenderTarget(1, 1, { samples: 4 })
-  // Depth RT with NO multisampling and NEAREST filtering: we MUST NOT average
-  // the packed-depth bytes (averaging is not a homomorphism on the packing —
-  // see depth-pack notes). NEAREST filter on the blit ensures byte-exact copy.
-  const depthRT = new THREE.WebGLRenderTarget(1, 1, {
+  // Single scene render per frame: RT with sampleable depth texture so we can
+  // derive both bitmaps from one pass. WebGL2 DepthTextures aren't compatible
+  // with multisampled FBOs without extension gymnastics, so the RT is non-
+  // MSAA. (Cost vs the previous two-RT-with-MSAA setup: lose MSAA on color,
+  // halve scene render cost. FXAA in the color blit is cheap and can recover
+  // most of the perceived AA quality if needed.)
+  const sceneRT = new THREE.WebGLRenderTarget(1, 1, {
     samples: 0,
-    minFilter: THREE.NearestFilter,
-    magFilter: THREE.NearestFilter,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
     generateMipmaps: false
   })
+  sceneRT.depthTexture = new THREE.DepthTexture(1, 1)
+  sceneRT.depthTexture.type = THREE.UnsignedIntType
 
-  // Fullscreen blit setup: a single ShaderMaterial whose texture uniform we
-  // swap between color and depth RTs each pass.
-  const blitMaterial = new THREE.ShaderMaterial({
+  // Color blit: sample the RT's color attachment and write to canvas.
+  const colorBlitMaterial = new THREE.ShaderMaterial({
     uniforms: { tex: { value: null as THREE.Texture | null } },
     vertexShader: `
       varying vec2 vUv;
@@ -135,10 +106,51 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     depthTest: false,
     depthWrite: false
   })
-  const blitMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blitMaterial)
-  blitMesh.frustumCulled = false
+
+  // Depth blit: sample the RT's depth attachment (which holds gl_FragCoord.z
+  // values), pack to RGBA via the existing depth-pack function. NEAREST is
+  // implicit because the RT-to-canvas map is 1:1 (same dimensions) and the
+  // depth texture has been configured with NearestFilter; a fullscreen quad
+  // sampling at integer pixel centers gets exact byte-pack correctness.
+  const depthBlitMaterial = new THREE.ShaderMaterial({
+    uniforms: { depthTex: { value: null as THREE.Texture | null } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      const float PackUpscale = 256.0 / 255.0;
+      const vec3 PackFactors = vec3(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0);
+      const vec3 ShiftRight8 = vec3(1.0 / 256.0);
+      vec4 packDepthToRGBA(float v) {
+        vec4 r = vec4(fract(v * PackFactors), v);
+        r.yzw -= r.xyz * ShiftRight8;
+        return r * PackUpscale;
+      }
+      uniform sampler2D depthTex;
+      varying vec2 vUv;
+      void main() {
+        float depth = texture2D(depthTex, vUv).r;
+        gl_FragColor = packDepthToRGBA(depth);
+      }
+    `,
+    depthTest: false,
+    depthWrite: false
+  })
+  // Match NearestFilter at the texture level so any non-1:1 sampling stays
+  // byte-exact (e.g., if the RT and canvas dimensions ever drift).
+  sceneRT.depthTexture.minFilter = THREE.NearestFilter
+  sceneRT.depthTexture.magFilter = THREE.NearestFilter
+
+  const blitGeo = new THREE.PlaneGeometry(2, 2)
+  const blitColorMesh = new THREE.Mesh(blitGeo, colorBlitMaterial)
+  const blitDepthMesh = new THREE.Mesh(blitGeo, depthBlitMaterial)
+  blitColorMesh.frustumCulled = false
+  blitDepthMesh.frustumCulled = false
   const blitScene = new THREE.Scene()
-  blitScene.add(blitMesh)
   const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
   let pendingPose: PortalSetPoseMessage | null = null
@@ -175,8 +187,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       offscreen.width = viewport.width
       offscreen.height = viewport.height
       renderer.setSize(viewport.width, viewport.height, false)
-      colorRT.setSize(viewport.width, viewport.height)
-      depthRT.setSize(viewport.width, viewport.height)
+      sceneRT.setSize(viewport.width, viewport.height)
     }
 
     camera.position.set(pose.position[0], pose.position[1], pose.position[2])
@@ -203,23 +214,22 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     applyObliqueClipFromAnchor(camera, config.anchor)
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
 
-    // Color pass: scene → MSAA colorRT → blit to canvas → ImageBitmap.
-    config.scene.overrideMaterial = null
-    renderer.setRenderTarget(colorRT)
+    // Single scene render → sceneRT (color attachment + depth texture).
+    renderer.setRenderTarget(sceneRT)
     renderer.render(config.scene, camera)
     renderer.setRenderTarget(null)
-    blitMaterial.uniforms.tex.value = colorRT.texture
+
+    // Color blit: sample sceneRT.texture → canvas → ImageBitmap.
+    blitScene.clear()
+    blitScene.add(blitColorMesh)
+    colorBlitMaterial.uniforms.tex.value = sceneRT.texture
     renderer.render(blitScene, blitCamera)
     const colorBitmap = offscreen.transferToImageBitmap()
 
-    // Depth-as-RGBA pass: scene+depthMaterial → non-MSAA depthRT → blit
-    // (NEAREST filter, fullscreen quad → byte-exact copy) → ImageBitmap.
-    config.scene.overrideMaterial = depthMaterial
-    renderer.setRenderTarget(depthRT)
-    renderer.render(config.scene, camera)
-    renderer.setRenderTarget(null)
-    config.scene.overrideMaterial = null
-    blitMaterial.uniforms.tex.value = depthRT.texture
+    // Depth blit: sample sceneRT.depthTexture, pack to RGBA → canvas → ImageBitmap.
+    blitScene.clear()
+    blitScene.add(blitDepthMesh)
+    depthBlitMaterial.uniforms.depthTex.value = sceneRT.depthTexture
     renderer.render(blitScene, blitCamera)
     const depthBitmap = offscreen.transferToImageBitmap()
 
