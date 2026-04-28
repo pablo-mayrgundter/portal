@@ -400,7 +400,27 @@ const debugModeToInt = (m: CompositorDebugMode): number =>
   m === 'noclip' ? 1 : m === 'depth' ? 2 : m === 'worldpos' ? 3 : m === 'clip' ? 4 : 0
 
 export type IframeEndpointConfig = {
-  iframe: HTMLIFrameElement
+  /**
+   * For the host-side case (most common), pass the iframe element. The
+   * endpoint sends setPose to `iframe.contentWindow` and filters incoming
+   * frames by `event.source === iframe.contentWindow`.
+   *
+   * For the iframe-side case (after iframe-portal traversal, when the iframe
+   * page wants to query its parent), omit this and supply `peerWindow` +
+   * `peerSource` instead.
+   */
+  iframe?: HTMLIFrameElement
+  /**
+   * Direct override of the postMessage target window. Defaults to
+   * `iframe.contentWindow` when `iframe` is provided.
+   */
+  peerWindow?: Window
+  /**
+   * Direct override of the message-source filter for incoming frames.
+   * Defaults to `iframe.contentWindow` when `iframe` is provided. Pass `null`
+   * to accept frames from any source (lax — useful for testing).
+   */
+  peerSource?: MessageEventSource | null
   /** postMessage origin restriction. '*' for dev, explicit origin in prod. */
   iframeOrigin?: string
   /** Stencil ref the iframe's compositor should test against. Must match the host's stencil-mask ref. */
@@ -496,8 +516,15 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   compositorScene.add(mesh)
   const compositorCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
+  const peerWindow: Window | null =
+    config.peerWindow ?? config.iframe?.contentWindow ?? null
+  const peerSource: MessageEventSource | null | undefined =
+    config.peerSource !== undefined
+      ? config.peerSource
+      : (config.iframe?.contentWindow ?? null)
+
   const onMessage = (ev: MessageEvent): void => {
-    if (ev.source !== config.iframe.contentWindow) return
+    if (peerSource !== null && ev.source !== peerSource) return
     const msg = ev.data as PortalMessage
     if (!msg || typeof msg !== 'object') return
 
@@ -526,7 +553,7 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
     },
     getBackground: () => background,
     requestFrame(opts) {
-      const win = config.iframe.contentWindow
+      const win = peerWindow
       if (!win) return
       const msg: PortalSetPoseMessage = { type: 'portal:setPose', ...opts }
       win.postMessage(msg, config.iframeOrigin ?? '*')
