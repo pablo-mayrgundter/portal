@@ -50,6 +50,21 @@ export type IframeTargetConfig = {
   tick?: (time: number) => void
   /** If true, log received pose + applied matrices once per second to console. */
   log?: boolean
+  /**
+   * Where to post 'portal:frame' responses + 'portal:ready' on init.
+   * Defaults to `parent` (the iframe-in-host case). When the host plays the
+   * destination role (after iframe-portal traversal), set this to the iframe's
+   * `contentWindow` so responses go to the iframe rather than the parent.
+   */
+  outputTarget?: Window
+  /**
+   * If set, only process incoming 'portal:setPose' messages whose `event.source`
+   * matches this. For the iframe-as-destination case, the default of `null`
+   * works (the iframe document only sees messages from its parent). For the
+   * host-as-destination case, set this to the iframe's `contentWindow` so we
+   * ignore stray messages from other windows.
+   */
+  inputFilter?: MessageEventSource | null
 }
 
 export type IframeTarget = {
@@ -157,6 +172,8 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   let lastLog = 0
   const lookTarget = new THREE.Vector3()
   const hostOrigin = config.hostOrigin ?? '*'
+  const outputTarget: Window = config.outputTarget ?? parent
+  const inputFilter = config.inputFilter ?? null
   const fmt = (a: ArrayLike<number>) =>
     `[${Array.from(a, (n) => n.toFixed(3)).join(', ')}]`
 
@@ -167,11 +184,12 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       background: config.background ?? defaultBackground(config.scene),
       viewport: { width: offscreen.width, height: offscreen.height }
     }
-    parent.postMessage(msg, hostOrigin)
+    outputTarget.postMessage(msg, hostOrigin)
   }
 
   const onMessage = (ev: MessageEvent): void => {
     if (!running) return
+    if (inputFilter !== null && ev.source !== inputFilter) return
     const msg = ev.data as PortalMessage
     if (!msg || typeof msg !== 'object') return
     if (msg.type === 'portal:setPose') {
@@ -249,7 +267,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       projection: matToArray(camera.projectionMatrix),
       view: matToArray(camera.matrixWorldInverse)
     }
-    parent.postMessage(frame, hostOrigin, [colorBitmap, depthBitmap])
+    outputTarget.postMessage(frame, hostOrigin, [colorBitmap, depthBitmap])
 
     if (config.log && msg.time - lastLog > 1) {
       lastLog = msg.time
