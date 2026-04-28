@@ -16,27 +16,15 @@ import type {
 // ---------------------------------------------------------------------------
 // Depth packing: encode/decode a [0, 1] depth value across an RGBA texel so we
 // can ship NDC depth as an ImageBitmap. Mirrors the classic three.js packing.
-//
-// IMPORTANT: the depth-pack material has to be a RawShaderMaterial so three.js
-// does NOT auto-apply the linear→sRGB encoding chunk to the fragment output.
-// We're writing raw bytes that the host will treat as packed-depth values; if
-// they get gamma-distorted on the way to the canvas, the host samples sRGB-
-// encoded values, the unpack returns garbage depth, and the depth-clip lets
-// near-side geometry leak through.
 // ---------------------------------------------------------------------------
 
 const depthPackVertexShader = `
-uniform mat4 modelViewMatrix;
-uniform mat4 projectionMatrix;
-attribute vec3 position;
 void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `
 
 const depthPackFragmentShader = `
-precision highp float;
-
 const float PackUpscale = 256.0 / 255.0;
 const vec3 PackFactors = vec3(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0);
 const vec3 ShiftRight8 = vec3(1.0/256.0);
@@ -101,7 +89,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const offscreen = new OffscreenCanvas(1, 1)
   const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: true })
 
-  const depthMaterial = new THREE.RawShaderMaterial({
+  const depthMaterial = new THREE.ShaderMaterial({
     vertexShader: depthPackVertexShader,
     fragmentShader: depthPackFragmentShader
   })
