@@ -237,6 +237,9 @@ window.addEventListener('message', (ev) => {
   iframe.classList.remove('fullscreen')
   // Pull focus back to the host window so keyboard goes to host controls.
   window.focus()
+  // Drop stale keys tracked while host was inactive (we never got the keyup
+  // events because focus was on the iframe).
+  controls.clearKeys()
   // Reset traversal state so the user can step through the host portal again.
   handedOff = false
   prevHostInitialized = false
@@ -309,6 +312,11 @@ const frame = () => {
         // Move keyboard focus into the iframe so the user's first WASD lands
         // on the iframe's controls, not on the now-inactive host listeners.
         iframe.contentWindow?.focus()
+        // Drop any keys still tracked by host's controls — focus has moved,
+        // so the keyup that eventually releases them will go to the iframe
+        // (or be missed entirely). Without this clear the host comes back
+        // from reverse-traversal with stale keys and phantom movement.
+        controls.clearKeys()
         if (LOG) console.log('[host] traversal: handed off to iframe at', mirrored)
       }
     }

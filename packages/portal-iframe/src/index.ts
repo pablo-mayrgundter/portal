@@ -102,6 +102,11 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   sceneRT.depthTexture.type = THREE.UnsignedIntType
 
   // Color blit: sample the RT's color attachment and write to canvas.
+  // Applies linearToSRGB because the scene render targets a non-sRGB RT (so
+  // material outputs are linear) but the canvas is treated as sRGB by the
+  // browser. Without this encoding the iframe-as-destination view ends up
+  // visibly darker than the iframe-as-source view (which renders direct-to-
+  // canvas via standard materials' colorspace_fragment).
   const colorBlitMaterial = new THREE.ShaderMaterial({
     uniforms: { tex: { value: null as THREE.Texture | null } },
     vertexShader: `
@@ -114,8 +119,16 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     fragmentShader: `
       uniform sampler2D tex;
       varying vec2 vUv;
+      vec3 linearToSRGB(vec3 v) {
+        return mix(
+          pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
+          v * 12.92,
+          vec3(lessThanEqual(v, vec3(0.0031308)))
+        );
+      }
       void main() {
-        gl_FragColor = texture2D(tex, vUv);
+        vec4 c = texture2D(tex, vUv);
+        gl_FragColor = vec4(linearToSRGB(c.rgb), c.a);
       }
     `,
     depthTest: false,

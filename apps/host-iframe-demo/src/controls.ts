@@ -54,5 +54,14 @@ export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTM
     yaw = Math.atan2(-f.x, -f.z)
   }
 
-  return { update, setOrientationFromForward }
+  // Clear pressed-keys state. Used on portal traversal: focus shifts between
+  // the host and iframe windows, so keyup events get delivered to whichever
+  // window has focus AT release time. The other window misses them and ends
+  // up with stale entries in its keys Set, causing phantom WASD movement.
+  const clearKeys = (): void => {
+    keys.clear()
+    dragging = false
+  }
+
+  return { update, setOrientationFromForward, clearKeys }
 }

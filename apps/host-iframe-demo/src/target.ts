@@ -257,6 +257,10 @@ const sourceFrame = (): void => {
       parent.postMessage(msg, '*')
       sourceMode = false
       cancelAnimationFrame(sourceRaf)
+      // Drop any pressed-key state — keyup will fire on the host (which has
+      // focus now), so iframe never sees it and would otherwise come back
+      // from a future forward traversal with stale movement.
+      sourceControls?.clearKeys()
       document.body.classList.remove('source-mode')
       // Restart destination service so the host (now active again) can ask
       // for portal-content frames.
