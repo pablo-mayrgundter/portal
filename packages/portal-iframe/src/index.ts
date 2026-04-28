@@ -1,17 +1,68 @@
 import * as THREE from 'three'
 import { PORTAL_STENCIL_REF } from '@portal/portal-three'
-import type {
-  ColorRGB,
-  Mat4,
-  PortalAnchor,
-  PortalEndpoint,
-  PortalFrameMessage,
-  PortalMessage,
-  PortalPose,
-  PortalReadyMessage,
-  PortalSetPoseMessage,
-  Viewport
+import {
+  obliqueClipPlaneForCamera,
+  type ColorRGB,
+  type Mat4,
+  type PortalAnchor,
+  type PortalEndpoint,
+  type PortalFrameMessage,
+  type PortalMessage,
+  type PortalPose,
+  type PortalReadyMessage,
+  type PortalSetPoseMessage,
+  type Viewport
 } from '@portal/portal-core'
+
+// Modify a perspective projection matrix to use the supplied world-space plane
+// as its near clip plane (Eric Lengyel's oblique near-plane technique). Used by
+// the iframe target so that geometry on the camera-side of the iframe portal is
+// clipped at render time — without this the iframe captures only the front-most
+// hit per pixel, so a camera-side sphere occluding a far-side sphere robs the
+// host's compositor of the far-side pixel data and the far sphere disappears.
+const _obliquePlane = new THREE.Plane()
+const _obliqueNormal = new THREE.Vector3()
+const _obliqueClip = new THREE.Vector4()
+const _obliqueQ = new THREE.Vector4()
+const _obliqueCamPos: [number, number, number] = [0, 0, 0]
+const applyObliqueClipToCamera = (
+  camera: THREE.PerspectiveCamera,
+  anchor: PortalAnchor
+): void => {
+  _obliqueCamPos[0] = camera.position.x
+  _obliqueCamPos[1] = camera.position.y
+  _obliqueCamPos[2] = camera.position.z
+  const oblique = obliqueClipPlaneForCamera(_obliqueCamPos, anchor.position, anchor.normal)
+  _obliqueNormal.set(oblique.normal[0], oblique.normal[1], oblique.normal[2])
+  _obliquePlane.set(_obliqueNormal, oblique.constant)
+  _obliquePlane.applyMatrix4(camera.matrixWorldInverse)
+  _obliqueClip.set(
+    _obliquePlane.normal.x,
+    _obliquePlane.normal.y,
+    _obliquePlane.normal.z,
+    _obliquePlane.constant
+  )
+  const m = camera.projectionMatrix.elements
+  _obliqueQ.set(
+    (Math.sign(_obliqueClip.x) + m[8]) / m[0],
+    (Math.sign(_obliqueClip.y) + m[9]) / m[5],
+    -1,
+    (1 + m[10]) / m[14]
+  )
+  const denom = _obliqueClip.dot(_obliqueQ)
+  if (Math.abs(denom) < 1e-6) return
+  const s = 2 / denom
+  const cx = _obliqueClip.x * s
+  const cy = _obliqueClip.y * s
+  const cz = _obliqueClip.z * s
+  const cw = _obliqueClip.w * s
+  const clipBias = 0.0001
+  m[2] = cx
+  m[6] = cy
+  m[10] = cz + 1 - clipBias
+  m[14] = cw
+  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
+}
 
 // ---------------------------------------------------------------------------
 // Depth packing: encode/decode a [0, 1] depth value across an RGBA texel so we
@@ -89,7 +140,14 @@ const matToArray = (m: THREE.Matrix4): Mat4 => Array.from(m.elements)
 export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const camera = new THREE.PerspectiveCamera()
   const offscreen = new OffscreenCanvas(1, 1)
-  const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: true })
+  // antialias: false is REQUIRED. The depth pass packs gl_FragCoord.z into RGBA
+  // bytes; with MSAA enabled, the renderer averages those packed bytes across
+  // samples at edge pixels, which yields garbage depth (bytes wrap at integer
+  // boundaries — averaging is not a homomorphism). The decoded "depth" at every
+  // antialiased silhouette would then sit near the far plane, defeating the
+  // host's per-pixel depth-clip and showing geometry that should be discarded.
+  // We accept jaggier color edges as the cost of correct depth-clip behavior.
+  const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: false })
 
   const depthMaterial = new THREE.ShaderMaterial({
     vertexShader: depthPackVertexShader,
@@ -148,6 +206,13 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     camera.projectionMatrix.fromArray(projection)
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
 
+    // Apply oblique near-plane clip aligned with the iframe portal so geometry
+    // on the camera-side of the portal is culled at render time. Without this,
+    // a camera-side primitive that occludes a far-side primitive becomes the
+    // front-most hit; the host composite discards the (correct) camera-side
+    // pixel but the far-side pixel was never rendered, so it shows bg fill.
+    applyObliqueClipToCamera(camera, config.anchor)
+
     // Color pass
     config.scene.overrideMaterial = null
     renderer.render(config.scene, camera)
@@ -177,6 +242,17 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       console.log('[iframe] received pose up: ', fmt(pose.up ?? [0, 1, 0]))
       console.log('[iframe] viewport:', viewport.width, 'x', viewport.height)
       console.log('[iframe] applied camera.position:', fmt(camera.position.toArray()))
+      console.log('[iframe] applied camera.up:', fmt(camera.up.toArray()))
+      console.log('[iframe] applied camera.quaternion:', fmt(camera.quaternion.toArray()))
+      // Derived camera basis (world directions). For host pitched θ these should
+      // be: right=(1,0,0), up=(0,cosθ,sinθ), back=(0,-sinθ,cosθ) — i.e., the
+      // "back" component of y/z should be NON-zero when host is pitched.
+      const r = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
+      const u = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
+      const b = new THREE.Vector3(0, 0, 1).applyQuaternion(camera.quaternion)
+      console.log('[iframe] camera basis right:', fmt(r.toArray()))
+      console.log('[iframe] camera basis up:   ', fmt(u.toArray()))
+      console.log('[iframe] camera basis back: ', fmt(b.toArray()))
       console.log('[iframe] sent view (matrixWorldInverse):', fmt(frame.view))
     }
   }
@@ -215,7 +291,13 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 const compositorVertexShader = `
 varying vec2 vUv;
 void main() {
-  vUv = uv;
+  // Flip Y because the iframe's color + depth bitmaps come from
+  // OffscreenCanvas.transferToImageBitmap, and ImageBitmap-sourced textures
+  // ignore UNPACK_FLIP_Y_WEBGL (it's silently dropped by browsers + documented
+  // as such by three.js). Without this flip the sampler returns iframe NDC.y =
+  // -host_NDC.y, which manifests as iframe content appearing to "track gaze"
+  // in the opposite direction of the door when the host pitches.
+  vUv = vec2(uv.x, 1.0 - uv.y);
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }
 `
@@ -262,10 +344,26 @@ void main() {
     return;
   }
 
+  float distFromPlane = dot(worldPos - destinationPortalPos, destinationKeptNormal);
+
+  // debugMode == 4: visualize depth-clip decision per-pixel. GREEN where
+  // distFromPlane >= 0 (would be kept = past portal); RED where < 0 (would be
+  // discarded = camera-side of portal). If a sphere visibly on the camera-side
+  // of the iframe portal plane shows up GREEN, the reconstructed worldPos is
+  // wrong (or the kept-normal sign is flipped). Brightness ≈ |distFromPlane|.
+  if (debugMode == 4) {
+    float mag = clamp(abs(distFromPlane) * 0.3, 0.0, 1.0);
+    if (distFromPlane >= 0.0) {
+      gl_FragColor = vec4(0.0, mag, 0.0, 1.0);
+    } else {
+      gl_FragColor = vec4(mag, 0.0, 0.0, 1.0);
+    }
+    return;
+  }
+
   // debugMode == 1: skip depth-clip; just blit color. Lets us see if iframe
   // content placement is correct independent of the clip logic.
   if (debugMode != 1) {
-    float distFromPlane = dot(worldPos - destinationPortalPos, destinationKeptNormal);
     if (distFromPlane < 0.0) discard;
   }
 
@@ -274,10 +372,10 @@ void main() {
 }
 `
 
-export type CompositorDebugMode = 'off' | 'noclip' | 'depth' | 'worldpos'
+export type CompositorDebugMode = 'off' | 'noclip' | 'depth' | 'worldpos' | 'clip'
 
 const debugModeToInt = (m: CompositorDebugMode): number =>
-  m === 'noclip' ? 1 : m === 'depth' ? 2 : m === 'worldpos' ? 3 : 0
+  m === 'noclip' ? 1 : m === 'depth' ? 2 : m === 'worldpos' ? 3 : m === 'clip' ? 4 : 0
 
 export type IframeEndpointConfig = {
   iframe: HTMLIFrameElement
@@ -296,6 +394,14 @@ export type IframeEndpointConfig = {
    *   color gradients across geometry mean reconstruction is working.
    */
   debugMode?: CompositorDebugMode
+  /**
+   * If true, the compositor's material is created with stencilWrite=false
+   * (so the door stencil is ignored) and the shader skips the depth-clip
+   * discard. Caller is expected to also skip rendering the source scene +
+   * stencil mask, so the iframe's full framebuffer fills the host viewport.
+   * For visual debugging only.
+   */
+  composeRaw?: boolean
 }
 
 export type IframePortalEndpoint = PortalEndpoint & {
@@ -333,7 +439,9 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   depthTexture.generateMipmaps = false
 
   const stencilRef = config.stencilRef ?? PORTAL_STENCIL_REF
-  const debugModeInt = debugModeToInt(config.debugMode ?? 'off')
+  const composeRaw = config.composeRaw ?? false
+  // compose=raw forces noclip behaviour in the shader; otherwise honor debugMode.
+  const debugModeInt = composeRaw ? 1 : debugModeToInt(config.debugMode ?? 'off')
 
   const uniforms = {
     iframeColor: { value: colorTexture },
@@ -351,8 +459,8 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
-    stencilWrite: true,
-    stencilFunc: THREE.EqualStencilFunc,
+    stencilWrite: !composeRaw,
+    stencilFunc: composeRaw ? THREE.AlwaysStencilFunc : THREE.EqualStencilFunc,
     stencilRef,
     stencilFail: THREE.KeepStencilOp,
     stencilZFail: THREE.KeepStencilOp,
