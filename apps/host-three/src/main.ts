@@ -1,12 +1,8 @@
 import * as THREE from 'three'
 import {
-  applyPortalStencilTest,
-  clearPortalStencilTest,
-  computeTraversalPose,
-  detectPortalCrossing,
-  makePortalPlane,
-  makePortalStencilMask,
-  updateCoupledCamera
+  makeLocalEndpoint,
+  makePortalLink,
+  makePortalPlane
 } from '@portal/portal-three'
 import { createWorldA } from './world-a'
 import { createWorldB } from './world-b'
@@ -24,8 +20,6 @@ app.appendChild(renderer.domElement)
 const hostCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 200)
 hostCamera.position.set(0, 1.6, 5.5)
 
-const portalCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
-
 const { scene: worldA } = createWorldA()
 const { scene: worldB, tick: tickWorldB } = createWorldB()
 
@@ -40,19 +34,10 @@ portalB.position.set(0, 1.6, 0)
 portalB.rotation.y = Math.PI
 worldB.add(portalB)
 
-const stencilMask = makePortalStencilMask()
-
-type WorldNode = {
-  scene: THREE.Scene
-  portal: THREE.Mesh
-  tick?: (t: number) => void
-}
-
-const nodeA: WorldNode = { scene: worldA, portal: portalA }
-const nodeB: WorldNode = { scene: worldB, portal: portalB, tick: tickWorldB }
-
-let here: WorldNode = nodeA
-let there: WorldNode = nodeB
+const link = makePortalLink({
+  a: makeLocalEndpoint({ scene: worldA, anchor: portalA }),
+  b: makeLocalEndpoint({ scene: worldB, anchor: portalB, tick: tickWorldB })
+})
 
 const controls = attachBasicFlyControls(hostCamera, renderer.domElement)
 
@@ -66,49 +51,20 @@ const onResize = () => {
 window.addEventListener('resize', onResize)
 
 const clock = new THREE.Clock()
-const prevPos = new THREE.Vector3().copy(hostCamera.position)
-const fallbackBackground = new THREE.Color(0, 0, 0)
-
-const backgroundColor = (scene: THREE.Scene): THREE.Color =>
-  scene.background instanceof THREE.Color ? scene.background : fallbackBackground
+const newForward = new THREE.Vector3()
 
 const frame = () => {
   const dt = clock.getDelta()
-  const t = clock.elapsedTime
+  const time = clock.elapsedTime
 
-  prevPos.copy(hostCamera.position)
   controls.update(dt)
-  nodeA.tick?.(t)
-  nodeB.tick?.(t)
 
-  const crossing = detectPortalCrossing(prevPos, hostCamera.position, here.portal)
-  if (crossing.crossed) {
-    const traversed = computeTraversalPose(hostCamera, here.portal, there.portal)
-    hostCamera.position.set(...traversed.position)
-    controls.setOrientationFromForward(new THREE.Vector3(...traversed.forward))
-    const swap = here
-    here = there
-    there = swap
+  const result = link.frame({ renderer, hostCamera, time })
+
+  if (result.teleported) {
+    newForward.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
+    controls.setOrientationFromForward(newForward)
   }
-
-  updateCoupledCamera(hostCamera, here.portal, there.portal, portalCamera, undefined, true)
-
-  renderer.setRenderTarget(null)
-  renderer.clear(true, true, true)
-
-  renderer.render(here.scene, hostCamera)
-
-  stencilMask.update(here.portal, hostCamera, backgroundColor(there.scene))
-  renderer.render(stencilMask.scene, stencilMask.camera)
-
-  renderer.clearDepth()
-
-  const savedBackground = there.scene.background
-  there.scene.background = null
-  applyPortalStencilTest(there.scene)
-  renderer.render(there.scene, portalCamera)
-  clearPortalStencilTest(there.scene)
-  there.scene.background = savedBackground
 
   requestAnimationFrame(frame)
 }
