@@ -195,9 +195,7 @@ if (!displayCanvas) throw new Error('Missing #display canvas in target.html')
 let sourceMode = false
 let sourceRaf = 0
 const sourceCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
-let sourceRenderer: THREE.WebGLRenderer | null = null
 let sourceControls: ReturnType<typeof attachBasicFlyControls> | null = null
-let sourceStencilMask: ReturnType<typeof makePortalStencilMask> | null = null
 const sourceClock = new THREE.Clock()
 const sourceLookTarget = new THREE.Vector3()
 const sourceCamPos = new THREE.Vector3()
@@ -205,8 +203,33 @@ const sourceCamFwd = new THREE.Vector3()
 const sourceCamUp = new THREE.Vector3()
 const sourceStencilBg = new THREE.Color()
 
+// Build source-mode renderer + stencil mask EAGERLY at module load, not lazily
+// in activateSourceMode. The lazy version cost a GL context creation + first-
+// render shader compilation on the very first traversal, which appeared as a
+// one-frame stutter ("frame flicker"). Pre-building here means the first
+// traversal hits warm shaders and a ready GL context.
+const sourceRenderer = new THREE.WebGLRenderer({
+  canvas: displayCanvas,
+  antialias: true,
+  stencil: true
+})
+sourceRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+sourceRenderer.autoClear = false
+const sourceStencilMask = makePortalStencilMask()
+
+// Warm up the GL programs so the first traversal doesn't pay shader-link
+// cost mid-flight. compile() walks the scene graph and triggers program
+// creation for each material+geometry combo without actually drawing.
+const warmCanvasSize = (): void => {
+  const w = window.innerWidth || 1
+  const h = window.innerHeight || 1
+  sourceRenderer.setSize(w, h)
+}
+warmCanvasSize()
+sourceRenderer.compile(bundle.scene, sourceCamera)
+sourceRenderer.compile(sourceStencilMask.scene, sourceStencilMask.camera)
+
 const onSourceResize = (): void => {
-  if (!sourceRenderer) return
   const w = window.innerWidth
   const h = window.innerHeight
   sourceRenderer.setSize(w, h)
@@ -232,7 +255,7 @@ const inferredHostAnchor: PortalAnchor = {
 }
 
 const sourceFrame = (): void => {
-  if (!sourceMode || !sourceRenderer || !sourceControls) return
+  if (!sourceMode || !sourceControls) return
   // Tick + setPose use the host-synced time (continuing from where the host's
   // clock was at the last sync) so the swarm animation phase is continuous
   // across forward/reverse traversals. sourceClock.getDelta() still drives
@@ -326,7 +349,7 @@ const sourceFrame = (): void => {
   sourceRenderer.clear(true, true, true)
   sourceRenderer.render(bundle.scene, sourceCamera)
 
-  if (sourceStencilMask && hostPeerEndpoint.isReady()) {
+  if (hostPeerEndpoint.isReady()) {
     const tbg = hostPeerEndpoint.getBackground()
     sourceStencilBg.setRGB(tbg.r, tbg.g, tbg.b)
     sourceStencilMask.update(iframePortalMesh, sourceCamera, sourceStencilBg)
@@ -349,18 +372,9 @@ const activateSourceMode = (initialPose: {
   // Tear down destination mode — no more bitmap sends.
   destinationTarget.stop()
 
-  // Build the visible-canvas renderer lazily so we don't pay for it in the
-  // common case where traversal never happens. stencil:true is required for
-  // the portal-back compositor; autoClear=false because we drive clearing
-  // manually around the source render + stencil mask + composite passes.
-  sourceRenderer = new THREE.WebGLRenderer({
-    canvas: displayCanvas,
-    antialias: true,
-    stencil: true
-  })
-  sourceRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  sourceRenderer.autoClear = false
-  sourceStencilMask = makePortalStencilMask()
+  // sourceRenderer + sourceStencilMask are pre-built at module load so the
+  // first traversal doesn't pay GL-context-creation + shader-link costs as
+  // a frame stutter. Just configure pose, controls, and CSS here.
 
   // Apply initial camera pose (already in iframe-world coords — host mirrored
   // it across the portal pair before posting).

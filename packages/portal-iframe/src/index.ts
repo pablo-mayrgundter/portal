@@ -189,6 +189,18 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const blitScene = new THREE.Scene()
   const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
+  // Pre-compile shaders for the destination scene + both blit materials so
+  // the first message-driven render doesn't pay program-link cost as a
+  // visible stutter. The blit materials are compiled by adding the meshes
+  // to the blit scene briefly and calling compile() against it.
+  renderer.compile(config.scene, camera)
+  blitScene.add(blitColorMesh)
+  renderer.compile(blitScene, blitCamera)
+  blitScene.clear()
+  blitScene.add(blitDepthMesh)
+  renderer.compile(blitScene, blitCamera)
+  blitScene.clear()
+
   let running = false
   let lastLog = 0
   const lookTarget = new THREE.Vector3()
