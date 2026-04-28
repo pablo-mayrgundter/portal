@@ -10,6 +10,26 @@ export type PortalAnchor = {
   position: Vec3
   normal: Vec3
   up: Vec3
+  halfWidth?: number
+  halfHeight?: number
+}
+
+export type ColorRGB = { r: number; g: number; b: number }
+
+/**
+ * Common contract every portal-side endpoint conforms to, regardless of whether
+ * it's a local THREE.Scene, an iframe, an offscreen renderer, or a WebRTC peer.
+ *
+ * Transports add their own rendering API on top (the local endpoint exposes
+ * scene + renderAsSource/renderAsDestination, the iframe endpoint will expose
+ * a postMessage frame request, etc.). PortalLink is the consumer that knows
+ * how to drive both.
+ */
+export interface PortalEndpoint {
+  getAnchor(): PortalAnchor
+  getBackground(): ColorRGB
+  tick?(t: number): void
+  enter?(state: unknown): void
 }
 
 export type CoupledPoseConfig = {
