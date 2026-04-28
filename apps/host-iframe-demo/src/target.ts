@@ -1,6 +1,12 @@
 import * as THREE from 'three'
 import { makeIframeTarget } from '@portal/portal-iframe'
-import type { PortalAnchor, PortalMessage } from '@portal/portal-core'
+import {
+  couplePoseAcrossPortal,
+  intersectSegmentWithDoor,
+  type PortalAnchor,
+  type PortalMessage,
+  type PortalTraverseMessage
+} from '@portal/portal-core'
 import { attachBasicFlyControls } from './controls'
 
 const params = new URLSearchParams(location.search)
@@ -164,10 +170,70 @@ const onSourceResize = (): void => {
   sourceCamera.updateProjectionMatrix()
 }
 
+const prevSourceWorldPos = new THREE.Vector3()
+let prevSourceInitialized = false
+let reverseTraversed = false
+
+// Inferred host anchor in worldA coords. We only know our own anchor here;
+// the host anchor is encoded by the portal pair convention (face-to-face,
+// host portal at -3.5z in worldA, normal +z). This matches the local demo
+// setup. If the protocol later carries the source anchor explicitly we can
+// drop this hardcode.
+const inferredHostAnchor: PortalAnchor = {
+  position: [0, 1.6, -3.5],
+  normal: [0, 0, 1],
+  up: [0, 1, 0],
+  halfWidth: 1.3,
+  halfHeight: 1.6
+}
+
 const sourceFrame = (): void => {
   if (!sourceMode || !sourceRenderer || !sourceControls) return
   bundle.tick?.(sourceClock.elapsedTime)
   sourceControls.update(sourceClock.getDelta())
+
+  // Reverse traversal: if the user walks back through the iframe portal door
+  // (in worldB coords), mirror the pose back into worldA and tell the host to
+  // resume as the active page.
+  if (!reverseTraversed && prevSourceInitialized) {
+    const halfW = anchor.halfWidth ?? 1
+    const halfH = anchor.halfHeight ?? 1.5
+    const crossing = intersectSegmentWithDoor(
+      [prevSourceWorldPos.x, prevSourceWorldPos.y, prevSourceWorldPos.z],
+      [sourceCamera.position.x, sourceCamera.position.y, sourceCamera.position.z],
+      anchor,
+      halfW,
+      halfH
+    )
+    if (crossing.crossed) {
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(sourceCamera.quaternion)
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(sourceCamera.quaternion)
+      const mirrored = couplePoseAcrossPortal(
+        {
+          position: [sourceCamera.position.x, sourceCamera.position.y, sourceCamera.position.z],
+          forward: [fwd.x, fwd.y, fwd.z],
+          up: [up.x, up.y, up.z]
+        },
+        { source: anchor, target: inferredHostAnchor }
+      )
+      const msg: PortalTraverseMessage = { type: 'portal:traverse', pose: mirrored }
+      parent.postMessage(msg, '*')
+      sourceMode = false
+      cancelAnimationFrame(sourceRaf)
+      document.body.classList.remove('source-mode')
+      // Restart destination service so the host (now active again) can ask
+      // for portal-content frames.
+      destinationTarget.start()
+      // Allow another forward traversal later (host may re-enter the iframe).
+      reverseTraversed = false
+      prevSourceInitialized = false
+      if (LOG) console.log('[iframe] reverse traversal: handed back to host at', mirrored)
+      return
+    }
+  }
+  prevSourceWorldPos.copy(sourceCamera.position)
+  prevSourceInitialized = true
+
   sourceRenderer.render(bundle.scene, sourceCamera)
   sourceRaf = requestAnimationFrame(sourceFrame)
 }

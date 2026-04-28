@@ -181,6 +181,40 @@ const sendTraverse = (mirroredPose: PortalPose): void => {
   iframe.contentWindow.postMessage(msg, '*')
 }
 
+// Handle reverse-traversal messages (iframe → host). When the user walks
+// back through the iframe portal in worldB, the iframe mirrors its pose
+// into worldA coords and posts here. Restore visibility, apply the pose,
+// and let the existing source-mode frame loop pick up where it left off.
+const reverseLookTarget = new THREE.Vector3()
+window.addEventListener('message', (ev) => {
+  if (ev.source !== iframe.contentWindow) return
+  const data = ev.data
+  if (!data || typeof data !== 'object' || data.type !== 'portal:traverse') return
+  const pose = data.pose as PortalPose
+  hostCamera.position.set(pose.position[0], pose.position[1], pose.position[2])
+  if (pose.up) hostCamera.up.set(pose.up[0], pose.up[1], pose.up[2])
+  if (pose.forward) {
+    reverseLookTarget.set(
+      pose.position[0] + pose.forward[0],
+      pose.position[1] + pose.forward[1],
+      pose.position[2] + pose.forward[2]
+    )
+    hostCamera.lookAt(reverseLookTarget)
+  }
+  // Sync the controls' yaw/pitch with the new orientation so the next mouse
+  // drag doesn't snap the view back.
+  if (pose.forward) {
+    const f = new THREE.Vector3(pose.forward[0], pose.forward[1], pose.forward[2])
+    controls.setOrientationFromForward?.(f)
+  }
+  document.body.classList.remove('handed-off')
+  iframe.classList.remove('fullscreen')
+  // Reset traversal state so the user can step through the host portal again.
+  handedOff = false
+  prevHostInitialized = false
+  if (LOG) console.log('[host] reverse traversal: resumed source role at', pose)
+})
+
 const extrapInto = (
   out: [number, number, number],
   prev: readonly number[],

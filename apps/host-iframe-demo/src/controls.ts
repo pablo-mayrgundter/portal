@@ -45,5 +45,14 @@ export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTM
     }
   }
 
-  return { update }
+  // Reset internal pitch/yaw to match a given forward vector. Used after a
+  // portal traversal hands the camera a new orientation; without this the
+  // next mouse drag snaps back to the (stale) yaw+pitch.
+  const setOrientationFromForward = (forward: THREE.Vector3): void => {
+    const f = forward.clone().normalize()
+    pitch = Math.asin(THREE.MathUtils.clamp(f.y, -1, 1))
+    yaw = Math.atan2(-f.x, -f.z)
+  }
+
+  return { update, setOrientationFromForward }
 }
