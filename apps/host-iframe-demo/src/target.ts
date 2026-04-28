@@ -195,7 +195,6 @@ if (!displayCanvas) throw new Error('Missing #display canvas in target.html')
 let sourceMode = false
 let sourceRaf = 0
 const sourceCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
-let sourceControls: ReturnType<typeof attachBasicFlyControls> | null = null
 const sourceClock = new THREE.Clock()
 const sourceLookTarget = new THREE.Vector3()
 const sourceCamPos = new THREE.Vector3()
@@ -229,6 +228,17 @@ warmCanvasSize()
 sourceRenderer.compile(bundle.scene, sourceCamera)
 sourceRenderer.compile(sourceStencilMask.scene, sourceStencilMask.camera)
 
+// Build controls eagerly too, alongside the renderer/stencil. This avoids:
+//  - re-attaching event listeners on every forward traversal (would leak)
+//  - the "snap to head-on" bug where the controls' default yaw=0/pitch=0
+//    overwrote sourceCamera.quaternion (which had been set from the oblique
+//    initialPose) on the first controls.update(). Symptom: user crossed at
+//    an oblique angle, played in worldB at that angle... but the next
+//    controls.update silently rotated them to head-on, so when they crossed
+//    back, the host saw a head-on forward and the user perceived a sudden
+//    "90 degree" redirect with no input change.
+const sourceControls = attachBasicFlyControls(sourceCamera, displayCanvas)
+
 const onSourceResize = (): void => {
   const w = window.innerWidth
   const h = window.innerHeight
@@ -255,7 +265,7 @@ const inferredHostAnchor: PortalAnchor = {
 }
 
 const sourceFrame = (): void => {
-  if (!sourceMode || !sourceControls) return
+  if (!sourceMode) return
   // Tick + setPose use the host-synced time (continuing from where the host's
   // clock was at the last sync) so the swarm animation phase is continuous
   // across forward/reverse traversals. sourceClock.getDelta() still drives
@@ -372,9 +382,9 @@ const activateSourceMode = (initialPose: {
   // Tear down destination mode — no more bitmap sends.
   destinationTarget.stop()
 
-  // sourceRenderer + sourceStencilMask are pre-built at module load so the
-  // first traversal doesn't pay GL-context-creation + shader-link costs as
-  // a frame stutter. Just configure pose, controls, and CSS here.
+  // sourceRenderer + sourceStencilMask + sourceControls are pre-built at
+  // module load. Just configure pose, sync the controls' euler state, clear
+  // any stale keys, and update CSS here.
 
   // Apply initial camera pose (already in iframe-world coords — host mirrored
   // it across the portal pair before posting).
@@ -387,9 +397,17 @@ const activateSourceMode = (initialPose: {
       initialPose.position[2] + initialPose.forward[2]
     )
     sourceCamera.lookAt(sourceLookTarget)
+    // Critical: sync controls.pitch/yaw to the initial forward so the next
+    // controls.update() doesn't overwrite the just-set quaternion with the
+    // controls' default-zero euler angles (which would snap the view to
+    // head-on, masquerading as a "90 degree redirect" later).
+    sourceControls.setOrientationFromForward?.(
+      new THREE.Vector3(initialPose.forward[0], initialPose.forward[1], initialPose.forward[2])
+    )
   }
-
-  sourceControls = attachBasicFlyControls(sourceCamera, displayCanvas)
+  // Drop any keys that might be lingering from a previous source-mode session
+  // (or from the destination-mode period if any sneaky keydown leaked through).
+  sourceControls.clearKeys()
   onSourceResize()
 
   // Render the first source-mode frame SYNCHRONOUSLY before showing #display.
