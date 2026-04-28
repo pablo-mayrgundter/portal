@@ -221,8 +221,6 @@ const frame = () => {
     } else {
       const targetAnchor = iframeEndpoint.getAnchor()
       const sourceAnchor = hostEndpoint.getAnchor()
-      const halfWidth = sourceAnchor.halfWidth ?? 1
-      const halfHeight = sourceAnchor.halfHeight ?? 1.5
       const crossing = detectPortalCrossing(
         prevHostWorldPos,
         hostCamera.position,
@@ -248,7 +246,6 @@ const frame = () => {
         iframe.classList.add('fullscreen')
         if (LOG) console.log('[host] traversal: handed off to iframe at', mirrored)
       }
-      void halfWidth; void halfHeight
     }
     prevHostWorldPos.copy(hostCamera.position)
   }
