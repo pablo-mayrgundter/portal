@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal - iframe demo (target)</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #1a0a14; color: #f7d6e0; font-family: system-ui, sans-serif; }
+      .info { padding: 16px; max-width: 480px; }
+    </style>
+  </head>
+  <body>
+    <div class="info">
+      <h2>Iframe portal target</h2>
+      <p>
+        This page is the destination world for the iframe-portal demo. Open
+        the host page (<a href="/">index.html</a>) to see it composited
+        through a portal.
+      </p>
+      <p>
+        The page itself doesn't render to its own canvas — it renders to an
+        OffscreenCanvas in response to <code>portal:setPose</code> messages
+        and posts the resulting frames back to the parent.
+      </p>
+    </div>
+    <script type="module" src="/src/target.ts"></script>
+  </body>
+</html>

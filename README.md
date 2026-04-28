@@ -71,14 +71,16 @@ Controls in the demo:
 
 ```txt
 /apps
-  /host-three             # demo host: two worlds + portal between them
+  /host-three             # demo host: two local worlds + traversable portal
+  /host-iframe-demo       # demo host: source world + iframe-served portal
 /packages
-  /portal-core            # pure-data geometry + types (no three.js dep)
+  /portal-core            # pure-data geometry + types + wire protocol (no three.js dep)
   /portal-three           # three.js bindings: stencil mask, coupled camera,
-                          # traversal helpers, scene-material stencil toggles
+                          # local endpoint, link pipeline, traversal helpers
+  /portal-iframe          # iframe transport: depth-pack target + depth-aware compositor
 ```
 
-`portal-core` is engine-agnostic and tested with vitest. `portal-three` translates between three.js scenes/cameras and the core data types.
+`portal-core` is engine-agnostic and tested with vitest. `portal-three` translates between three.js scenes/cameras and the core data types. `portal-iframe` adds a postMessage transport so a portal's destination world can live in a separate iframe with its own engine context.
 
 ## How the rendering works
 
