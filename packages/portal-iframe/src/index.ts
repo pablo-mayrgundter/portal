@@ -1,68 +1,17 @@
 import * as THREE from 'three'
-import { PORTAL_STENCIL_REF } from '@portal/portal-three'
-import {
-  obliqueClipPlaneForCamera,
-  type ColorRGB,
-  type Mat4,
-  type PortalAnchor,
-  type PortalEndpoint,
-  type PortalFrameMessage,
-  type PortalMessage,
-  type PortalPose,
-  type PortalReadyMessage,
-  type PortalSetPoseMessage,
-  type Viewport
+import { PORTAL_STENCIL_REF, applyObliqueClipFromAnchor } from '@portal/portal-three'
+import type {
+  ColorRGB,
+  Mat4,
+  PortalAnchor,
+  PortalEndpoint,
+  PortalFrameMessage,
+  PortalMessage,
+  PortalPose,
+  PortalReadyMessage,
+  PortalSetPoseMessage,
+  Viewport
 } from '@portal/portal-core'
-
-// Modify a perspective projection matrix to use the supplied world-space plane
-// as its near clip plane (Eric Lengyel's oblique near-plane technique). Used by
-// the iframe target so that geometry on the camera-side of the iframe portal is
-// clipped at render time — without this the iframe captures only the front-most
-// hit per pixel, so a camera-side sphere occluding a far-side sphere robs the
-// host's compositor of the far-side pixel data and the far sphere disappears.
-const _obliquePlane = new THREE.Plane()
-const _obliqueNormal = new THREE.Vector3()
-const _obliqueClip = new THREE.Vector4()
-const _obliqueQ = new THREE.Vector4()
-const _obliqueCamPos: [number, number, number] = [0, 0, 0]
-const applyObliqueClipToCamera = (
-  camera: THREE.PerspectiveCamera,
-  anchor: PortalAnchor
-): void => {
-  _obliqueCamPos[0] = camera.position.x
-  _obliqueCamPos[1] = camera.position.y
-  _obliqueCamPos[2] = camera.position.z
-  const oblique = obliqueClipPlaneForCamera(_obliqueCamPos, anchor.position, anchor.normal)
-  _obliqueNormal.set(oblique.normal[0], oblique.normal[1], oblique.normal[2])
-  _obliquePlane.set(_obliqueNormal, oblique.constant)
-  _obliquePlane.applyMatrix4(camera.matrixWorldInverse)
-  _obliqueClip.set(
-    _obliquePlane.normal.x,
-    _obliquePlane.normal.y,
-    _obliquePlane.normal.z,
-    _obliquePlane.constant
-  )
-  const m = camera.projectionMatrix.elements
-  _obliqueQ.set(
-    (Math.sign(_obliqueClip.x) + m[8]) / m[0],
-    (Math.sign(_obliqueClip.y) + m[9]) / m[5],
-    -1,
-    (1 + m[10]) / m[14]
-  )
-  const denom = _obliqueClip.dot(_obliqueQ)
-  if (Math.abs(denom) < 1e-6) return
-  const s = 2 / denom
-  const cx = _obliqueClip.x * s
-  const cy = _obliqueClip.y * s
-  const cz = _obliqueClip.z * s
-  const cw = _obliqueClip.w * s
-  const clipBias = 0.0001
-  m[2] = cx
-  m[6] = cy
-  m[10] = cz + 1 - clipBias
-  m[14] = cw
-  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
-}
 
 // ---------------------------------------------------------------------------
 // Depth packing: encode/decode a [0, 1] depth value across an RGBA texel so we
@@ -211,7 +160,8 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     // a camera-side primitive that occludes a far-side primitive becomes the
     // front-most hit; the host composite discards the (correct) camera-side
     // pixel but the far-side pixel was never rendered, so it shows bg fill.
-    applyObliqueClipToCamera(camera, config.anchor)
+    applyObliqueClipFromAnchor(camera, config.anchor)
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
 
     // Color pass
     config.scene.overrideMaterial = null

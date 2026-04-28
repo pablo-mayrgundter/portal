@@ -59,51 +59,71 @@ const computeCoupledPose = (
   }
 }
 
+/**
+ * Modify a perspective camera's projection matrix to use the supplied portal
+ * anchor as its near clip plane (Eric Lengyel's oblique near-plane technique).
+ * Geometry on the camera-side of the anchor is culled at the rasterizer (clip
+ * test). Used by both the local portal pipeline and the iframe portal target.
+ *
+ * The anchor's `position` and `normal` MUST already be in world coordinates.
+ * For a `THREE.Object3D` portal mesh, derive a world-space `PortalAnchor` via
+ * `asAnchor(mesh, normal)` first.
+ *
+ * Mutates `camera.projectionMatrix` in place. Call AFTER you've set the
+ * camera's pose AND its base projection matrix; the result will only be
+ * meaningful until the next `updateProjectionMatrix()`/`fromArray()` call.
+ *
+ * Pre-allocates its scratch state so it's safe to call every frame.
+ */
+const _obliquePlane = new THREE.Plane()
+const _obliqueNormal = new THREE.Vector3()
+const _obliqueClip = new THREE.Vector4()
+const _obliqueQ = new THREE.Vector4()
+const _obliqueCamPos: Vec3 = [0, 0, 0]
+export const applyObliqueClipFromAnchor = (
+  camera: THREE.PerspectiveCamera,
+  anchor: PortalAnchor
+): void => {
+  _obliqueCamPos[0] = camera.position.x
+  _obliqueCamPos[1] = camera.position.y
+  _obliqueCamPos[2] = camera.position.z
+  const oblique = obliqueClipPlaneForCamera(_obliqueCamPos, anchor.position, anchor.normal)
+  _obliqueNormal.set(oblique.normal[0], oblique.normal[1], oblique.normal[2])
+  _obliquePlane.set(_obliqueNormal, oblique.constant)
+  _obliquePlane.applyMatrix4(camera.matrixWorldInverse)
+  _obliqueClip.set(
+    _obliquePlane.normal.x,
+    _obliquePlane.normal.y,
+    _obliquePlane.normal.z,
+    _obliquePlane.constant
+  )
+  const m = camera.projectionMatrix.elements
+  _obliqueQ.set(
+    (Math.sign(_obliqueClip.x) + m[8]) / m[0],
+    (Math.sign(_obliqueClip.y) + m[9]) / m[5],
+    -1,
+    (1 + m[10]) / m[14]
+  )
+  const denom = _obliqueClip.dot(_obliqueQ)
+  if (Math.abs(denom) < 1e-6) return
+  const s = 2 / denom
+  const cx = _obliqueClip.x * s
+  const cy = _obliqueClip.y * s
+  const cz = _obliqueClip.z * s
+  const cw = _obliqueClip.w * s
+  const clipBias = 0.0001
+  m[2] = cx
+  m[6] = cy
+  m[10] = cz + 1 - clipBias
+  m[14] = cw
+}
+
 const applyObliqueNearPlane = (
   camera: THREE.PerspectiveCamera,
   portalPlane: THREE.Object3D,
   portalNormal: THREE.Vector3
 ): void => {
-  const portalPos = new THREE.Vector3()
-  const portalQuat = new THREE.Quaternion()
-  portalPlane.getWorldPosition(portalPos)
-  portalPlane.getWorldQuaternion(portalQuat)
-  const worldNormal = portalNormal.clone().applyQuaternion(portalQuat).normalize()
-
-  const camPos = new THREE.Vector3()
-  camera.getWorldPosition(camPos)
-
-  const oblique = obliqueClipPlaneForCamera(
-    [camPos.x, camPos.y, camPos.z],
-    [portalPos.x, portalPos.y, portalPos.z],
-    [worldNormal.x, worldNormal.y, worldNormal.z]
-  )
-
-  const plane = new THREE.Plane(
-    new THREE.Vector3(oblique.normal[0], oblique.normal[1], oblique.normal[2]),
-    oblique.constant
-  )
-  plane.applyMatrix4(camera.matrixWorldInverse)
-
-  const clipPlane = new THREE.Vector4(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant)
-
-  const proj = camera.projectionMatrix
-  const m = proj.elements
-
-  const q = new THREE.Vector4(
-    (Math.sign(clipPlane.x) + m[8]) / m[0],
-    (Math.sign(clipPlane.y) + m[9]) / m[5],
-    -1,
-    (1 + m[10]) / m[14]
-  )
-
-  const c = clipPlane.clone().multiplyScalar(2 / clipPlane.dot(q))
-
-  const clipBias = 0.0001
-  m[2] = c.x
-  m[6] = c.y
-  m[10] = c.z + 1 - clipBias
-  m[14] = c.w
+  applyObliqueClipFromAnchor(camera, asAnchor(portalPlane, portalNormal))
 }
 
 export const updateCoupledCamera = (
