@@ -65,6 +65,14 @@ export type IframeTargetConfig = {
    * ignore stray messages from other windows.
    */
   inputFilter?: MessageEventSource | null
+  /**
+   * Called with the peer's `msg.time` on every received setPose. Lets the
+   * caller keep external clocks (e.g., the iframe's source-mode tick) in
+   * sync with the peer's clock — important when the same scene is rendered
+   * by both pages depending on which is currently active, since otherwise
+   * animation phase jumps at every traversal.
+   */
+  onTime?: (time: number) => void
 }
 
 export type IframeTarget = {
@@ -218,6 +226,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 
   const renderFrame = (msg: PortalSetPoseMessage): void => {
     config.tick?.(msg.time)
+    config.onTime?.(msg.time)
 
     const { pose, projection, viewport } = msg
 

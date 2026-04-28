@@ -140,11 +140,25 @@ const buildGrid = (): SceneBundle => {
 const bundle = SCENE === 'grid' ? buildGrid() : buildSwarm()
 if (LOG) console.log('[iframe] scene:', SCENE)
 
+// Track the host's clock so source mode can continue from it instead of
+// restarting at zero (which would jump the animation phase every traversal).
+// Each destination-mode setPose updates the base; source-mode reads it and
+// extrapolates with performance.now().
+let hostTimeBase = 0
+let perfBaseAtSync = performance.now() / 1000
+const updateHostTimeSync = (hostTime: number): void => {
+  hostTimeBase = hostTime
+  perfBaseAtSync = performance.now() / 1000
+}
+const syncedTime = (): number =>
+  hostTimeBase + (performance.now() / 1000 - perfBaseAtSync)
+
 const destinationTarget = makeIframeTarget({
   scene: bundle.scene,
   anchor,
   log: LOG,
-  tick: bundle.tick
+  tick: bundle.tick,
+  onTime: updateHostTimeSync
 })
 destinationTarget.start()
 
@@ -218,9 +232,13 @@ const inferredHostAnchor: PortalAnchor = {
 
 const sourceFrame = (): void => {
   if (!sourceMode || !sourceRenderer || !sourceControls) return
-  bundle.tick?.(sourceClock.elapsedTime)
+  // Tick + setPose use the host-synced time (continuing from where the host's
+  // clock was at the last sync) so the swarm animation phase is continuous
+  // across forward/reverse traversals. sourceClock.getDelta() still drives
+  // controls (it only cares about per-frame deltas, not absolute time).
+  const time = syncedTime()
+  bundle.tick?.(time)
   sourceControls.update(sourceClock.getDelta())
-  const time = sourceClock.elapsedTime
 
   // Pull anchor from peer if we have it (host announced via portal:ready),
   // else fall back to our hardcoded inference. Used both for reverse-traversal
