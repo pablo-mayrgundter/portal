@@ -209,6 +209,8 @@ window.addEventListener('message', (ev) => {
   }
   document.body.classList.remove('handed-off')
   iframe.classList.remove('fullscreen')
+  // Pull focus back to the host window so keyboard goes to host controls.
+  window.focus()
   // Reset traversal state so the user can step through the host portal again.
   handedOff = false
   prevHostInitialized = false
@@ -278,6 +280,9 @@ const frame = () => {
         handedOff = true
         document.body.classList.add('handed-off')
         iframe.classList.add('fullscreen')
+        // Move keyboard focus into the iframe so the user's first WASD lands
+        // on the iframe's controls, not on the now-inactive host listeners.
+        iframe.contentWindow?.focus()
         if (LOG) console.log('[host] traversal: handed off to iframe at', mirrored)
       }
     }
