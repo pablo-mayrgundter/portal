@@ -55,10 +55,12 @@ Requires Node 20+ and npm.
 
 ```bash
 npm install
-npm run dev      # vite dev server for the host-three app
-npm test         # vitest run on the portal-core geometry
-npm run check    # type-check all workspaces
-npm run build    # type-check + production build of all workspaces
+npm run dev          # alias for dev:three (the local-portal demo)
+npm run dev:three    # vite dev server for the host-three app (two local worlds, traversable portal)
+npm run dev:iframe   # vite dev server for the host-iframe-demo app (iframe-served portal)
+npm test             # vitest run on the portal-core geometry + endpoint contracts
+npm run check        # type-check all workspaces
+npm run build        # type-check + production build of all workspaces
 ```
 
 Controls in the demo:
