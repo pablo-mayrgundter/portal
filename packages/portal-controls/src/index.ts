@@ -120,10 +120,10 @@ const attachMobileWasdPad = (keys: Set<string>) => {
   pad.className = 'wasd-pad'
   pad.setAttribute('aria-label', 'Movement controls')
   pad.innerHTML = `
-    <button type="button" data-key="KeyW" class="wasd-btn wasd-up" aria-label="Forward">W</button>
-    <button type="button" data-key="KeyA" class="wasd-btn wasd-left" aria-label="Left">A</button>
-    <button type="button" data-key="KeyS" class="wasd-btn wasd-down" aria-label="Back">S</button>
-    <button type="button" data-key="KeyD" class="wasd-btn wasd-right" aria-label="Right">D</button>
+    <button type="button" data-key="KeyW" class="wasd-btn wasd-up" aria-label="Forward">↑</button>
+    <button type="button" data-key="KeyA" class="wasd-btn wasd-left" aria-label="Left">←</button>
+    <button type="button" data-key="KeyS" class="wasd-btn wasd-down" aria-label="Back">↓</button>
+    <button type="button" data-key="KeyD" class="wasd-btn wasd-right" aria-label="Right">→</button>
   `
 
   const style = document.createElement('style')
@@ -144,7 +144,8 @@ const attachMobileWasdPad = (keys: Set<string>) => {
       -webkit-user-select: none;
     }
     .wasd-btn {
-      font: 600 18px Inter, system-ui, sans-serif;
+      font: 600 22px Inter, system-ui, sans-serif;
+      line-height: 1;
       color: #d8e7ff;
       background: rgba(4, 9, 18, 0.55);
       border: 1px solid rgba(216, 231, 255, 0.25);
