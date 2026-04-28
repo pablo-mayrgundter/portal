@@ -58,18 +58,30 @@ controls.update(dt) → hostCamera moves
                                                   (loop running independently)
 
 if iframeEndpoint.isReady():
-  hostPose = (camera position + forward + up)
-  coupled  = couplePoseAcrossPortal(
-              hostPose,
-              {source: hostAnchor,
-               target: iframeAnchor})
+  hostPose  = (camera position + forward + up)
+  predicted = hostPose + (hostPose - prevHostPose) * 1
+              (extrapolate one frame ahead so iframe
+               renders for the time its response will
+               arrive — kills lag-induced parallax error
+               during fast rotation; default 1 frame,
+               toggleable with ?predict=N)
+  coupled   = couplePoseAcrossPortal(
+                predicted,
+                {source: hostAnchor,
+                 target: iframeAnchor})
 
   iframe.requestFrame({
     pose:       coupled,
     projection: hostCamera.projectionMatrix,    ──▶  receive 'portal:setPose'
     viewport:   {w, h},                              apply pose to its camera
     time                                             apply projection matrix
-  })                                                 render scene to OffscreenCanvas
+  })                                                 apply oblique near-plane clip
+                                                       aligned with iframe portal anchor
+                                                       (so camera-side geometry is
+                                                       culled at render time, not
+                                                       just by the host's depth-clip
+                                                       — see "why both clips" below)
+                                                     render scene to OffscreenCanvas
                                                      transferToImageBitmap → COLOR
                                                      scene.overrideMaterial = depthMaterial
                                                      render scene again
@@ -121,6 +133,8 @@ iframe.renderAsDestination(renderer)
        - stencilFunc = Equal, ref = 1
          (so this only writes pixels where the
           stencil mask wrote 1)
+       - vUv = (uv.x, 1 - uv.y)
+         (Y-flip; see "why the Y-flip" below)
        - sample iframeColor at vUv (sRGB → linear)
        - sample iframeDepth at vUv, unpack RGBA → [0,1]
        - reconstruct iframe-world position:
@@ -141,13 +155,17 @@ iframe.renderAsDestination(renderer)
    against the source render; if a source object is closer, the stencil bit was
    never written).
 3. **The iframe's reconstructed world position for that pixel is past the
-   destination plane** (compositor's depth-clip in iframe coords).
+   destination plane** (compositor's depth-clip in iframe coords) — and the
+   iframe's own oblique near-plane clip already culled most camera-side
+   geometry at rasterization time, so what arrives over the wire is already
+   restricted to past-portal geometry.
 
-That's exactly the same correctness invariant as the local case — stencil
-bounds *which screen pixels*, oblique clip bounds *which destination geometry*.
-The local case does the second test in a projection-matrix mod (oblique near
-plane); the iframe case does it per-pixel in the compositor using the depth
-shipped from iframe.
+Same correctness invariant as the local case. Both use an oblique near-plane
+clip aligned with the destination portal — local applies it to the directly-
+rendering portal camera, iframe applies it to its target-side camera. The host
+adds a per-pixel depth-clip in the compositor as a safety net for the iframe
+path (handles primitives that straddle the portal plane and absorbs any
+oblique-clip bias).
 
 ## Why each design choice
 
@@ -161,10 +179,38 @@ back as something the host can sample requires either an extra `gl.readPixels`
 Encoding depth into RGBA in a fragment shader and `transferToImageBitmap`-ing
 it uses the exact same fast path as color.
 
-**Why does the host clip, not the iframe?** Keeps the iframe protocol minimal
-— pose in, frame out. The iframe doesn't need to know what plane it's being
-clipped against. Cost: iframe shades some pixels the host immediately discards.
-Acceptable for the demo; could add an ROI hint later if it becomes painful.
+**Why both clips — iframe-side oblique AND host-side depth-clip?** The iframe's
+color+depth pass captures only the front-most hit per pixel. If a camera-side
+sphere occludes a far-side sphere, the iframe records *the camera-side sphere's*
+color and depth; the host's depth-clip then correctly discards that pixel, but
+the far sphere was never rendered, so the door pixel falls through to bg fill.
+The iframe-side oblique clip culls camera-side geometry at the rasterizer (NDC
+clip), so the front-most hit *is* the far-side geometry. The host's depth-clip
+stays in as a per-pixel safety net for primitives that straddle the plane and
+for any iframe-side bias slop.
+
+**Why the Y-flip in the compositor?** `transferToImageBitmap` produces an
+`ImageBitmap`, and browsers silently ignore `UNPACK_FLIP_Y_WEBGL` when uploading
+those (`createImageBitmap` accepts `imageOrientation: 'flipY'`, but
+`transferToImageBitmap` takes no options). Three.js's `texture.flipY = true` is
+documented as a no-op for `ImageBitmap` for the same reason. So the iframe's
+texture is upside-down relative to OpenGL convention; the compositor inverts
+`vUv.y` to compensate. Symptom when broken: iframe content appears to track
+gaze the wrong way during pitch — sphere ring rises when you look up.
+
+**Why predict the host pose?** The iframe takes ~1 RAF to respond, so the
+composite would otherwise apply iframe content rendered for the *previous*
+frame's pose against the *current* frame's stencil. Visible during fast
+rotation as iframe content sliding within the door. Sending a one-frame
+extrapolation cancels the lag at steady angular velocities.
+
+**Why `antialias: false` on the iframe renderer?** The depth pass packs
+`gl_FragCoord.z` into RGBA bytes. MSAA averages those *bytes* across coverage
+samples at silhouettes, which is not a homomorphism on the depth packing —
+decoded depth at every antialiased edge sat near the far plane and fully
+defeated the host's depth-clip. We accept jaggier color edges; a future fix is
+a non-MSAA `RenderTarget` for the depth pass while keeping AA on the color
+pass.
 
 **Why is the iframe DOM hidden offscreen instead of `display: none`?**
 `display: none` would prevent the iframe from running at all (some browsers
@@ -173,8 +219,27 @@ throttle hidden iframes aggressively). Offscreen positioning keeps it active.
 ## Latency model
 
 One round-trip per frame (host → iframe → host). Host doesn't await — it
-composites whatever pending bitmap arrived since last frame. Effective latency
-≈ one animation frame from input to portal view update.
+composites whatever pending bitmap arrived since last frame. Without prediction
+this is ~1 frame of rotation/translation lag visible during fast motion; with
+prediction enabled (default 1 frame), steady-velocity motion has effectively
+zero parallax error from lag (acceleration still produces residual error).
+
+## Diagnostic flags
+
+All accepted as URL query params on the host page. All gated; no perf cost when
+omitted.
+
+| Flag | Effect |
+| --- | --- |
+| `?debug=noclip` | Skip the host's per-pixel depth-clip discard. Useful to confirm whether the depth-clip is the cause of an artifact. |
+| `?debug=depth` | Visualize unpacked depth as grayscale. Bands or noise indicate a broken pack/unpack round-trip. |
+| `?debug=worldpos` | Visualize the reconstructed iframe-world position as `fract(p * 0.25 + 0.5)` RGB. Smooth gradients across geometry mean reconstruction is working. |
+| `?debug=clip` | Per-pixel depth-clip decision: green = would keep, red = would discard, brightness ∝ \|distFromPlane\|. |
+| `?compose=raw` | Bypass stencil + depth-clip entirely, blit the iframe's full framebuffer over the host viewport. Use to compare directly against `dev:three`. |
+| `?freeze=1` | Capture the coupled pose once on first ready, then keep sending the same pose. Lets you walk around while the iframe content is held fixed. |
+| `?predict=N` | Number of frames to extrapolate the host pose ahead. Default `1`. `?predict=0` disables. Higher values may help if the iframe runs slower than host. |
+| `?scene=grid` | Replace the iframe's swarm scene with a static cube lattice (no animation, predictable geometry) for cleaner alignment debugging. |
+| `?log=1` | 1 Hz console logging on both halves: pose round-trip, viewport, applied camera basis, view matrix. |
 
 ## Files of interest
 
