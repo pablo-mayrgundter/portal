@@ -8,6 +8,7 @@ import {
 } from '@portal/portal-core'
 import {
   makeIframeEndpoint,
+  makeIframeTarget,
   type CompositorDebugMode
 } from '@portal/portal-iframe'
 import {
@@ -122,6 +123,31 @@ const iframeEndpoint = makeIframeEndpoint({
   debugMode: DEBUG_MODE,
   composeRaw: COMPOSE_RAW
 })
+
+// Always-on destination service for the host scene. Inactive until the iframe
+// becomes the active page (after portal traversal); from then on it responds
+// to setPose from the iframe with worldA color+depth bitmaps so the iframe
+// can composite the portal-back view through its own stencil mask.
+//
+// Sends portal:ready to the iframe immediately; iframe stashes the host's
+// anchor + background so it doesn't need to hardcode them.
+const hostDestinationServiceTarget = iframe.contentWindow
+if (hostDestinationServiceTarget) {
+  const hostDestinationService = makeIframeTarget({
+    scene: hostScene,
+    anchor: hostEndpoint.getAnchor(),
+    outputTarget: hostDestinationServiceTarget,
+    inputFilter: hostDestinationServiceTarget,
+    log: LOG
+  })
+  // Wait for the iframe document to load before announcing — postMessage to a
+  // not-yet-loaded contentWindow can race with the iframe's listener setup.
+  if (iframe.contentDocument?.readyState === 'complete') {
+    hostDestinationService.start()
+  } else {
+    iframe.addEventListener('load', () => hostDestinationService.start(), { once: true })
+  }
+}
 
 if (DEBUG_MODE !== 'off') console.log('[host] compositor debug mode:', DEBUG_MODE)
 if (COMPOSE_RAW) console.log('[host] compose=raw: bypassing stencil + depth-clip')

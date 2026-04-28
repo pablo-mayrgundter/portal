@@ -1,8 +1,13 @@
 import * as THREE from 'three'
-import { makeIframeTarget } from '@portal/portal-iframe'
+import { makeIframeEndpoint, makeIframeTarget } from '@portal/portal-iframe'
+import {
+  makePortalPlane,
+  makePortalStencilMask
+} from '@portal/portal-three'
 import {
   couplePoseAcrossPortal,
   intersectSegmentWithDoor,
+  type Mat4,
   type PortalAnchor,
   type PortalMessage,
   type PortalTraverseMessage
@@ -143,6 +148,25 @@ const destinationTarget = makeIframeTarget({
 })
 destinationTarget.start()
 
+// Eagerly create the peer endpoint to the parent (host). Built at module init
+// — even in destination mode it's just listening — so we don't miss the host's
+// portal:ready announcement that arrives once the host destination service
+// starts up after our document loads.
+const hostPeerEndpoint = makeIframeEndpoint({
+  peerWindow: parent,
+  peerSource: parent,
+  iframeOrigin: '*'
+})
+
+// Invisible portal mesh placed at the iframe portal anchor's pose. Used by
+// the stencil mask machinery (which expects an Object3D so it can read world-
+// space pose). The mesh's rotation accounts for anchor.normal = (0, 0, -1).
+const PORTAL_HALF_SIZE = new THREE.Vector2(2.6, 3.2)
+const iframePortalMesh = makePortalPlane(PORTAL_HALF_SIZE)
+iframePortalMesh.position.set(anchor.position[0], anchor.position[1], anchor.position[2])
+iframePortalMesh.rotation.y = Math.PI
+bundle.scene.add(iframePortalMesh)
+
 // ---------------------------------------------------------------------------
 // Source-mode rendering (activated on portal:traverse). Builds a visible
 // canvas + controls + frame loop in the iframe document so the user can drive
@@ -158,8 +182,13 @@ let sourceRaf = 0
 const sourceCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
 let sourceRenderer: THREE.WebGLRenderer | null = null
 let sourceControls: ReturnType<typeof attachBasicFlyControls> | null = null
+let sourceStencilMask: ReturnType<typeof makePortalStencilMask> | null = null
 const sourceClock = new THREE.Clock()
 const sourceLookTarget = new THREE.Vector3()
+const sourceCamPos = new THREE.Vector3()
+const sourceCamFwd = new THREE.Vector3()
+const sourceCamUp = new THREE.Vector3()
+const sourceStencilBg = new THREE.Color()
 
 const onSourceResize = (): void => {
   if (!sourceRenderer) return
@@ -191,6 +220,14 @@ const sourceFrame = (): void => {
   if (!sourceMode || !sourceRenderer || !sourceControls) return
   bundle.tick?.(sourceClock.elapsedTime)
   sourceControls.update(sourceClock.getDelta())
+  const time = sourceClock.elapsedTime
+
+  // Pull anchor from peer if we have it (host announced via portal:ready),
+  // else fall back to our hardcoded inference. Used both for reverse-traversal
+  // mirroring and for the forward setPose ask.
+  const hostAnchorData = hostPeerEndpoint.isReady()
+    ? hostPeerEndpoint.getAnchor()
+    : inferredHostAnchor
 
   // Reverse traversal: if the user walks back through the iframe portal door
   // (in worldB coords), mirror the pose back into worldA and tell the host to
@@ -214,7 +251,7 @@ const sourceFrame = (): void => {
           forward: [fwd.x, fwd.y, fwd.z],
           up: [up.x, up.y, up.z]
         },
-        { source: anchor, target: inferredHostAnchor }
+        { source: anchor, target: hostAnchorData }
       )
       const msg: PortalTraverseMessage = { type: 'portal:traverse', pose: mirrored }
       parent.postMessage(msg, '*')
@@ -234,7 +271,49 @@ const sourceFrame = (): void => {
   prevSourceWorldPos.copy(sourceCamera.position)
   prevSourceInitialized = true
 
+  // --- Portal-back: ask host for worldA frames so we can composite them
+  // through our stencil mask at the iframe portal door.
+  if (hostPeerEndpoint.isReady()) {
+    sourceCamera.getWorldPosition(sourceCamPos)
+    sourceCamFwd.set(0, 0, -1).applyQuaternion(sourceCamera.quaternion)
+    sourceCamUp.set(0, 1, 0).applyQuaternion(sourceCamera.quaternion)
+    const coupled = couplePoseAcrossPortal(
+      {
+        position: [sourceCamPos.x, sourceCamPos.y, sourceCamPos.z],
+        forward: [sourceCamFwd.x, sourceCamFwd.y, sourceCamFwd.z],
+        up: [sourceCamUp.x, sourceCamUp.y, sourceCamUp.z]
+      },
+      { source: anchor, target: hostAnchorData }
+    )
+    const projection: Mat4 = Array.from(sourceCamera.projectionMatrix.elements)
+    const pixelRatio = sourceRenderer.getPixelRatio()
+    const w = Math.max(1, Math.floor(window.innerWidth * pixelRatio))
+    const h = Math.max(1, Math.floor(window.innerHeight * pixelRatio))
+    hostPeerEndpoint.requestFrame({
+      pose: coupled,
+      projection,
+      viewport: { width: w, height: h },
+      time
+    })
+  }
+
+  // --- Render: source scene (worldB) → stencil mask at iframe portal →
+  // composite host frames (worldA) through stencil.
+  sourceRenderer.setRenderTarget(null)
+  sourceRenderer.clear(true, true, true)
   sourceRenderer.render(bundle.scene, sourceCamera)
+
+  if (sourceStencilMask && hostPeerEndpoint.isReady()) {
+    const tbg = hostPeerEndpoint.getBackground()
+    sourceStencilBg.setRGB(tbg.r, tbg.g, tbg.b)
+    sourceStencilMask.update(iframePortalMesh, sourceCamera, sourceStencilBg)
+    sourceRenderer.render(sourceStencilMask.scene, sourceStencilMask.camera)
+    sourceRenderer.clearDepth()
+    if (hostPeerEndpoint.hasFrame()) {
+      hostPeerEndpoint.renderAsDestination(sourceRenderer)
+    }
+  }
+
   sourceRaf = requestAnimationFrame(sourceFrame)
 }
 
@@ -248,9 +327,17 @@ const activateSourceMode = (initialPose: {
   destinationTarget.stop()
 
   // Build the visible-canvas renderer lazily so we don't pay for it in the
-  // common case where traversal never happens.
-  sourceRenderer = new THREE.WebGLRenderer({ canvas: displayCanvas, antialias: true })
+  // common case where traversal never happens. stencil:true is required for
+  // the portal-back compositor; autoClear=false because we drive clearing
+  // manually around the source render + stencil mask + composite passes.
+  sourceRenderer = new THREE.WebGLRenderer({
+    canvas: displayCanvas,
+    antialias: true,
+    stencil: true
+  })
   sourceRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  sourceRenderer.autoClear = false
+  sourceStencilMask = makePortalStencilMask()
 
   // Apply initial camera pose (already in iframe-world coords — host mirrored
   // it across the portal pair before posting).
