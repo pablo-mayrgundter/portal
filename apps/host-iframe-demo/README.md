@@ -228,10 +228,22 @@ throttle hidden iframes aggressively). Offscreen positioning keeps it active.
 ## Latency model
 
 One round-trip per frame (host → iframe → host). Host doesn't await — it
-composites whatever pending bitmap arrived since last frame. Without prediction
-this is ~1 frame of rotation/translation lag visible during fast motion; with
-prediction enabled (default 1 frame), steady-velocity motion has effectively
-zero parallax error from lag (acceleration still produces residual error).
+composites whatever pending bitmap arrived since last frame.
+
+The iframe renders **synchronously in its `message` handler**, not on its own
+RAF. The iframe is offscreen — it's a render service, not a display surface —
+so there's nothing to vsync to, and waiting for the next RAF would burn up to
+a full frame of round-trip latency. Bonus: this also bypasses browser RAF
+throttling, which can hit hidden / occluded iframes hard (some browsers drop
+non-visible iframe RAFs to 1 Hz).
+
+Net round-trip is dominated by `transferToImageBitmap` × 2 + `postMessage` ×
+2, typically a few ms. With prediction enabled (default 1 frame), steady-
+velocity motion has effectively zero parallax error from lag; acceleration
+still produces a residual error proportional to acceleration × frame². If
+strafe still feels laggier than forward/back motion despite prediction, the
+remainder is geometric: lateral motion produces ~2× more NDC content delta
+per meter than forward motion, so the same residual lag is more visible.
 
 ## Diagnostic flags
 

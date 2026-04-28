@@ -153,8 +153,6 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const blitScene = new THREE.Scene()
   const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
-  let pendingPose: PortalSetPoseMessage | null = null
-  let raf = 0
   let running = false
   let lastLog = 0
   const lookTarget = new THREE.Vector3()
@@ -173,9 +171,18 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   }
 
   const onMessage = (ev: MessageEvent): void => {
+    if (!running) return
     const msg = ev.data as PortalMessage
     if (!msg || typeof msg !== 'object') return
-    if (msg.type === 'portal:setPose') pendingPose = msg
+    if (msg.type === 'portal:setPose') {
+      // Render synchronously in the message handler rather than waiting for the
+      // next RAF. The iframe is a render service (offscreen), not a display
+      // surface — there's nothing to vsync to. Bypassing RAF saves up to a
+      // full frame of round-trip latency AND avoids browser throttling that
+      // applies to RAF in non-visible iframes. msg.time still drives any
+      // animation tick, so deterministic motion stays in sync with the host.
+      renderFrame(msg)
+    }
   }
 
   const renderFrame = (msg: PortalSetPoseMessage): void => {
@@ -266,27 +273,15 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     }
   }
 
-  const loop = (): void => {
-    if (!running) return
-    if (pendingPose) {
-      const next = pendingPose
-      pendingPose = null
-      renderFrame(next)
-    }
-    raf = requestAnimationFrame(loop)
-  }
-
   return {
     start() {
       if (running) return
       running = true
       window.addEventListener('message', onMessage)
       sendReady()
-      raf = requestAnimationFrame(loop)
     },
     stop() {
       running = false
-      cancelAnimationFrame(raf)
       window.removeEventListener('message', onMessage)
     }
   }
