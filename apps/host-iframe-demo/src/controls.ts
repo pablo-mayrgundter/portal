@@ -87,5 +87,18 @@ export const attachBasicFlyControls = (camera: THREE.PerspectiveCamera, dom: HTM
     dragging = false
   }
 
-  return { update, setOrientationFromForward, clearKeys }
+  // Snapshot / restore the pressed-keys set across portal traversal. The
+  // sender snapshots before posting; the receiver applies after focus shifts
+  // so a key the user is HOLDING when they cross the portal stays "held" in
+  // the new active page's controls — no need to release+re-press to resume
+  // motion. Without this, the receiver's keydown listener missed the
+  // (already-fired) initial keydown, and only the OS auto-repeat (~500ms
+  // delay) would eventually re-deliver it.
+  const getKeys = (): string[] => Array.from(keys)
+  const setKeys = (k: readonly string[]): void => {
+    keys.clear()
+    for (const code of k) keys.add(code)
+  }
+
+  return { update, setOrientationFromForward, clearKeys, getKeys, setKeys }
 }

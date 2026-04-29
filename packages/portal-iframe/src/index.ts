@@ -109,14 +109,25 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   sceneRT.depthTexture = new THREE.DepthTexture(1, 1)
   sceneRT.depthTexture.type = THREE.UnsignedIntType
 
-  // Color blit: sample the RT's color attachment and write to canvas.
-  // Applies linearToSRGB because the scene render targets a non-sRGB RT (so
-  // material outputs are linear) but the canvas is treated as sRGB by the
-  // browser. Without this encoding the iframe-as-destination view ends up
-  // visibly darker than the iframe-as-source view (which renders direct-to-
-  // canvas via standard materials' colorspace_fragment).
+  // Color blit: sample the RT's color attachment, run FXAA, and write to
+  // canvas with linearToSRGB encoding. FXAA recovers most of the perceived
+  // anti-aliasing quality lost when the scene RT had to be created as
+  // non-MSAA (WebGL2 depth textures aren't compatible with multisampled
+  // FBOs without extension gymnastics, and we need a sampleable depth
+  // attachment for the depth blit). Done here in the same pass that writes
+  // to canvas so we don't pay a separate fullscreen pass.
+  //
+  // FXAA is run on sRGB-encoded samples (perceptually-linear luma), which
+  // is the correct domain for edge detection — running it on raw linear
+  // values under-anti-aliases dark transitions because low values get
+  // stretched by the sRGB curve. linearToSRGB is applied per sample, not
+  // once at the end, so each contribution to the final pixel is in the
+  // same color space as the luma weighting.
   const colorBlitMaterial = new THREE.ShaderMaterial({
-    uniforms: { tex: { value: null as THREE.Texture | null } },
+    uniforms: {
+      tex: { value: null as THREE.Texture | null },
+      invResolution: { value: new THREE.Vector2(1, 1) }
+    },
     vertexShader: `
       varying vec2 vUv;
       void main() {
@@ -126,7 +137,9 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     `,
     fragmentShader: `
       uniform sampler2D tex;
+      uniform vec2 invResolution;
       varying vec2 vUv;
+
       vec3 linearToSRGB(vec3 v) {
         return mix(
           pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
@@ -134,9 +147,65 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
           vec3(lessThanEqual(v, vec3(0.0031308)))
         );
       }
+
+      vec3 sampleSRGB(vec2 uv) {
+        return linearToSRGB(texture2D(tex, uv).rgb);
+      }
+
+      // Lottes-2011 "console" FXAA. Tuned for cheapness over precision —
+      // five corner samples for edge detection, four extra samples along the
+      // detected edge direction, no sub-pixel quality search.
       void main() {
-        vec4 c = texture2D(tex, vUv);
-        gl_FragColor = vec4(linearToSRGB(c.rgb), c.a);
+        const float REDUCE_MIN = 1.0 / 128.0;
+        const float REDUCE_MUL = 1.0 / 8.0;
+        const float SPAN_MAX = 8.0;
+        const vec3 LUMA = vec3(0.299, 0.587, 0.114);
+
+        vec3 rgbNW = sampleSRGB(vUv + vec2(-1.0, -1.0) * invResolution);
+        vec3 rgbNE = sampleSRGB(vUv + vec2( 1.0, -1.0) * invResolution);
+        vec3 rgbSW = sampleSRGB(vUv + vec2(-1.0,  1.0) * invResolution);
+        vec3 rgbSE = sampleSRGB(vUv + vec2( 1.0,  1.0) * invResolution);
+        vec3 rgbM  = sampleSRGB(vUv);
+
+        float lumaNW = dot(rgbNW, LUMA);
+        float lumaNE = dot(rgbNE, LUMA);
+        float lumaSW = dot(rgbSW, LUMA);
+        float lumaSE = dot(rgbSE, LUMA);
+        float lumaM  = dot(rgbM,  LUMA);
+
+        float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+        float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+        // Edge direction = perpendicular to local luma gradient, in pixel
+        // space. Sign convention is irrelevant since we sample +/- along it.
+        vec2 dir;
+        dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+        dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+        float dirReduce = max(
+          (lumaNW + lumaNE + lumaSW + lumaSE) * 0.25 * REDUCE_MUL,
+          REDUCE_MIN
+        );
+        float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+        dir = clamp(dir * rcpDirMin, -SPAN_MAX, SPAN_MAX) * invResolution;
+
+        // Two-tap inner pair (rgbA) and four-tap outer blend (rgbB). If the
+        // longer-distance blend wanders outside the local luma range — i.e.
+        // we picked up a dissimilar feature past the edge — fall back to the
+        // safer inner pair.
+        vec3 rgbA = 0.5 * (
+          sampleSRGB(vUv + dir * (1.0 / 3.0 - 0.5)) +
+          sampleSRGB(vUv + dir * (2.0 / 3.0 - 0.5))
+        );
+        vec3 rgbB = rgbA * 0.5 + 0.25 * (
+          sampleSRGB(vUv + dir * -0.5) +
+          sampleSRGB(vUv + dir *  0.5)
+        );
+
+        float lumaB = dot(rgbB, LUMA);
+        vec3 outRgb = (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
+
+        gl_FragColor = vec4(outRgb, 1.0);
       }
     `,
     depthTest: false,
@@ -235,6 +304,10 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       offscreen.height = viewport.height
       renderer.setSize(viewport.width, viewport.height, false)
       sceneRT.setSize(viewport.width, viewport.height)
+      colorBlitMaterial.uniforms.invResolution.value.set(
+        1 / viewport.width,
+        1 / viewport.height
+      )
     }
 
     camera.position.set(pose.position[0], pose.position[1], pose.position[2])
@@ -334,14 +407,24 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 
 const compositorVertexShader = `
 varying vec2 vUv;
+varying vec2 vUvNdc;
 void main() {
-  // Flip Y because the iframe's color + depth bitmaps come from
-  // OffscreenCanvas.transferToImageBitmap, and ImageBitmap-sourced textures
-  // ignore UNPACK_FLIP_Y_WEBGL (it's silently dropped by browsers + documented
-  // as such by three.js). Without this flip the sampler returns iframe NDC.y =
-  // -host_NDC.y, which manifests as iframe content appearing to "track gaze"
-  // in the opposite direction of the door when the host pitches.
+  // vUv: y-flipped, used only for SAMPLING the iframe color + depth bitmaps.
+  // ImageBitmap-sourced textures ignore UNPACK_FLIP_Y_WEBGL (browsers silently
+  // drop it; three.js documents flipY as a no-op for ImageBitmap), so the
+  // bitmap is upside-down relative to GL convention. Without this flip the
+  // sampler returns iframe NDC.y = -host_NDC.y, which manifests as iframe
+  // content appearing to "track gaze" in the opposite direction during pitch.
   vUv = vec2(uv.x, 1.0 - uv.y);
+  // vUvNdc: un-flipped, used for NDC RECONSTRUCTION (depth-clip worldPos).
+  // The iframe rendered with standard NDC orientation, so the depth value
+  // sampled at vUv corresponds to the original render's NDC.y = uv.y * 2 - 1
+  // — NOT the flipped vUv.y. Using the flipped vUv here would produce a
+  // worldPos with wrong y/z (after view-inverse and the oblique projection's
+  // y-z coupling), often landing on the camera-side of the portal plane and
+  // getting falsely discarded by the depth-clip — visible as the bottoms of
+  // balls being clipped near the portal in A-to-B.
+  vUvNdc = uv;
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }
 `
@@ -357,6 +440,7 @@ uniform vec3 destinationKeptNormal;
 uniform int debugMode;
 
 varying vec2 vUv;
+varying vec2 vUvNdc;
 
 vec3 linearToSRGB(vec3 v) {
   return mix(
@@ -376,7 +460,7 @@ void main() {
     return;
   }
 
-  vec4 ndc = vec4(vUv * 2.0 - 1.0, depth01 * 2.0 - 1.0, 1.0);
+  vec4 ndc = vec4(vUvNdc * 2.0 - 1.0, depth01 * 2.0 - 1.0, 1.0);
   vec4 worldPos4 = iframeViewProjectionInverse * ndc;
   vec3 worldPos = worldPos4.xyz / worldPos4.w;
 
@@ -480,6 +564,12 @@ export type IframePortalEndpoint = PortalEndpoint & {
   }): void
   /** Composite the latest received frame onto the canvas (stencil-tested + depth-clipped). */
   renderAsDestination(renderer: THREE.WebGLRenderer): void
+  /**
+   * Compile the compositor's GLSL programs against the supplied renderer so
+   * the first `renderAsDestination` call doesn't pay program-link cost as a
+   * visible stutter. Call once at startup, before any frames have arrived.
+   */
+  prewarm(renderer: THREE.WebGLRenderer): void
 }
 
 export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEndpoint => {
@@ -626,6 +716,9 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
       )
 
       renderer.render(compositorScene, compositorCamera)
+    },
+    prewarm(renderer) {
+      renderer.compile(compositorScene, compositorCamera)
     }
   }
 }

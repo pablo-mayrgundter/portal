@@ -1,5 +1,9 @@
 import * as THREE from 'three'
-import { makeIframeEndpoint, makeIframeTarget } from '@portal/portal-iframe'
+import {
+  makeIframeEndpoint,
+  makeIframeTarget,
+  type CompositorDebugMode
+} from '@portal/portal-iframe'
 import {
   makePortalPlane,
   makePortalStencilMask
@@ -18,6 +22,10 @@ import { attachBasicFlyControls } from './controls'
 const params = new URLSearchParams(location.search)
 const LOG = params.get('log') === '1'
 const SCENE = params.get('scene') ?? 'swarm'
+// Same debug flag as the host, applied to the iframe's portal-back compositor
+// (worldA-through-the-iframe-portal view). Lets us diagnose the B-to-A side
+// the same way ?debug=clip works for A-to-B on the host.
+const DEBUG_MODE = (params.get('debug') ?? 'off') as CompositorDebugMode
 
 // Portal anchor: at the origin, normal pointing toward -z. The host will mirror
 // its viewer pose across this anchor so that what the host sees through the
@@ -170,7 +178,8 @@ destinationTarget.start()
 const hostPeerEndpoint = makeIframeEndpoint({
   peerWindow: parent,
   peerSource: parent,
-  iframeOrigin: '*'
+  iframeOrigin: '*',
+  debugMode: DEBUG_MODE
 })
 
 // Invisible portal mesh placed at the iframe portal anchor's pose. Used by
@@ -227,6 +236,11 @@ const warmCanvasSize = (): void => {
 warmCanvasSize()
 sourceRenderer.compile(bundle.scene, sourceCamera)
 sourceRenderer.compile(sourceStencilMask.scene, sourceStencilMask.camera)
+// Compile the portal-back compositor too. Without this, the first frame
+// after activateSourceMode that has a host-frame available pays the
+// compositor's program-link cost — appears as a one-frame stutter on the
+// first reverse composite, layered on top of the traversal handoff.
+hostPeerEndpoint.prewarm(sourceRenderer)
 
 // Build controls eagerly too, alongside the renderer/stencil. This avoids:
 //  - re-attaching event listeners on every forward traversal (would leak)
@@ -305,7 +319,13 @@ const sourceFrame = (): void => {
         },
         { source: anchor, target: hostAnchorData }
       )
-      const msg: PortalTraverseMessage = { type: 'portal:traverse', pose: mirrored }
+      const msg: PortalTraverseMessage = {
+        type: 'portal:traverse',
+        pose: mirrored,
+        // Snapshot held keys so the host's controls can pick up uninterrupted
+        // motion after the focus shift back.
+        pressedKeys: sourceControls.getKeys()
+      }
       parent.postMessage(msg, '*')
       sourceMode = false
       cancelAnimationFrame(sourceRaf)
@@ -313,7 +333,15 @@ const sourceFrame = (): void => {
       // focus now), so iframe never sees it and would otherwise come back
       // from a future forward traversal with stale movement.
       sourceControls?.clearKeys()
-      document.body.classList.remove('source-mode')
+      // Deliberately DO NOT remove the .source-mode class here. If we do,
+      // #display flips to display:none and the iframe's .info welcome text
+      // pops in for the brief gap between this handler and the host's CSS
+      // swap (handed-off + fullscreen removal) — visible as a jarring
+      // "info-page flash" mid-traversal. Leaving #display visible means
+      // the user sees the iframe's last rendered frame (worldB + portal-
+      // back) until the host's CSS swap sends the iframe back offscreen,
+      // which is much smoother. activateSourceMode's classList.add is
+      // idempotent so the next forward traversal is fine.
       // Restart destination service so the host (now active again) can ask
       // for portal-content frames.
       destinationTarget.start()
@@ -342,9 +370,14 @@ const sourceFrame = (): void => {
       { source: anchor, target: hostAnchorData }
     )
     const projection: Mat4 = Array.from(sourceCamera.projectionMatrix.elements)
-    const pixelRatio = sourceRenderer.getPixelRatio()
-    const w = Math.max(1, Math.floor(window.innerWidth * pixelRatio))
-    const h = Math.max(1, Math.floor(window.innerHeight * pixelRatio))
+    // Drive the request-viewport from the renderer's actual backing buffer,
+    // not window.innerWidth/innerHeight. Right after activateSourceMode the
+    // iframe's window may still report its pre-swap (1×1) dimensions until
+    // the layout-driven 'resize' event fires; the renderer was already sized
+    // to the host-supplied viewport, so its canvas attributes are the source
+    // of truth.
+    const w = Math.max(1, sourceRenderer.domElement.width)
+    const h = Math.max(1, sourceRenderer.domElement.height)
     hostPeerEndpoint.requestFrame({
       pose: coupled,
       projection,
@@ -359,15 +392,18 @@ const sourceFrame = (): void => {
   sourceRenderer.clear(true, true, true)
   sourceRenderer.render(bundle.scene, sourceCamera)
 
-  if (hostPeerEndpoint.isReady()) {
+  // Gate the stencil mask on hasFrame() so the door doesn't appear as a flat
+  // bg-color rectangle for the first 1–2 frames before the first portal:frame
+  // arrives from the host. Until then, worldB content shows where the door
+  // will eventually be — perceived as the door "opening" once content is
+  // available, vs. a flat-color flash that pops to real content.
+  if (hostPeerEndpoint.isReady() && hostPeerEndpoint.hasFrame()) {
     const tbg = hostPeerEndpoint.getBackground()
     sourceStencilBg.setRGB(tbg.r, tbg.g, tbg.b)
     sourceStencilMask.update(iframePortalMesh, sourceCamera, sourceStencilBg)
     sourceRenderer.render(sourceStencilMask.scene, sourceStencilMask.camera)
     sourceRenderer.clearDepth()
-    if (hostPeerEndpoint.hasFrame()) {
-      hostPeerEndpoint.renderAsDestination(sourceRenderer)
-    }
+    hostPeerEndpoint.renderAsDestination(sourceRenderer)
   }
 
   sourceRaf = requestAnimationFrame(sourceFrame)
@@ -377,6 +413,8 @@ const activateSourceMode = (initialPose: {
   position: [number, number, number]
   forward?: [number, number, number]
   up?: [number, number, number]
+  pressedKeys?: string[]
+  viewport?: { width: number; height: number }
 }): void => {
   if (sourceMode) return
   // Tear down destination mode — no more bitmap sends.
@@ -406,9 +444,25 @@ const activateSourceMode = (initialPose: {
     )
   }
   // Drop any keys that might be lingering from a previous source-mode session
-  // (or from the destination-mode period if any sneaky keydown leaked through).
+  // (or from the destination-mode period if any sneaky keydown leaked through),
+  // then adopt the keys the host was holding at the moment of crossing so the
+  // user's WASD motion continues uninterrupted across the focus shift.
   sourceControls.clearKeys()
-  onSourceResize()
+  if (Array.isArray(initialPose.pressedKeys)) {
+    sourceControls.setKeys(initialPose.pressedKeys)
+  }
+  // Size the renderer to the host-supplied viewport, NOT window.innerWidth.
+  // While we're still an offscreen 1×1 iframe, window.innerWidth = 1, so
+  // calling onSourceResize() here would set the renderer to 1×1; the CSS
+  // swap then stretches a one-pixel backing buffer over the entire screen
+  // for the brief window before the iframe's own resize event fires.
+  // initialPose.viewport carries the host's window dimensions so the
+  // pre-render below renders at the eventual fullscreen size.
+  const initW = initialPose.viewport?.width ?? window.innerWidth
+  const initH = initialPose.viewport?.height ?? window.innerHeight
+  sourceRenderer.setSize(initW, initH)
+  sourceCamera.aspect = initW / initH
+  sourceCamera.updateProjectionMatrix()
 
   // Render the first source-mode frame SYNCHRONOUSLY before showing #display.
   // Without this, body.source-mode reveals an empty canvas (dark page bg
@@ -444,6 +498,10 @@ window.addEventListener('message', (ev) => {
   const msg = ev.data as PortalMessage
   if (!msg || typeof msg !== 'object') return
   if (msg.type === 'portal:traverse') {
-    activateSourceMode(msg.pose as Parameters<typeof activateSourceMode>[0])
+    activateSourceMode({
+      ...(msg.pose as Parameters<typeof activateSourceMode>[0]),
+      pressedKeys: msg.pressedKeys,
+      viewport: msg.viewport
+    })
   }
 })

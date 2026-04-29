@@ -94,7 +94,7 @@ dirLight.position.set(3, 6, 2)
 hostScene.add(dirLight)
 const hostFloor = new THREE.Mesh(
   new THREE.PlaneGeometry(18, 18),
-  new THREE.MeshStandardMaterial({ color: '#1b2a3f', roughness: 0.95 })
+  new THREE.MeshStandardMaterial({ color: '#1b2a3f', roughness: 0.95, metalness: 0.03 })
 )
 hostFloor.rotation.x = -Math.PI / 2
 hostScene.add(hostFloor)
@@ -123,6 +123,10 @@ const iframeEndpoint = makeIframeEndpoint({
   debugMode: DEBUG_MODE,
   composeRaw: COMPOSE_RAW
 })
+// Pre-compile the compositor's GLSL programs so the first portal:frame
+// arriving from the iframe doesn't pay program-link cost as a startup
+// stutter when it lands on the canvas.
+iframeEndpoint.prewarm(renderer)
 
 // Always-on destination service for the host scene. Inactive until the iframe
 // becomes the active page (after portal traversal); from then on it responds
@@ -203,7 +207,21 @@ let handedOff = false
 
 const sendTraverse = (mirroredPose: PortalPose): void => {
   if (!iframe.contentWindow) return
-  const msg: PortalTraverseMessage = { type: 'portal:traverse', pose: mirroredPose }
+  const msg: PortalTraverseMessage = {
+    type: 'portal:traverse',
+    pose: mirroredPose,
+    // Snapshot the keys the user is currently holding so the iframe's
+    // controls can pre-populate its keys-set after the focus shift —
+    // otherwise a held W (etc.) at crossing would stop motion until the
+    // OS auto-repeat eventually re-delivers the keydown.
+    pressedKeys: controls.getKeys(),
+    // Tell the iframe what size it WILL be once the host applies the
+    // fullscreen CSS swap. The iframe's own window.innerWidth is currently
+    // 1 (it's positioned offscreen at 1×1) but its renderer needs the
+    // eventual viewport dims for the synchronous pre-render — otherwise the
+    // CSS swap stretches a 1-pixel backing buffer over the whole screen.
+    viewport: { width: window.innerWidth, height: window.innerHeight }
+  }
   iframe.contentWindow.postMessage(msg, '*')
 }
 
@@ -255,21 +273,36 @@ window.addEventListener('message', (ev) => {
     const f = new THREE.Vector3(pose.forward[0], pose.forward[1], pose.forward[2])
     controls.setOrientationFromForward?.(f)
   }
-  // Render the host scene at the new pose synchronously BEFORE unhiding it,
-  // so the user doesn't see the host canvas's stale (pre-traversal) content
-  // for one frame while waiting for the next RAF.
+  // Render a full host frame (worldA + iframe-portal composite) synchronously
+  // BEFORE unhiding the host canvas, so the user sees a complete view on the
+  // first post-reverse frame instead of:
+  //   - one frame of host's stale (pre-traversal) content, or
+  //   - one frame of worldA WITHOUT the iframe portal, until RAF resumes.
+  // The iframe composite uses iframeEndpoint's most recently uploaded frame
+  // (stale by the duration of the iframe-source session) — visibly imperfect
+  // for one frame, but much smoother than the door pops-in alternative.
   hostCamera.updateMatrixWorld(true)
   renderer.setRenderTarget(null)
   renderer.clear(true, true, true)
   hostEndpoint.renderAsSource(renderer, hostCamera)
+  if (iframeEndpoint.isReady() && iframeEndpoint.hasFrame()) {
+    const tbg = iframeEndpoint.getBackground()
+    stencilBg.setRGB(tbg.r, tbg.g, tbg.b)
+    stencilMask.update(hostAnchor, hostCamera, stencilBg)
+    renderer.render(stencilMask.scene, stencilMask.camera)
+    renderer.clearDepth()
+    iframeEndpoint.renderAsDestination(renderer)
+  }
 
   document.body.classList.remove('handed-off')
   iframe.classList.remove('fullscreen')
   // Pull focus back to the host window so keyboard goes to host controls.
   window.focus()
   // Drop stale keys tracked while host was inactive (we never got the keyup
-  // events because focus was on the iframe).
+  // events because focus was on the iframe), then adopt the keys the iframe
+  // was holding at the moment of reverse-crossing so motion is continuous.
   controls.clearKeys()
+  if (Array.isArray(data.pressedKeys)) controls.setKeys(data.pressedKeys)
   // Reset traversal state so the user can step through the host portal again.
   handedOff = false
   prevHostInitialized = false
