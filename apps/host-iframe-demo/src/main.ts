@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import {
   couplePoseAcrossPortal,
+  decodeCameraPose,
+  encodeCameraPose,
   type Mat4,
   type PortalPose,
   type PortalTraverseMessage,
@@ -96,6 +98,20 @@ app.appendChild(renderer.domElement)
 const hostCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 200)
 hostCamera.position.set(0, 1.6, 5.5)
 
+// ?pose=... permalink: drop into a reproducible viewing position. Useful for
+// filing parallax/alignment bugs (paste a permalink, see exactly the same
+// pose) and for A/B comparing transports across the iframe + headless demos
+// at an identical pose. Press 'P' below to update the URL with the current
+// pose and copy it to the clipboard.
+const initialPose = decodeCameraPose(params.get('pose'))
+if (initialPose) {
+  hostCamera.position.set(
+    initialPose.position[0],
+    initialPose.position[1],
+    initialPose.position[2]
+  )
+}
+
 // Source scene: a simple "world A"-style room with blue cubes.
 const hostScene = new THREE.Scene()
 hostScene.background = new THREE.Color('#101826')
@@ -173,6 +189,39 @@ if (PREDICT !== 1) console.log('[host] predict =', PREDICT, '(frames ahead)')
 const stencilMask = makePortalStencilMask()
 
 const controls = attachBasicFlyControls(hostCamera, renderer.domElement)
+
+// Apply ?pose= forward direction AFTER controls exist so the controls' yaw/
+// pitch state matches the camera quaternion — otherwise the next mouse drag
+// would snap the camera back to the controls' default orientation.
+if (initialPose) {
+  controls.setOrientationFromForward(
+    new THREE.Vector3(
+      initialPose.forward[0],
+      initialPose.forward[1],
+      initialPose.forward[2]
+    )
+  )
+}
+
+// Press P (or Shift+P) to copy a permalink encoding the current host camera
+// pose. Updates the URL via replaceState so a refresh lands on the same view,
+// and writes the full URL to the clipboard. Includes the iframe target's
+// pose by NOT serializing it — the iframe is fully determined by the host
+// pose via couplePoseAcrossPortal, so a single host-pose permalink is enough.
+const camForward = new THREE.Vector3()
+window.addEventListener('keydown', (ev) => {
+  if (ev.code !== 'KeyP' || ev.metaKey || ev.ctrlKey || ev.altKey) return
+  camForward.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
+  const encoded = encodeCameraPose({
+    position: [hostCamera.position.x, hostCamera.position.y, hostCamera.position.z],
+    forward: [camForward.x, camForward.y, camForward.z]
+  })
+  const url = new URL(location.href)
+  url.searchParams.set('pose', encoded)
+  history.replaceState(null, '', url.toString())
+  navigator.clipboard?.writeText(url.toString()).catch(() => {})
+  console.log('[host] permalink:', url.toString())
+})
 
 const onResize = () => {
   const w = window.innerWidth

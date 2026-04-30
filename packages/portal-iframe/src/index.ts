@@ -1,16 +1,23 @@
 import * as THREE from 'three'
-import { PORTAL_STENCIL_REF, applyObliqueClipFromAnchor } from '@portal/portal-three'
-import type {
-  ColorRGB,
-  Mat4,
-  PortalAnchor,
-  PortalEndpoint,
-  PortalFrameMessage,
-  PortalMessage,
-  PortalPose,
-  PortalReadyMessage,
-  PortalSetPoseMessage,
-  Viewport
+import {
+  PORTAL_STENCIL_REF,
+  applyObliqueClipFromAnchor,
+  asAnchor,
+  makePortalStencilMask,
+  type PortalStencilMask
+} from '@portal/portal-three'
+import {
+  couplePoseAcrossPortal,
+  type ColorRGB,
+  type Mat4,
+  type PortalAnchor,
+  type PortalEndpoint,
+  type PortalFrameMessage,
+  type PortalMessage,
+  type PortalPose,
+  type PortalReadyMessage,
+  type PortalSetPoseMessage,
+  type Viewport
 } from '@portal/portal-core'
 
 // ---------------------------------------------------------------------------
@@ -36,7 +43,209 @@ float unpackRGBAToDepth(vec4 v) {
 
 // ---------------------------------------------------------------------------
 // Iframe target side: receive setPose, render color + packed depth, post back.
+//
+// The render loop is transport-agnostic: it talks to its peer through a
+// `PortalTransport` interface (post + onMessage). Two adapters are
+// included here:
+//   - the default Window adapter, used when the target runs in an iframe
+//     document (peer is `parent` or another Window).
+//   - `selfWorkerTargetTransport()`, used when the target runs in a Web
+//     Worker (peer is the worker's `self`, the message channel is implicit).
+// portal-worker re-exports the worker variant for use from worker scripts.
 // ---------------------------------------------------------------------------
+
+/**
+ * Two-way message channel between the two halves of a portal endpoint pair —
+ * the host (sends setPose, receives ready/frame) and the render service
+ * (receives setPose, sends ready/frame). Concrete implementations bind to a
+ * Window pair (iframe ↔ parent) or a Worker pair (worker self ↔ main-thread
+ * Worker handle).
+ */
+export type PortalTransport = {
+  /** Send a message to the peer, optionally transferring ownership of bitmaps. */
+  post(msg: PortalMessage, transfer?: Transferable[]): void
+  /** Subscribe to messages from the peer. Returns a teardown function. */
+  onMessage(listener: (msg: PortalMessage) => void): () => void
+}
+
+/**
+ * Window-based transport. Used by both the iframe target (output = parent,
+ * filter = parent) and the host endpoint (output = iframe.contentWindow,
+ * filter = iframe.contentWindow). Listens on its own `window` for `message`
+ * events optionally filtered by source, and posts to the supplied output
+ * Window with the supplied origin.
+ */
+export const windowTransport = (opts: {
+  output: Window
+  outputOrigin?: string
+  inputFilter?: MessageEventSource | null
+}): PortalTransport => {
+  const origin = opts.outputOrigin ?? '*'
+  const filter = opts.inputFilter ?? null
+  return {
+    post(msg, transfer) {
+      opts.output.postMessage(msg, origin, transfer ?? [])
+    },
+    onMessage(listener) {
+      const onMessage = (ev: MessageEvent): void => {
+        if (filter !== null && ev.source !== filter) return
+        const data = ev.data as PortalMessage
+        if (!data || typeof data !== 'object') return
+        listener(data)
+      }
+      window.addEventListener('message', onMessage)
+      return () => window.removeEventListener('message', onMessage)
+    }
+  }
+}
+
+/**
+ * Worker-self transport (target side): the target runs inside a Web Worker.
+ * Worker postMessage doesn't take an origin, and there's exactly one peer
+ * (the main thread holding the Worker handle), so no source filtering is
+ * needed.
+ */
+export const workerSelfTransport = (): PortalTransport => {
+  // `self` typing: in a DedicatedWorkerGlobalScope, postMessage takes
+  // (message, transfer) and addEventListener exposes 'message'.
+  type WorkerSelf = {
+    postMessage: (msg: unknown, transfer?: Transferable[]) => void
+    addEventListener: (type: 'message', listener: (ev: MessageEvent) => void) => void
+    removeEventListener: (type: 'message', listener: (ev: MessageEvent) => void) => void
+  }
+  const ws = self as unknown as WorkerSelf
+  return {
+    post(msg, transfer) {
+      ws.postMessage(msg, transfer ?? [])
+    },
+    onMessage(listener) {
+      const onMessage = (ev: MessageEvent): void => {
+        const data = ev.data as PortalMessage
+        if (!data || typeof data !== 'object') return
+        listener(data)
+      }
+      ws.addEventListener('message', onMessage)
+      return () => ws.removeEventListener('message', onMessage)
+    }
+  }
+}
+
+/**
+ * Host-side worker transport: the host holds a `Worker` handle to a worker
+ * running the render service. postMessage to that handle delivers to the
+ * worker's `self`; the handle itself emits `message` events for replies.
+ */
+export const workerHostTransport = (worker: Worker): PortalTransport => ({
+  post(msg, transfer) {
+    worker.postMessage(msg, transfer ?? [])
+  },
+  onMessage(listener) {
+    const onMessage = (ev: MessageEvent): void => {
+      const data = ev.data as PortalMessage
+      if (!data || typeof data !== 'object') return
+      listener(data)
+    }
+    worker.addEventListener('message', onMessage)
+    return () => worker.removeEventListener('message', onMessage)
+  }
+})
+
+/**
+ * In-process loopback transport pair. `hostTransport.post(msg)` synchronously
+ * delivers to the target's registered listener (and vice versa). No
+ * postMessage, no thread boundary, no async.
+ *
+ * The synchronous delivery is the load-bearing property: when a host endpoint
+ * calls `requestFrame()` over the loopback, the target renders inline and
+ * posts the frame back BEFORE `requestFrame()` returns — so by the time the
+ * caller composites, `endpoint.hasFrame()` is already true. The existing
+ * fire-and-forget `requestFrame` API thus behaves like sync request/response
+ * over loopback, no Promise plumbing needed.
+ *
+ * Multiple listeners are not supported (each side has one listener at a
+ * time); subsequent `onMessage` calls overwrite the previous listener.
+ *
+ * Used by the headless renderer to drive recursive portal trees in a single
+ * process — each level of the Droste cascade is a separate target connected
+ * to its parent over a loopback pair.
+ *
+ * Transferables passed through `post(msg, transfer)` are NOT actually
+ * transferred (it's the same realm), they're just passed through; the second
+ * argument is accepted for API parity with windowTransport / worker*.
+ */
+export type LoopbackPair = {
+  hostTransport: PortalTransport
+  targetTransport: PortalTransport
+}
+
+export const createLoopbackPair = (): LoopbackPair => {
+  let hostListener: ((msg: PortalMessage) => void) | null = null
+  let targetListener: ((msg: PortalMessage) => void) | null = null
+
+  const hostTransport: PortalTransport = {
+    post(msg) {
+      targetListener?.(msg)
+    },
+    onMessage(listener) {
+      hostListener = listener
+      return () => {
+        if (hostListener === listener) hostListener = null
+      }
+    }
+  }
+
+  const targetTransport: PortalTransport = {
+    post(msg) {
+      hostListener?.(msg)
+    },
+    onMessage(listener) {
+      targetListener = listener
+      return () => {
+        if (targetListener === listener) targetListener = null
+      }
+    }
+  }
+
+  return { hostTransport, targetTransport }
+}
+
+/**
+ * A child portal embedded in this target's scene. The target composites the
+ * child's frame in-place each render, the same way a top-level host does:
+ * stencil-mask the door rectangle, clear depth, ask the child to render a
+ * fullscreen quad with stencilFunc=Equal,ref=1 + depth-clip discard. The net
+ * result is that a portal-compliant scene can ITSELF contain portals — the
+ * recursion stacks naturally, with each level rendering its scene plus its
+ * own children before posting pixels to its parent.
+ *
+ * `anchor` is a THREE.Object3D placed at the door pose in *this scene's*
+ * coordinates (typically a `makePortalPlane` mesh). `endpoint` is a child
+ * portal endpoint (iframe / worker / loopback) that knows where the
+ * destination door sits in *its* scene and how to render it.
+ */
+export type ChildPortal = {
+  anchor: THREE.Object3D
+  endpoint: ChildPortalEndpoint
+}
+
+/**
+ * Structural shape every "render-from-this-pose into the current renderer"
+ * endpoint must satisfy. Matches `IframePortalEndpoint` from this module and
+ * the worker / loopback / headless variants in sibling packages.
+ */
+export type ChildPortalEndpoint = {
+  isReady(): boolean
+  hasFrame(): boolean
+  getAnchor(): PortalAnchor
+  getBackground(): ColorRGB
+  requestFrame(opts: {
+    pose: PortalPose
+    projection: Mat4
+    viewport: Viewport
+    time: number
+  }): void
+  renderAsDestination(renderer: THREE.WebGLRenderer): void
+}
 
 export type IframeTargetConfig = {
   scene: THREE.Scene
@@ -81,6 +290,24 @@ export type IframeTargetConfig = {
    * animation phase jumps at every traversal.
    */
   onTime?: (time: number) => void
+  /**
+   * Direct transport override. When supplied, replaces the default Window
+   * adapter built from `outputTarget`/`hostOrigin`/`inputFilter`. Used by
+   * the worker-target wrapper in `portal-worker` (or any other transport
+   * — the render loop only talks through this interface).
+   */
+  transport?: PortalTransport
+  /**
+   * Child portals embedded in this scene. When non-empty, the per-frame
+   * render runs the host-style composite for each child (stencil mask +
+   * clearDepth + child.renderAsDestination) into sceneRT before the color/
+   * depth blits to the parent. Lets a portal-compliant scene itself contain
+   * portals — the recursion stacks naturally.
+   *
+   * Empty (or undefined) preserves byte-identical behaviour to the
+   * non-recursive case: scene renders flat to sceneRT, no stencil writes.
+   */
+  portals?: ChildPortal[]
 }
 
 export type IframeTarget = {
@@ -118,14 +345,23 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   // MSAA. (Cost vs the previous two-RT-with-MSAA setup: lose MSAA on color,
   // halve scene render cost. FXAA in the color blit is cheap and can recover
   // most of the perceived AA quality if needed.)
+  //
+  // Depth-stencil packed format. UnsignedInt248Type carries 24 bits of depth
+  // + 8 bits of stencil in a single texture; the depth-pack shader continues
+  // to read the .r component (depth) unchanged. Stencil is needed when the
+  // target itself contains child portals (`config.portals`) — recursive
+  // composite uses the same stencil-mask + depth-clip dance the host does
+  // today, but writing into sceneRT instead of the canvas. With no child
+  // portals declared the stencil bits are simply unused, no behaviour change.
   const sceneRT = new THREE.WebGLRenderTarget(1, 1, {
     samples: 0,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
-    generateMipmaps: false
+    generateMipmaps: false,
+    stencilBuffer: true
   })
-  sceneRT.depthTexture = new THREE.DepthTexture(1, 1)
-  sceneRT.depthTexture.type = THREE.UnsignedIntType
+  sceneRT.depthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedInt248Type)
+  sceneRT.depthTexture.format = THREE.DepthStencilFormat
 
   // Color blit: sample the RT's color attachment and write to canvas with
   // linearToSRGB encoding. The default path also runs FXAA in the same pass
@@ -297,10 +533,24 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 
   let running = false
   let lastLog = 0
+  let unlisten: (() => void) | null = null
   const lookTarget = new THREE.Vector3()
-  const hostOrigin = config.hostOrigin ?? '*'
-  const outputTarget: Window = config.outputTarget ?? parent
-  const inputFilter = config.inputFilter ?? null
+  const transport: PortalTransport = config.transport ?? windowTransport({
+    output: config.outputTarget ?? parent,
+    outputOrigin: config.hostOrigin ?? '*',
+    inputFilter: config.inputFilter ?? null
+  })
+
+  // Recursive child portals: this scene may itself contain portals into other
+  // worlds. Allocate the stencil-mask machinery lazily — empty portals[] is
+  // the common case and stays byte-identical to the non-recursive code path.
+  const childPortals: ChildPortal[] = config.portals ?? []
+  let childStencilMask: PortalStencilMask | null = null
+  const childStencilBg = new THREE.Color()
+  const childCoupledForward: [number, number, number] = [0, 0, -1]
+  const childCoupledUp: [number, number, number] = [0, 1, 0]
+  const childCoupledPos: [number, number, number] = [0, 0, 0]
+
   const fmt = (a: ArrayLike<number>) =>
     `[${Array.from(a, (n) => n.toFixed(3)).join(', ')}]`
 
@@ -311,21 +561,19 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       background: config.background ?? defaultBackground(config.scene),
       viewport: { width: offscreen.width, height: offscreen.height }
     }
-    outputTarget.postMessage(msg, hostOrigin)
+    transport.post(msg)
   }
 
-  const onMessage = (ev: MessageEvent): void => {
+  const onPortalMessage = (msg: PortalMessage): void => {
     if (!running) return
-    if (inputFilter !== null && ev.source !== inputFilter) return
-    const msg = ev.data as PortalMessage
-    if (!msg || typeof msg !== 'object') return
     if (msg.type === 'portal:setPose') {
       // Render synchronously in the message handler rather than waiting for the
-      // next RAF. The iframe is a render service (offscreen), not a display
-      // surface — there's nothing to vsync to. Bypassing RAF saves up to a
-      // full frame of round-trip latency AND avoids browser throttling that
-      // applies to RAF in non-visible iframes. msg.time still drives any
-      // animation tick, so deterministic motion stays in sync with the host.
+      // next RAF. The target is a render service (offscreen iframe or worker),
+      // not a display surface — there's nothing to vsync to. Bypassing RAF
+      // saves up to a full frame of round-trip latency AND avoids browser
+      // throttling that applies to RAF in non-visible iframes / backgrounded
+      // workers. msg.time still drives any animation tick, so deterministic
+      // motion stays in sync with the host.
       renderFrame(msg)
     }
   }
@@ -371,10 +619,96 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     applyObliqueClipFromAnchor(camera, config.anchor)
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
 
-    // Single scene render → sceneRT (color attachment + depth texture).
-    renderer.setRenderTarget(sceneRT)
-    renderer.render(config.scene, camera)
-    renderer.setRenderTarget(null)
+    if (childPortals.length === 0) {
+      // No child portals: existing flat-render path. autoClear default + a
+      // single render call clears + draws the scene to sceneRT.
+      renderer.setRenderTarget(sceneRT)
+      renderer.render(config.scene, camera)
+      renderer.setRenderTarget(null)
+    } else {
+      // Recursive case: this scene contains a child portal. Run the same
+      // composite dance the host runs against this target — scene render,
+      // stencil-mask the child door, depth-clear, ask the child to render
+      // its frame as a fullscreen quad gated by the stencil. Net result is
+      // a sceneRT whose color attachment shows worldB pixels normally and
+      // worldC pixels through the child door.
+      //
+      // V1 composes a single child per level (which covers the Droste /
+      // self-referential demo). Multi-child requires either caller-
+      // coordinated unique stencil refs per child or scene-depth caching
+      // between children — slated for a follow-up.
+      if (childPortals.length > 1) {
+        console.warn(
+          '[portal-iframe] target.portals: only the first child is composited; multi-child support is a follow-up'
+        )
+      }
+      const child = childPortals[0]
+      if (!childStencilMask) childStencilMask = makePortalStencilMask()
+
+      // Ask the child to render a frame at the mirrored pose. The child takes
+      // a round-trip to respond; this composites whatever bitmap is already
+      // pending, the same way the top-level host pipelines today.
+      if (child.endpoint.isReady()) {
+        const sourceAnchorData = asAnchor(child.anchor)
+        const targetAnchorData = child.endpoint.getAnchor()
+        const coupled = couplePoseAcrossPortal(msg.pose, {
+          source: sourceAnchorData,
+          target: targetAnchorData
+        })
+        // Reuse scratch arrays so we don't allocate per frame.
+        childCoupledPos[0] = coupled.position[0]
+        childCoupledPos[1] = coupled.position[1]
+        childCoupledPos[2] = coupled.position[2]
+        if (coupled.forward) {
+          childCoupledForward[0] = coupled.forward[0]
+          childCoupledForward[1] = coupled.forward[1]
+          childCoupledForward[2] = coupled.forward[2]
+        }
+        if (coupled.up) {
+          childCoupledUp[0] = coupled.up[0]
+          childCoupledUp[1] = coupled.up[1]
+          childCoupledUp[2] = coupled.up[2]
+        }
+        child.endpoint.requestFrame({
+          pose: {
+            position: childCoupledPos,
+            forward: childCoupledForward,
+            up: childCoupledUp
+          },
+          // Pass the parent's pre-oblique projection so the child can apply
+          // its own oblique against its own anchor; passing the post-oblique
+          // matrix would compose the two clips in nonsensical ways.
+          projection: msg.projection,
+          viewport: msg.viewport,
+          time: msg.time
+        })
+      }
+
+      // Scene render → sceneRT, then mask, then composite. autoClear off for
+      // the duration so the mask + composite don't wipe the buffer between
+      // operations; restore on exit.
+      renderer.setRenderTarget(sceneRT)
+      const prevAutoClear = renderer.autoClear
+      renderer.autoClear = false
+      renderer.clear(true, true, true)
+      renderer.render(config.scene, camera)
+
+      const tbg = child.endpoint.isReady() ? child.endpoint.getBackground() : { r: 0, g: 0, b: 0 }
+      childStencilBg.setRGB(tbg.r, tbg.g, tbg.b)
+      childStencilMask.update(child.anchor, camera, childStencilBg)
+      renderer.render(childStencilMask.scene, childStencilMask.camera)
+
+      // Preserve stencil + color, drop depth so the destination quad isn't
+      // occluded by source-world pixels behind the door.
+      renderer.clearDepth()
+
+      if (child.endpoint.hasFrame()) {
+        child.endpoint.renderAsDestination(renderer)
+      }
+
+      renderer.autoClear = prevAutoClear
+      renderer.setRenderTarget(null)
+    }
 
     // Color blit: sample sceneRT.texture → canvas → ImageBitmap.
     blitScene.clear()
@@ -399,7 +733,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       projection: matToArray(camera.projectionMatrix),
       view: matToArray(camera.matrixWorldInverse)
     }
-    outputTarget.postMessage(frame, hostOrigin, [colorBitmap, depthBitmap])
+    transport.post(frame, [colorBitmap, depthBitmap])
 
     if (config.log && msg.time - lastLog > 1) {
       lastLog = msg.time
@@ -427,12 +761,13 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
     start() {
       if (running) return
       running = true
-      window.addEventListener('message', onMessage)
+      unlisten = transport.onMessage(onPortalMessage)
       sendReady()
     },
     stop() {
       running = false
-      window.removeEventListener('message', onMessage)
+      unlisten?.()
+      unlisten = null
     }
   }
 }
@@ -583,6 +918,13 @@ export type IframeEndpointConfig = {
    * For visual debugging only.
    */
   composeRaw?: boolean
+  /**
+   * Direct transport override. When supplied, replaces the default Window
+   * adapter built from `iframe`/`peerWindow`/`peerSource`. Used by the
+   * worker-endpoint wrapper in `portal-worker` so the host can talk to a
+   * Web Worker rather than a same-origin iframe.
+   */
+  transport?: PortalTransport
 }
 
 export type IframePortalEndpoint = PortalEndpoint & {
@@ -670,6 +1012,11 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   compositorScene.add(mesh)
   const compositorCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
+  // Build the transport. If the caller passed `transport` directly (e.g. the
+  // worker-endpoint wrapper), use it as-is. Otherwise build a window-based
+  // transport from the iframe / peerWindow options. peerSource defaulting to
+  // `iframe.contentWindow` keeps message-source filtering on the host side
+  // safe even with multiple iframes in the page.
   const peerWindow: Window | null =
     config.peerWindow ?? config.iframe?.contentWindow ?? null
   const peerSource: MessageEventSource | null | undefined =
@@ -677,11 +1024,21 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
       ? config.peerSource
       : (config.iframe?.contentWindow ?? null)
 
-  const onMessage = (ev: MessageEvent): void => {
-    if (peerSource !== null && ev.source !== peerSource) return
-    const msg = ev.data as PortalMessage
-    if (!msg || typeof msg !== 'object') return
+  const transport: PortalTransport =
+    config.transport ??
+    (peerWindow
+      ? windowTransport({
+          output: peerWindow,
+          outputOrigin: config.iframeOrigin ?? '*',
+          inputFilter: peerSource ?? null
+        })
+      : (() => {
+          throw new Error(
+            'makeIframeEndpoint: must supply iframe, peerWindow, or transport'
+          )
+        })())
 
+  transport.onMessage((msg) => {
     if (msg.type === 'portal:ready') {
       anchor = msg.anchor
       background = msg.background
@@ -694,9 +1051,7 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
       const view = new THREE.Matrix4().fromArray(msg.view as number[])
       lastViewProjection = new THREE.Matrix4().multiplyMatrices(proj, view)
     }
-  }
-
-  window.addEventListener('message', onMessage)
+  })
 
   return {
     isReady: () => anchor !== null,
@@ -707,10 +1062,8 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
     },
     getBackground: () => background,
     requestFrame(opts) {
-      const win = peerWindow
-      if (!win) return
       const msg: PortalSetPoseMessage = { type: 'portal:setPose', ...opts }
-      win.postMessage(msg, config.iframeOrigin ?? '*')
+      transport.post(msg)
     },
     renderAsDestination(renderer) {
       // TODO: screen-space reprojection to eliminate residual round-trip lag.

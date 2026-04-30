@@ -36,9 +36,11 @@ Working in the cooperative-same-origin case:
 - continuous traversal across the portal plane (no flicker, no double-rendering)
 - stencil-mask + oblique near-plane clip so destination geometry past the portal renders directly to the canvas with native MSAA, source geometry in front of the portal occludes correctly, and source/destination compose without a texture intermediate
 - two cooperating worlds (`world-a`, `world-b`) and a host that walks between them
-- a `PortalEndpoint` abstraction with two implementations: a local-three endpoint and an iframe endpoint that runs the destination world in a separate frame and ships color + packed-RGBA depth back over `postMessage`
+- a `PortalEndpoint` abstraction with implementations across four transports: local three (`makeLocalEndpoint`), iframe (`makeIframeEndpoint`), Web Worker (`makeWorkerEndpoint`), and server-side node (`makeHeadlessEndpoint`). Wire shape is shared — the only thing that changes is the message channel.
+- **recursive portals:** scenes can themselves contain portals, composited inline before the parent reads them. Demonstrated by a Droste cascade rendered server-side with N nested levels.
+- **server-side rendering** (no browser): `portal-headless-three` runs jsdom + headless-gl + three on node. `apps/snapshot-proxy` exposes it over HTTP for social-preview / share-link image generation.
 
-Both demos are same-origin. Iframe-portal traversal is in (host → iframe and iframe → host, with held-key handoff and a render-then-swap CSS handshake to kill flashes). Cross-origin iframes, headless / WebRTC / multi-engine hosting are still roadmap.
+Both browser demos are same-origin. Iframe-portal traversal is in (host → iframe and iframe → host, with held-key handoff and a render-then-swap CSS handshake to kill flashes). Cross-origin iframes, WebRTC, multi-engine hosting are still roadmap.
 
 ## Design notes
 
@@ -59,6 +61,8 @@ npm install
 npm run dev          # alias for dev:three (the local-portal demo)
 npm run dev:three    # vite dev server for the host-three app (two local worlds, traversable portal)
 npm run dev:iframe   # vite dev server for the host-iframe-demo app (iframe-served portal)
+npm run dev:worker   # vite dev server for the host-worker-demo app (Web Worker portal — no DOM)
+npm run dev:proxy    # node HTTP server that renders portal scenes server-side and returns PNGs
 npm test             # vitest run on the portal-core geometry + endpoint contracts
 npm run check        # type-check all workspaces
 npm run build        # type-check + production build of all workspaces
@@ -76,11 +80,16 @@ Controls in the demo:
 /apps
   /host-three             # demo host: two local worlds + traversable portal
   /host-iframe-demo       # demo host: source world + iframe-served portal
+  /host-worker-demo       # demo host: source world + Web Worker portal (no DOM)
+  /snapshot-proxy         # node HTTP service: server-side render to PNG
 /packages
   /portal-core            # pure-data geometry + types + wire protocol (no three.js dep)
   /portal-three           # three.js bindings: stencil mask, coupled camera,
                           # local endpoint, link pipeline, traversal helpers
-  /portal-iframe          # iframe transport: depth-pack target + depth-aware compositor
+  /portal-iframe          # transport-agnostic render target + depth-aware compositor;
+                          # window-transport adapter for the iframe case
+  /portal-worker          # worker-transport adapter on top of portal-iframe;
+                          # makeWorkerTarget (worker side) + makeWorkerEndpoint (host side)
   /portal-controls        # shared host fly-controls: keyboard WASD, drag-to-look,
                           # on-screen WASD pad for touch devices
 ```
@@ -149,7 +158,7 @@ type PortalEndpoint = {
 
 `makeLocalEndpoint({ scene, anchor, background, tick })` wraps a local `THREE.Scene` and owns the per-frame stencil walk, `scene.background` null-swap, and oblique-clip on the portal camera. Plain scenes stay plain; the hidden contract is bounded to that one module.
 
-`makeIframeEndpoint(...)`, `makeHeadlessEndpoint(...)`, `makeWebrtcEndpoint(...)` are sibling implementations of the same interface.
+`makeIframeEndpoint(...)` (browser, postMessage), `makeWorkerEndpoint(...)` (browser, Web Worker), `makeHeadlessEndpoint(...)` (server-side node, loopback), and a future `makeWebrtcEndpoint(...)` are sibling implementations of the same interface — they differ only in the underlying `PortalTransport`.
 
 On top of that:
 
@@ -180,15 +189,45 @@ const result = link.frame({ renderer, hostCamera, dt })
 
 7. **Iframe-portal traversal (forward + reverse).** Walking through the iframe portal hands the host's pose (and the keys it's currently holding) to the iframe via `portal:traverse`; the iframe sizes its renderer to a viewport carried in the message, renders one synchronous frame, posts `portal:traverse-ack`, and only then does the host commit the CSS swap that hides itself and shows the iframe — so the user never sees a dark flash or a stretched 1-pixel buffer. The reverse direction is symmetric: the iframe walks back through its own portal door, mirrors its pose into worldA coords, and the host re-activates as the source page. While the host is the "destination" service, it runs `makeIframeTarget` against its own scene so the iframe can ask for worldA frames through the portal-back. GL programs (scene + stencil mask + compositor) are pre-warmed at module load to keep the first traversal frame stutter-free.
 
+8. **Web Worker endpoint (browser-side, no DOM).** Same `PortalEndpoint` contract, no DOM in the worker. `apps/host-worker-demo` runs the destination scene inside a Web Worker with an `OffscreenCanvas`; the host talks to it over `worker.postMessage` using the same `portal:ready` / `portal:setPose` / `portal:frame` wire protocol the iframe transport uses. Realised by extracting a `PortalTransport` abstraction in `portal-iframe` (`windowTransport` for the iframe case, `workerSelfTransport` / `workerHostTransport` for the worker case) so the render loop is shared verbatim — `portal-worker` is just the worker-transport wrapper. Pose permalinks (`?pose=…`, press `P` to copy) work in both demos so an iframe-vs-worker A/B at the same view is one paste away.
+
+9. **Server-side rendering + recursive portals + snapshot proxy.** Three layered changes that together close out the "share a permalink, get a real PNG" story:
+
+   - **Recursion.** `IframeTargetConfig.portals?: ChildPortal[]` lets every target host its own child portals. Per-frame: render scene → stencil-mask each child door → `clearDepth` → composite child via the same compositor the top-level host uses. Recursion stacks because each child is a target whose own `portals` is non-empty, and so on. v1 supports a single child per level; multi-child needs per-child stencil refs and is a follow-up.
+   - **Loopback transport.** `createLoopbackPair()` in `portal-iframe` returns a `{ hostTransport, targetTransport }` pair that delivers messages synchronously across the same process. Because loopback `post()` invokes the peer's listener inline, the existing fire-and-forget `requestFrame` doubles as a synchronous request/response — no Promise plumbing needed for in-process recursion. This is what makes a chain of N targets composable in a single node process.
+   - **Server-side renderer.** `portal-headless-three` is the node-side sibling of the iframe target: jsdom for `document` / `window` globals, `gl@9.0.0-rc.10` for a `WebGL2RenderingContext` with stencil + depth + `gl_FragDepth` support (verified by spike), three's `WebGLRenderer({context: glCtx})`, color/depth read out via `readRenderTargetPixels`, packed depth via the iframe target's depth-pack shader. The host-side compositor uses `THREE.DataTexture` (instead of `Texture` over `ImageBitmap`) with `SRGBColorSpace` tagging so three's shader rewrite preserves the linear-vs-sRGB chain across recursion levels.
+   - **Droste cascade demo** (`packages/portal-headless-three/src/droste.test.ts`) builds an N-level cascade where each level renders a depth-coloured scene, asks the next level for a frame over loopback, and composites. With perfectly self-similar mirror geometry (cam pose preserved by the source/target normal-flip pairing), doors must shrink at each level (`0.7^depth`) or every level samples its own door region in the next level's frame and the recursion collapses to a uniform colour — fixing this gave the classic Droste nested rings. Tests through depth 5 (six visible levels).
+   - **Snapshot proxy** (`apps/snapshot-proxy`, `npm run dev:proxy`) is the smallest possible HTTP wrapper: `GET /render?depth=N&pose=px,py,pz,fx,fy,fz&w=480&h=320` returns a PNG of the cascade at that pose. ~300 ms per request at depth 4, 800×600. Built so a downstream project (e.g. celestiary) can either host this proxy with its own scene module registered or import `portal-headless-three` directly into its server.
+
 ### Next
 
-8. **Headless / offscreen render endpoint.** Same `PortalEndpoint` contract but the implementation is a renderer with no window — `OffscreenCanvas` in a worker, or even a node-side renderer feeding frames over a websocket. Useful for compute-heavy worlds (splats, baked light) and for testing the protocol without a DOM.
+10. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
 
-9. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
+11. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real.
 
-10. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real.
+12. **Scene merging.** Past simple preview: shared physics or selection across worlds, depth/occlusion sharing where it's possible to share at all, multi-child portal composites at one level (currently single-child).
 
-11. **Scene merging.** Past simple preview: shared physics or selection across worlds, recursive portals, depth/occlusion sharing where it's possible to share at all.
+## Open follow-ups
+
+State for in-flight work and known gaps. We track these here rather than in issues so the next agent picking the project up has a single source of truth.
+
+### Visual regression checks (need eyeballs)
+- **Depth-pack precision drift** in `dev:iframe` after switching sceneRT to a depth-stencil packed format (`UnsignedInt248Type` + `DepthStencilFormat`). Mathematically the depth-pack shader still reads `.r` of the depth texture so the round-trip should be unchanged, but worth an A/B against pre-rename `main` at the same `?pose=` permalink. Look for new artifacts at door edges or in `?debug=depth` mode.
+- **Droste cascade pixel correctness.** The test writes `/tmp/portal-droste-d{0..5}.png`. d=5 should show six visibly distinct nested rings (red → orange cube → green → blue → amber → magenta → teal). Quick eyeball whenever the headless renderer changes.
+
+### Performance characterisation
+- **Per-depth Droste render time.** How does cost scale with N? Linear by construction (each level is its own gl context + scene render), but constant-factor matters: `gl` context creation is ~50–150 ms, jsdom init is one-time, and there's a fixed pack/blit per level. Open question: is there a knee around N=4 or N=8 where per-context overhead dominates, and should we pool gl contexts in `snapshot-proxy` to amortise it?
+- **Snapshot-proxy throughput.** Current implementation creates fresh contexts per request and tears them down after responding. Easy to drop to ~50 ms/req with a context pool but adds a class of state-leak bugs. Defer until we have a real workload that warrants it.
+
+### Architecture gaps surfaced by the headless work
+- **Multi-child portals per scene.** `IframeTargetConfig.portals?: ChildPortal[]` accepts an array but v1 only composites the first child (with a `console.warn` for the multi-child case). Two ways to lift: (a) per-child stencil refs that the caller coordinates with each child endpoint's `stencilRef`, OR (b) cache scene depth between children so each child's mask write can depth-test against source geometry. (a) is simpler API-wise; (b) is more correct. Pick when there's a use case.
+- **Mixed-runtime composition.** A node-side host can't currently composite a browser-side child (or vice versa) because the wire shapes are typed differently (`PortalFrameMessage` uses `ImageBitmap`, `HeadlessFrameMessage` uses `Uint8Array`). For pure-node and pure-browser cascades it doesn't matter; for a future "browser host with server-rendered destination" setup we'd need a bridge that re-encodes Uint8Array → ImageBitmap on the receiver side.
+- **`makeHeadlessEndpoint` doesn't run the bg-pixel depth-clip in the iframe compositor.** The headless compositor special-cases `depth01 >= 0.99` because the depth-pack→RGBA8→unpack round-trip loses precision at the top of the range. The browser-side `makeIframeEndpoint`'s shader doesn't have this guard. If we ever try to drive a browser host from a headless child, the browser's compositor would discard bg pixels — needs the same threshold lifted.
+
+### Loose ends to wire
+- **Snapshot-proxy scene registry.** Currently only the Droste cascade. Adding a second scene (the iframe demo's worldB swarm is the natural choice) would validate the registry pattern before celestiary brings its own scene module.
+- **Permalink format consistency.** `encodeCameraPose` produces `px,py,pz,fx,fy,fz`. Apps with their own permalinks (celestiary's `#@lat,lng,alt;t=…`) will keep their own format; the portal-side helper is for portal demo / snapshot use. Document the boundary explicitly so it doesn't get conflated.
+- **Cross-origin iframes.** The iframe transport hardcodes `'*'` for postMessage origin in dev. Production use needs origin-restricted posts on both sides — small change, but warrants its own pass.
 
 ## Core types
 
@@ -207,7 +246,7 @@ type Portal = {
   href: string
   sourceAnchor: Transform
   targetAnchor?: Transform
-  mode: 'local' | 'iframe' | 'headless' | 'webrtc'
+  mode: 'local' | 'iframe' | 'worker' | 'headless' | 'webrtc'
   intent?: 'view' | 'edit' | 'simulate' | 'inspect'
 }
 
@@ -243,20 +282,24 @@ type PortalCapabilities = {
 
 ## Candidate package layout
 
-As the iframe / headless / WebRTC / multi-engine demos land:
+As the WebRTC / multi-engine demos land:
 
 ```txt
 /apps
-  /host-three             # current cooperative host
-  /world-iframe           # iframe endpoint demo
-  /world-headless         # offscreen render endpoint
+  /host-three             # local cooperative host (done)
+  /host-iframe-demo       # iframe endpoint demo (done)
+  /host-worker-demo       # Web Worker endpoint demo (done)
+  /snapshot-proxy         # node HTTP server-side render service (done)
   /world-webrtc           # captureStream/WebRTC endpoint
   /world-cesium           # Cesium globe endpoint
 
 /packages
-  /portal-core            # pure types + geometry (current)
-  /portal-three           # three.js bindings (current); local endpoint + link
-  /portal-iframe          # postMessage transport, depth-aware compositor
+  /portal-core            # pure types + geometry + permalinks (done)
+  /portal-three           # three.js bindings; local endpoint + link (done)
+  /portal-iframe          # transport-agnostic render target + compositor;
+                          # window-transport adapter (done)
+  /portal-worker          # worker-transport adapter (done)
+  /portal-headless-three  # node-side renderer (jsdom + headless-gl) (done)
   /portal-webrtc          # WebRTC transport
   /portal-debug           # inspectors, pose gizmos, logs
 ```
