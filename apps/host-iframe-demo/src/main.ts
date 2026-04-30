@@ -63,6 +63,11 @@ const PREDICT = (() => {
   const n = Number(raw)
   return Number.isFinite(n) ? n : 0
 })()
+// Diagnostic: turn off FXAA in BOTH directions of color-blit (iframe target
+// rendering worldB, and host destination service rendering worldA). Lets us
+// A/B test whether FXAA explains an apparent brightness shift through the
+// portal vs. the direct view.
+const FXAA = params.get('fxaa') !== 'off'
 
 // Forward host's URL params to the iframe so the iframe target can pick up the
 // same flags (LOG, etc.) without us hard-coding its URL in index.html.
@@ -77,6 +82,12 @@ const iframe = document.querySelector<HTMLIFrameElement>('#target-iframe')
 if (!iframe) throw new Error('Missing #target-iframe')
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true })
+// Force the GL context's color-space attributes to known values (three's
+// constructor doesn't propagate _outputColorSpace until the setter is
+// invoked). Keeps the canvas exactly in sync with what the iframe sends back
+// over the wire — both halves of the demo render through 'srgb' canvases.
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.toneMapping = THREE.NoToneMapping
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.autoClear = false
@@ -142,7 +153,8 @@ if (hostDestinationServiceTarget) {
     anchor: hostEndpoint.getAnchor(),
     outputTarget: hostDestinationServiceTarget,
     inputFilter: hostDestinationServiceTarget,
-    log: LOG
+    log: LOG,
+    fxaa: FXAA
   })
   // Wait for the iframe document to load before announcing — postMessage to a
   // not-yet-loaded contentWindow can race with the iframe's listener setup.

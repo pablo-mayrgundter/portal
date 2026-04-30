@@ -260,6 +260,7 @@ omitted.
 | `?freeze=1` | Capture the coupled pose once on first ready, then keep sending the same pose. Lets you walk around while the iframe content is held fixed. |
 | `?predict=N` | Number of frames to extrapolate the host pose ahead. Default `0` (with sync iframe rendering, round-trip is near-instant and prediction tends to over-shoot). Set `?predict=1` if the iframe runs slower than host (e.g., RAF-throttled in a backgrounded tab). |
 | `?scene=grid` | Replace the iframe's swarm scene with a static cube lattice (no animation, predictable geometry) for cleaner alignment debugging. |
+| `?fxaa=off` | Disable FXAA in the color blit (both directions). The default path runs a Lottes-2011 console FXAA on sRGB-encoded samples to recover most of the AA quality lost when the scene RT had to be non-MSAA. Toggle off to A/B test against a single-tap `linearToSRGB` blit when diagnosing brightness or edge-aliasing differences. |
 | `?log=1` | 1 Hz console logging on both halves: pose round-trip, viewport, applied camera basis, view matrix. |
 
 ## Files of interest

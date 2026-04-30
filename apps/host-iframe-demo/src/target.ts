@@ -26,6 +26,8 @@ const SCENE = params.get('scene') ?? 'swarm'
 // (worldA-through-the-iframe-portal view). Lets us diagnose the B-to-A side
 // the same way ?debug=clip works for A-to-B on the host.
 const DEBUG_MODE = (params.get('debug') ?? 'off') as CompositorDebugMode
+// Toggle FXAA in the color-blit (mirrors the host-side ?fxaa=off flag).
+const FXAA = params.get('fxaa') !== 'off'
 
 // Portal anchor: at the origin, normal pointing toward -z. The host will mirror
 // its viewer pose across this anchor so that what the host sees through the
@@ -167,7 +169,8 @@ const destinationTarget = makeIframeTarget({
   anchor,
   log: LOG,
   tick: bundle.tick,
-  onTime: updateHostTimeSync
+  onTime: updateHostTimeSync,
+  fxaa: FXAA
 })
 destinationTarget.start()
 
@@ -221,6 +224,11 @@ const sourceRenderer = new THREE.WebGLRenderer({
   antialias: true,
   stencil: true
 })
+// Force GL color-space attributes to known values — see the matching
+// comment in makeIframeTarget for why this isn't redundant with three's
+// constructor defaults.
+sourceRenderer.outputColorSpace = THREE.SRGBColorSpace
+sourceRenderer.toneMapping = THREE.NoToneMapping
 sourceRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 sourceRenderer.autoClear = false
 const sourceStencilMask = makePortalStencilMask()

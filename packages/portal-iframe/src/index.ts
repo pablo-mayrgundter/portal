@@ -51,6 +51,14 @@ export type IframeTargetConfig = {
   /** If true, log received pose + applied matrices once per second to console. */
   log?: boolean
   /**
+   * Apply FXAA in the color blit. Defaults to true. Set to false to compare
+   * against a plain single-tap linearToSRGB blit — useful for diagnosing
+   * whether FXAA is responsible for an apparent brightness/lighting shift on
+   * smooth-gradient regions (it shouldn't be, but the URL-toggleable flag
+   * makes A/B comparison cheap).
+   */
+  fxaa?: boolean
+  /**
    * Where to post 'portal:frame' responses + 'portal:ready' on init.
    * Defaults to `parent` (the iframe-in-host case). When the host plays the
    * destination role (after iframe-portal traversal), set this to the iframe's
@@ -93,6 +101,16 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const camera = new THREE.PerspectiveCamera()
   const offscreen = new OffscreenCanvas(1, 1)
   const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: false })
+  // Three's constructor initializes _outputColorSpace to SRGB but DOES NOT
+  // propagate to gl.drawingBufferColorSpace / gl.unpackColorSpace — that only
+  // happens via the property setter. Without this, the canvas's color-space
+  // attributes are whatever the GL context defaulted to (usually 'srgb' in
+  // modern browsers, but the spec leaves it unspecified). Setting the
+  // property explicitly forces both GL attributes to 'srgb' so the offscreen
+  // canvas's transferToImageBitmap output is unambiguously sRGB-tagged and
+  // matches the host's main canvas exactly.
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.NoToneMapping
 
   // Single scene render per frame: RT with sampleable depth texture so we can
   // derive both bitmaps from one pass. WebGL2 DepthTextures aren't compatible
@@ -109,33 +127,17 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   sceneRT.depthTexture = new THREE.DepthTexture(1, 1)
   sceneRT.depthTexture.type = THREE.UnsignedIntType
 
-  // Color blit: sample the RT's color attachment, run FXAA, and write to
-  // canvas with linearToSRGB encoding. FXAA recovers most of the perceived
-  // anti-aliasing quality lost when the scene RT had to be created as
-  // non-MSAA (WebGL2 depth textures aren't compatible with multisampled
-  // FBOs without extension gymnastics, and we need a sampleable depth
-  // attachment for the depth blit). Done here in the same pass that writes
-  // to canvas so we don't pay a separate fullscreen pass.
+  // Color blit: sample the RT's color attachment and write to canvas with
+  // linearToSRGB encoding. The default path also runs FXAA in the same pass
+  // to recover most of the AA quality lost when the scene RT had to be
+  // non-MSAA. linearToSRGB is applied per sample (not once at the end) so
+  // FXAA's luma weighting matches the sRGB domain it's tuned for.
   //
-  // FXAA is run on sRGB-encoded samples (perceptually-linear luma), which
-  // is the correct domain for edge detection — running it on raw linear
-  // values under-anti-aliases dark transitions because low values get
-  // stretched by the sRGB curve. linearToSRGB is applied per sample, not
-  // once at the end, so each contribution to the final pixel is in the
-  // same color space as the luma weighting.
-  const colorBlitMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      tex: { value: null as THREE.Texture | null },
-      invResolution: { value: new THREE.Vector2(1, 1) }
-    },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = vec4(position.xy, 0.0, 1.0);
-      }
-    `,
-    fragmentShader: `
+  // The non-FXAA path is a single-tap blit, kept compilable so callers can
+  // toggle FXAA at construction time without re-creating the renderer.
+  const useFxaa = config.fxaa ?? true
+  const colorBlitFragmentShader = useFxaa
+    ? `
       uniform sampler2D tex;
       uniform vec2 invResolution;
       varying vec2 vUv;
@@ -207,7 +209,42 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 
         gl_FragColor = vec4(outRgb, 1.0);
       }
+    `
+    : `
+      uniform sampler2D tex;
+      uniform vec2 invResolution;
+      varying vec2 vUv;
+
+      vec3 linearToSRGB(vec3 v) {
+        return mix(
+          pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
+          v * 12.92,
+          vec3(lessThanEqual(v, vec3(0.0031308)))
+        );
+      }
+
+      void main() {
+        // invResolution kept in the uniform set so the shared resize block
+        // can update it unconditionally; unused on this path.
+        vec2 _unused = invResolution;
+        vec4 c = texture2D(tex, vUv);
+        gl_FragColor = vec4(linearToSRGB(c.rgb), c.a);
+      }
+    `
+
+  const colorBlitMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      tex: { value: null as THREE.Texture | null },
+      invResolution: { value: new THREE.Vector2(1, 1) }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
     `,
+    fragmentShader: colorBlitFragmentShader,
     depthTest: false,
     depthWrite: false
   })
@@ -442,14 +479,6 @@ uniform int debugMode;
 varying vec2 vUv;
 varying vec2 vUvNdc;
 
-vec3 linearToSRGB(vec3 v) {
-  return mix(
-    pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
-    v * 12.92,
-    vec3(lessThanEqual(v, vec3(0.0031308)))
-  );
-}
-
 void main() {
   float depth01 = unpackRGBAToDepth(texture2D(iframeDepth, vUv));
 
@@ -495,8 +524,12 @@ void main() {
     if (distFromPlane < 0.0) discard;
   }
 
+  // iframeColor is uploaded with NoColorSpace — the sample returns the raw
+  // sRGB-encoded bytes (as floats in [0,1]) the iframe target's color blit
+  // already wrote to the bitmap. Pass them through unchanged: the canvas
+  // displays bytes as sRGB, so we want sRGB on the way out.
   vec4 colorSample = texture2D(iframeColor, vUv);
-  gl_FragColor = vec4(linearToSRGB(colorSample.rgb), 1.0);
+  gl_FragColor = vec4(colorSample.rgb, 1.0);
 }
 `
 
@@ -580,8 +613,17 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   let lastViewProjection: THREE.Matrix4 | null = null
   let hasUploadedFrame = false
 
+  // NoColorSpace, not SRGB. The bitmap is already sRGB-encoded (the iframe
+  // target's color blit applied linearToSRGB before transferToImageBitmap),
+  // and we want to write those bytes straight to the canvas without a GPU
+  // sRGB-decode + software re-encode round-trip in the compositor. The
+  // round-trip *should* be a no-op, but in practice we saw worldA-via-portal
+  // visibly dimmer than worldA-direct in the B→A view, consistent with a
+  // double-decode somewhere in the SRGB-texture upload path. Treating the
+  // bytes as raw, paired with no encode in the compositor shader, makes the
+  // round-trip byte-exact and matches the direct-render reference exactly.
   const colorTexture = new THREE.Texture()
-  colorTexture.colorSpace = THREE.SRGBColorSpace
+  colorTexture.colorSpace = THREE.NoColorSpace
   colorTexture.minFilter = THREE.LinearFilter
   colorTexture.magFilter = THREE.LinearFilter
   colorTexture.generateMipmaps = false
