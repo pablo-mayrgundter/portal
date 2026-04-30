@@ -207,6 +207,28 @@ const result = link.frame({ renderer, hostCamera, dt })
 
 12. **Scene merging.** Past simple preview: shared physics or selection across worlds, depth/occlusion sharing where it's possible to share at all, multi-child portal composites at one level (currently single-child).
 
+## Open follow-ups
+
+State for in-flight work and known gaps. We track these here rather than in issues so the next agent picking the project up has a single source of truth.
+
+### Visual regression checks (need eyeballs)
+- **Depth-pack precision drift** in `dev:iframe` after switching sceneRT to a depth-stencil packed format (`UnsignedInt248Type` + `DepthStencilFormat`). Mathematically the depth-pack shader still reads `.r` of the depth texture so the round-trip should be unchanged, but worth an A/B against pre-rename `main` at the same `?pose=` permalink. Look for new artifacts at door edges or in `?debug=depth` mode.
+- **Droste cascade pixel correctness.** The test writes `/tmp/portal-droste-d{0..5}.png`. d=5 should show six visibly distinct nested rings (red → orange cube → green → blue → amber → magenta → teal). Quick eyeball whenever the headless renderer changes.
+
+### Performance characterisation
+- **Per-depth Droste render time.** How does cost scale with N? Linear by construction (each level is its own gl context + scene render), but constant-factor matters: `gl` context creation is ~50–150 ms, jsdom init is one-time, and there's a fixed pack/blit per level. Open question: is there a knee around N=4 or N=8 where per-context overhead dominates, and should we pool gl contexts in `snapshot-proxy` to amortise it?
+- **Snapshot-proxy throughput.** Current implementation creates fresh contexts per request and tears them down after responding. Easy to drop to ~50 ms/req with a context pool but adds a class of state-leak bugs. Defer until we have a real workload that warrants it.
+
+### Architecture gaps surfaced by the headless work
+- **Multi-child portals per scene.** `IframeTargetConfig.portals?: ChildPortal[]` accepts an array but v1 only composites the first child (with a `console.warn` for the multi-child case). Two ways to lift: (a) per-child stencil refs that the caller coordinates with each child endpoint's `stencilRef`, OR (b) cache scene depth between children so each child's mask write can depth-test against source geometry. (a) is simpler API-wise; (b) is more correct. Pick when there's a use case.
+- **Mixed-runtime composition.** A node-side host can't currently composite a browser-side child (or vice versa) because the wire shapes are typed differently (`PortalFrameMessage` uses `ImageBitmap`, `HeadlessFrameMessage` uses `Uint8Array`). For pure-node and pure-browser cascades it doesn't matter; for a future "browser host with server-rendered destination" setup we'd need a bridge that re-encodes Uint8Array → ImageBitmap on the receiver side.
+- **`makeHeadlessEndpoint` doesn't run the bg-pixel depth-clip in the iframe compositor.** The headless compositor special-cases `depth01 >= 0.99` because the depth-pack→RGBA8→unpack round-trip loses precision at the top of the range. The browser-side `makeIframeEndpoint`'s shader doesn't have this guard. If we ever try to drive a browser host from a headless child, the browser's compositor would discard bg pixels — needs the same threshold lifted.
+
+### Loose ends to wire
+- **Snapshot-proxy scene registry.** Currently only the Droste cascade. Adding a second scene (the iframe demo's worldB swarm is the natural choice) would validate the registry pattern before celestiary brings its own scene module.
+- **Permalink format consistency.** `encodeCameraPose` produces `px,py,pz,fx,fy,fz`. Apps with their own permalinks (celestiary's `#@lat,lng,alt;t=…`) will keep their own format; the portal-side helper is for portal demo / snapshot use. Document the boundary explicitly so it doesn't get conflated.
+- **Cross-origin iframes.** The iframe transport hardcodes `'*'` for postMessage origin in dev. Production use needs origin-restricted posts on both sides — small change, but warrants its own pass.
+
 ## Core types
 
 ```ts
