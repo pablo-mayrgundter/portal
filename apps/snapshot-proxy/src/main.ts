@@ -1,11 +1,5 @@
 import express, { type Request, type Response } from 'express'
-import * as THREE from 'three'
-import { decodeCameraPose } from '@portal/portal-core'
-import {
-  colorBufferToPNG,
-  type HeadlessFrameMessage
-} from '@portal/portal-headless-three'
-import { buildDrosteCascade } from './scenes/droste'
+import { DEFAULT_SCENE, SCENES } from './scenes/registry'
 
 // ---------------------------------------------------------------------------
 // Snapshot proxy: HTTP service that renders portal-compliant scenes server-
@@ -13,13 +7,14 @@ import { buildDrosteCascade } from './scenes/droste'
 // case — a crawler hits this proxy with a permalink, gets back an image
 // representing the actual scene at that pose.
 //
-// V1 ships a single built-in scene (the Droste cascade) so we have something
-// concrete and self-contained to test against. Future work: load arbitrary
-// portal-compliant scene modules from external URLs.
+// Scenes are registered in scenes/registry.ts. /render?scene=NAME dispatches
+// on the registry; legacy /render/droste keeps working for prior callers.
+// /render with no scene defaults to the "pair" scene used by the three
+// demos so the social-preview use case is one URL and one query param.
 //
-// Each /render request creates fresh GL contexts (one per cascade level) and
-// tears them down after responding. That's expensive (~50–150 ms of
-// overhead) but trivial; for high-throughput use, swap in a context pool.
+// Each /render request creates fresh GL contexts and tears them down after
+// responding. That's expensive (~50–150 ms of overhead) but trivial; for
+// high-throughput use, swap in a context pool.
 // ---------------------------------------------------------------------------
 
 const DEFAULT_W = 480
@@ -28,11 +23,6 @@ const MAX_W = 1600
 const MAX_H = 1200
 const DEFAULT_DEPTH = 2
 const MAX_DEPTH = 8 // server-side cap; the underlying cascade allows up to 12
-
-const DEFAULT_POSE: { position: [number, number, number]; forward: [number, number, number] } = {
-  position: [0, 0, 3],
-  forward: [0, 0, -1]
-}
 
 const clampInt = (
   raw: unknown,
@@ -47,65 +37,54 @@ const clampInt = (
 
 const handleRender = (req: Request, res: Response): void => {
   const t0 = Date.now()
-  const depth = clampInt(req.query.depth, DEFAULT_DEPTH, 0, MAX_DEPTH)
-  const width = clampInt(req.query.w, DEFAULT_W, 16, MAX_W)
-  const height = clampInt(req.query.h, DEFAULT_H, 16, MAX_H)
-
-  // Pose: ?pose=px,py,pz,fx,fy,fz (matches encodeCameraPose's wire format).
-  // Falls back to a sensible "looking at origin from z=3" pose.
-  const decoded = decodeCameraPose(typeof req.query.pose === 'string' ? req.query.pose : null)
-  const pose = decoded
-    ? { position: decoded.position, forward: decoded.forward }
-    : DEFAULT_POSE
-
-  const cam = new THREE.PerspectiveCamera(60, width / height, 0.1, 100)
-  cam.updateProjectionMatrix()
-
-  const cascade = buildDrosteCascade(depth, width, height)
-  let frameMsg: HeadlessFrameMessage | null = null
-  cascade.hostTransport.onMessage((msg) => {
-    if (msg.type === 'portal:frame') frameMsg = msg as unknown as HeadlessFrameMessage
-  })
-  cascade.hostTransport.post({
-    type: 'portal:setPose',
-    pose: { ...pose, up: [0, 1, 0] },
-    projection: Array.from(cam.projectionMatrix.elements),
-    viewport: { width, height },
-    time: 0
-  })
-
-  if (!frameMsg) {
-    cascade.cleanup()
-    res.status(500).send('cascade did not produce a frame')
+  const sceneName = (req.params.scene ?? req.query.scene ?? DEFAULT_SCENE) as string
+  const scene = SCENES[sceneName]
+  if (!scene) {
+    res.status(404).send(`unknown scene: ${sceneName}`)
     return
   }
 
-  const fm = frameMsg as unknown as HeadlessFrameMessage
-  const png = colorBufferToPNG(fm.color, fm.width, fm.height)
-  cascade.cleanup()
+  const width = clampInt(req.query.w, DEFAULT_W, 16, MAX_W)
+  const height = clampInt(req.query.h, DEFAULT_H, 16, MAX_H)
+  const depth = clampInt(req.query.depth, DEFAULT_DEPTH, 0, MAX_DEPTH)
+  const pose = typeof req.query.pose === 'string' ? req.query.pose : null
 
-  const elapsed = Date.now() - t0
-  res.set('Content-Type', 'image/png')
-  res.set('X-Render-MS', String(elapsed))
-  res.set('X-Render-Depth', String(depth))
-  res.send(png)
+  try {
+    const { png, meta } = scene.render({ width, height, pose, depth })
+    const elapsed = Date.now() - t0
+    res.set('Content-Type', 'image/png')
+    res.set('X-Render-MS', String(elapsed))
+    res.set('X-Render-Scene', scene.name)
+    for (const [k, v] of Object.entries(meta)) res.set(k, v)
+    res.send(png)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    res.status(500).send(`render failed: ${message}`)
+  }
 }
 
 const handleHealth = (_req: Request, res: Response): void => {
-  res.json({ ok: true, scenes: ['droste'], maxDepth: MAX_DEPTH })
+  res.json({
+    ok: true,
+    scenes: Object.keys(SCENES),
+    defaultScene: DEFAULT_SCENE,
+    maxDepth: MAX_DEPTH
+  })
 }
 
 const app = express()
 app.get('/health', handleHealth)
 app.get('/render', handleRender)
-// Default scene shortcut: future work will dispatch on ?scene=name.
-app.get('/render/droste', handleRender)
+// Per-scene shortcut routes — equivalent to /render?scene=NAME but more
+// permalink-friendly (e.g. /render/pair?pose=...).
+app.get('/render/:scene', handleRender)
 
 const PORT = parseInt(process.env.PORT ?? '3030', 10)
 app.listen(PORT, () => {
   console.log(`[snapshot-proxy] listening on http://localhost:${PORT}`)
-  console.log(
-    `  GET /render?depth=N&pose=px,py,pz,fx,fy,fz&w=480&h=320  →  PNG`
-  )
-  console.log(`  GET /health  →  JSON status`)
+  console.log(`  scenes: ${Object.keys(SCENES).join(', ')}  (default: ${DEFAULT_SCENE})`)
+  console.log(`  GET /render?scene=NAME&pose=px,py,pz,fx,fy,fz&w=480&h=320  →  PNG`)
+  console.log(`  GET /render/NAME?pose=...&w=...&h=...                     →  PNG`)
+  console.log(`  GET /render/droste?depth=N                                →  PNG`)
+  console.log(`  GET /health                                               →  JSON status`)
 })

@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.vite
+**/*.log
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+*.md
+!README.md
+.env
+.env.*
+coverage
