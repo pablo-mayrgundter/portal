@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import {
+  buildSnapshotUrl,
   couplePoseAcrossPortal,
   decodeCameraPose,
   encodeCameraPose,
+  type EncodedCameraPose,
   type Mat4,
   type Viewport
 } from '@portal/portal-core'
@@ -100,18 +102,44 @@ if (initialPose) {
   )
 }
 
+// Update og:image / twitter:image meta tags so JS-aware previewers reflect
+// the current pose. Crawlers without JS see the static fallback in
+// index.html. Pointed at the pair scene since the demos are visually
+// equivalent — the transport difference doesn't show in a still image.
+const SNAPSHOT_BASE =
+  document.querySelector<HTMLMetaElement>('meta[name="portal:snapshot-proxy"]')?.content ??
+  'http://localhost:3030'
+const SNAPSHOT_SCENE =
+  document.querySelector<HTMLMetaElement>('meta[name="portal:snapshot-scene"]')?.content ??
+  'pair'
+const updateSocialPreview = (pose: EncodedCameraPose | null): void => {
+  const url = buildSnapshotUrl({
+    baseUrl: SNAPSHOT_BASE,
+    scene: SNAPSHOT_SCENE,
+    pose,
+    width: 1200,
+    height: 630
+  })
+  document.querySelectorAll<HTMLMetaElement>(
+    'meta[property="og:image"], meta[name="twitter:image"]'
+  ).forEach((el) => { el.content = url })
+}
+updateSocialPreview(initialPose)
+
 const camForward = new THREE.Vector3()
 window.addEventListener('keydown', (ev) => {
   if (ev.code !== 'KeyP' || ev.metaKey || ev.ctrlKey || ev.altKey) return
   camForward.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
-  const encoded = encodeCameraPose({
+  const pose: EncodedCameraPose = {
     position: [hostCamera.position.x, hostCamera.position.y, hostCamera.position.z],
     forward: [camForward.x, camForward.y, camForward.z]
-  })
+  }
+  const encoded = encodeCameraPose(pose)
   const url = new URL(location.href)
   url.searchParams.set('pose', encoded)
   history.replaceState(null, '', url.toString())
   navigator.clipboard?.writeText(url.toString()).catch(() => {})
+  updateSocialPreview(pose)
   console.log('[host] permalink:', url.toString())
 })
 

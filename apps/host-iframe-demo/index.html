@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Portal - iframe demo (host)</title>
+
+    <!-- Social preview. og:image points at the snapshot-proxy's pair scene
+         (worldA + worldB-through-portal — visually identical across the
+         three demos). Crawlers without JS see the default-pose snapshot;
+         JS-aware shares get an updated URL with the current ?pose=. -->
+    <meta name="portal:snapshot-proxy" content="%VITE_SNAPSHOT_PROXY%" />
+    <meta name="portal:snapshot-scene" content="pair" />
+    <meta property="og:title" content="Spatial Portal — iframe destination" />
+    <meta property="og:description" content="Live 3D portal with the destination world rendered by an iframe over postMessage." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="%VITE_SNAPSHOT_PROXY%/render/pair?w=1200&h=630" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="%VITE_SNAPSHOT_PROXY%/render/pair?w=1200&h=630" />
     <style>
       html, body, #app {
         margin: 0;

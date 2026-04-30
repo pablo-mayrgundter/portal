@@ -1,3 +1,9 @@
 node_modules
 .DS_Store
 dist
+
+# Per-developer env overrides (Vite convention). Committed `.env` files
+# hold sensible defaults (e.g. the public snapshot-proxy URL); a checked-out
+# `.env.local` never gets committed.
+.env.local
+.env.*.local

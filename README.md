@@ -74,6 +74,38 @@ Controls in the demo:
 - WASD to move
 - walk through the portal — you traverse to the other world
 
+## Deploying the snapshot proxy
+
+The proxy ships with a Dockerfile (`apps/snapshot-proxy/Dockerfile`) and a Fly.io config (`fly.snapshot-proxy.toml` at the repo root). The container is the deployable unit; demos consume it as a static URL via the `og:image` meta tags.
+
+Local container test:
+
+```bash
+docker build -f apps/snapshot-proxy/Dockerfile -t portal-snapshot-proxy .
+docker run --rm -p 3030:8080 portal-snapshot-proxy
+curl http://localhost:3030/render/pair?w=1200\&h=630 -o /tmp/og.png
+```
+
+Fly.io deploy (one-time setup, then deploys):
+
+```bash
+fly launch --config fly.snapshot-proxy.toml --no-deploy   # picks app name + region; rewrites the `app =` line
+fly deploy --config fly.snapshot-proxy.toml
+```
+
+After deploy, point each demo's `<meta name="portal:snapshot-proxy">` (in the index.html files) at the Fly URL — both the static `og:image` content and the meta config tag the JS reads.
+
+The image is heavier than a typical Node image (~600 MB) because `gl@9.x` is a node-gyp native module that depends on Mesa + ANGLE shared libs at runtime. The Dockerfile installs:
+
+- build toolchain (`build-essential`, `python3`, `pkg-config`) for the install-time native build
+- `libxi-dev`, `libglu1-mesa-dev`, `libglew-dev` (the canonical headless-gl deps)
+- `libwayland-client0`, `libxcb*`, `libxshmfence1` (ANGLE dlopens these on first gl context creation; missing them shows up as a segfault, not at install time)
+- `xvfb` + a small entrypoint that backgrounds Xvfb on `:99` (ANGLE's GLES backend opens an X display by default; in a container with no real display you get *"Could not open the default X display"*)
+
+Container cold-start adds ~650 ms over bare-metal cold-start; warm requests are byte-for-byte identical to bare-metal. Idle Fly machines auto-stop and add ~1–2 s to the next request that wakes them. Set `auto_stop_machines = "off"` in `fly.snapshot-proxy.toml` if a cold-start bump pushes a crawler past its timeout budget.
+
+The proxy is **not** an open URL relay — input params are `scene` (registry-gated), `pose` (six floats), `w/h/depth` (clamped ints). No way to coerce it into reaching internal services, so SSRF risk is zero. Resource-abuse defenses (rate limit, edge cache, signed URLs) aren't wired in yet — add them if the proxy starts taking real public traffic.
+
 ## Workspace layout
 
 ```txt
@@ -199,6 +231,8 @@ const result = link.frame({ renderer, hostCamera, dt })
    - **Droste cascade demo** (`packages/portal-headless-three/src/droste.test.ts`) builds an N-level cascade where each level renders a depth-coloured scene, asks the next level for a frame over loopback, and composites. With perfectly self-similar mirror geometry (cam pose preserved by the source/target normal-flip pairing), doors must shrink at each level (`0.7^depth`) or every level samples its own door region in the next level's frame and the recursion collapses to a uniform colour — fixing this gave the classic Droste nested rings. Tests through depth 5 (six visible levels).
    - **Snapshot proxy** (`apps/snapshot-proxy`, `npm run dev:proxy`) is the smallest possible HTTP wrapper: `GET /render?depth=N&pose=px,py,pz,fx,fy,fz&w=480&h=320` returns a PNG of the cascade at that pose. ~300 ms per request at depth 4, 800×600. Built so a downstream project (e.g. celestiary) can either host this proxy with its own scene module registered or import `portal-headless-three` directly into its server.
 
+10. **Permalinks + social previews on the demos.** All three browser demos (`dev:three`, `dev:iframe`, `dev:worker`) now share the `?pose=…` permalink format and the press-`P` copy gesture, and each `index.html` declares OG/Twitter meta tags whose `og:image` points at the snapshot-proxy's `/render/pair` endpoint. Crawlers without JS see a default-pose snapshot of the scene; JS-aware previewers see the URL updated to reflect the current `?pose=` after the page boots. The proxy gained a scene registry (`SCENES` in `apps/snapshot-proxy/src/scenes/registry.ts`) so `?scene=NAME` dispatches uniformly; the new `pair` scene reconstructs the demos' worldA + worldB-through-portal composite server-side using `makeHeadlessTarget` + `makeHeadlessEndpoint` over a `createLoopbackPair`. Cold first request ~240 ms; warm 1200×630 (OG dims) ~155 ms; warm 480×320 ~75 ms — well under typical crawler timeouts, so on-demand rendering is viable without pre-rendering or a CDN cache for v1.
+
 ### Next
 
 10. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
@@ -217,7 +251,7 @@ State for in-flight work and known gaps. We track these here rather than in issu
 
 ### Performance characterisation
 - **Per-depth Droste render time.** How does cost scale with N? Linear by construction (each level is its own gl context + scene render), but constant-factor matters: `gl` context creation is ~50–150 ms, jsdom init is one-time, and there's a fixed pack/blit per level. Open question: is there a knee around N=4 or N=8 where per-context overhead dominates, and should we pool gl contexts in `snapshot-proxy` to amortise it?
-- **Snapshot-proxy throughput.** Current implementation creates fresh contexts per request and tears them down after responding. Easy to drop to ~50 ms/req with a context pool but adds a class of state-leak bugs. Defer until we have a real workload that warrants it.
+- **Snapshot-proxy throughput.** Current implementation creates fresh contexts per request and tears them down after responding. Easy to drop to ~50 ms/req with a context pool but adds a class of state-leak bugs. Pair-scene measurements (2026-04-29): cold first req ~240 ms, warm 1200×630 ~155 ms, warm 480×320 ~75 ms, droste depth=4 1200×630 ~250 ms. All comfortably under the ~5 s crawler timeout — pooling is a future-perf nice-to-have, not a correctness blocker.
 
 ### Architecture gaps surfaced by the headless work
 - **Multi-child portals per scene.** `IframeTargetConfig.portals?: ChildPortal[]` accepts an array but v1 only composites the first child (with a `console.warn` for the multi-child case). Two ways to lift: (a) per-child stencil refs that the caller coordinates with each child endpoint's `stencilRef`, OR (b) cache scene depth between children so each child's mask write can depth-test against source geometry. (a) is simpler API-wise; (b) is more correct. Pick when there's a use case.
@@ -225,9 +259,10 @@ State for in-flight work and known gaps. We track these here rather than in issu
 - **`makeHeadlessEndpoint` doesn't run the bg-pixel depth-clip in the iframe compositor.** The headless compositor special-cases `depth01 >= 0.99` because the depth-pack→RGBA8→unpack round-trip loses precision at the top of the range. The browser-side `makeIframeEndpoint`'s shader doesn't have this guard. If we ever try to drive a browser host from a headless child, the browser's compositor would discard bg pixels — needs the same threshold lifted.
 
 ### Loose ends to wire
-- **Snapshot-proxy scene registry.** Currently only the Droste cascade. Adding a second scene (the iframe demo's worldB swarm is the natural choice) would validate the registry pattern before celestiary brings its own scene module.
 - **Permalink format consistency.** `encodeCameraPose` produces `px,py,pz,fx,fy,fz`. Apps with their own permalinks (celestiary's `#@lat,lng,alt;t=…`) will keep their own format; the portal-side helper is for portal demo / snapshot use. Document the boundary explicitly so it doesn't get conflated.
 - **Cross-origin iframes.** The iframe transport hardcodes `'*'` for postMessage origin in dev. Production use needs origin-restricted posts on both sides — small change, but warrants its own pass.
+- **Crawler-aware OG image URLs.** Static `og:image` tags hardcode the default pose, and the JS shim that updates them after `?pose=` decoding only helps previewers that execute JS. For crawlers that read raw HTML, we'd need server-side templating (or an edge function rewriting the HTML) to inject a query-aware `og:image`. Defer until we see a use-case where shared `?pose=` permalinks need crawler-correct previews.
+- **Snapshot-proxy base URL config for prod.** Each demo's `index.html` declares the proxy URL via `<meta name="portal:snapshot-proxy" content="...">` (default `http://localhost:3030`). Prod deploys need a build-time substitution or a runtime config so the meta tag and the static `og:image` URL match the deployed proxy host.
 
 ## Core types
 

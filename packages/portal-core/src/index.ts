@@ -342,3 +342,36 @@ export const decodeCameraPose = (s: string | null | undefined): EncodedCameraPos
   }
   return pose
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot URL helpers.
+//
+// Wire-format mirror of the snapshot-proxy's HTTP surface:
+//
+//   {baseUrl}/render/{scene}?pose={encoded}&w={W}&h={H}
+//
+// Demos call this to set their og:image to a server-rendered snapshot of
+// the current view. Pure string assembly — no DOM, no fetch — so it stays
+// in portal-core alongside encodeCameraPose.
+// ---------------------------------------------------------------------------
+
+export type SnapshotUrlOpts = {
+  /** Snapshot-proxy base URL, e.g. 'http://localhost:3030'. No trailing slash. */
+  baseUrl: string
+  /** Scene name registered in the proxy (e.g. 'pair'). */
+  scene: string
+  /** Pose to render. Pass null/undefined for the scene's default pose. */
+  pose?: EncodedCameraPose | null
+  width: number
+  height: number
+}
+
+export const buildSnapshotUrl = (opts: SnapshotUrlOpts): string => {
+  const url = new URL(`${opts.baseUrl.replace(/\/$/, '')}/render/${opts.scene}`)
+  url.searchParams.set('w', String(opts.width))
+  url.searchParams.set('h', String(opts.height))
+  if (opts.pose) {
+    url.searchParams.set('pose', encodeCameraPose(opts.pose))
+  }
+  return url.toString()
+}
