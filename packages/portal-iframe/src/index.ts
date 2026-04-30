@@ -50,6 +50,37 @@ export type IframeTargetConfig = {
   tick?: (time: number) => void
   /** If true, log received pose + applied matrices once per second to console. */
   log?: boolean
+  /**
+   * Apply FXAA in the color blit. Defaults to true. Set to false to compare
+   * against a plain single-tap linearToSRGB blit — useful for diagnosing
+   * whether FXAA is responsible for an apparent brightness/lighting shift on
+   * smooth-gradient regions (it shouldn't be, but the URL-toggleable flag
+   * makes A/B comparison cheap).
+   */
+  fxaa?: boolean
+  /**
+   * Where to post 'portal:frame' responses + 'portal:ready' on init.
+   * Defaults to `parent` (the iframe-in-host case). When the host plays the
+   * destination role (after iframe-portal traversal), set this to the iframe's
+   * `contentWindow` so responses go to the iframe rather than the parent.
+   */
+  outputTarget?: Window
+  /**
+   * If set, only process incoming 'portal:setPose' messages whose `event.source`
+   * matches this. For the iframe-as-destination case, the default of `null`
+   * works (the iframe document only sees messages from its parent). For the
+   * host-as-destination case, set this to the iframe's `contentWindow` so we
+   * ignore stray messages from other windows.
+   */
+  inputFilter?: MessageEventSource | null
+  /**
+   * Called with the peer's `msg.time` on every received setPose. Lets the
+   * caller keep external clocks (e.g., the iframe's source-mode tick) in
+   * sync with the peer's clock — important when the same scene is rendered
+   * by both pages depending on which is currently active, since otherwise
+   * animation phase jumps at every traversal.
+   */
+  onTime?: (time: number) => void
 }
 
 export type IframeTarget = {
@@ -70,6 +101,16 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   const camera = new THREE.PerspectiveCamera()
   const offscreen = new OffscreenCanvas(1, 1)
   const renderer = new THREE.WebGLRenderer({ canvas: offscreen, antialias: false })
+  // Three's constructor initializes _outputColorSpace to SRGB but DOES NOT
+  // propagate to gl.drawingBufferColorSpace / gl.unpackColorSpace — that only
+  // happens via the property setter. Without this, the canvas's color-space
+  // attributes are whatever the GL context defaulted to (usually 'srgb' in
+  // modern browsers, but the spec leaves it unspecified). Setting the
+  // property explicitly forces both GL attributes to 'srgb' so the offscreen
+  // canvas's transferToImageBitmap output is unambiguously sRGB-tagged and
+  // matches the host's main canvas exactly.
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.NoToneMapping
 
   // Single scene render per frame: RT with sampleable depth texture so we can
   // derive both bitmaps from one pass. WebGL2 DepthTextures aren't compatible
@@ -86,9 +127,116 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   sceneRT.depthTexture = new THREE.DepthTexture(1, 1)
   sceneRT.depthTexture.type = THREE.UnsignedIntType
 
-  // Color blit: sample the RT's color attachment and write to canvas.
+  // Color blit: sample the RT's color attachment and write to canvas with
+  // linearToSRGB encoding. The default path also runs FXAA in the same pass
+  // to recover most of the AA quality lost when the scene RT had to be
+  // non-MSAA. linearToSRGB is applied per sample (not once at the end) so
+  // FXAA's luma weighting matches the sRGB domain it's tuned for.
+  //
+  // The non-FXAA path is a single-tap blit, kept compilable so callers can
+  // toggle FXAA at construction time without re-creating the renderer.
+  const useFxaa = config.fxaa ?? true
+  const colorBlitFragmentShader = useFxaa
+    ? `
+      uniform sampler2D tex;
+      uniform vec2 invResolution;
+      varying vec2 vUv;
+
+      vec3 linearToSRGB(vec3 v) {
+        return mix(
+          pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
+          v * 12.92,
+          vec3(lessThanEqual(v, vec3(0.0031308)))
+        );
+      }
+
+      vec3 sampleSRGB(vec2 uv) {
+        return linearToSRGB(texture2D(tex, uv).rgb);
+      }
+
+      // Lottes-2011 "console" FXAA. Tuned for cheapness over precision —
+      // five corner samples for edge detection, four extra samples along the
+      // detected edge direction, no sub-pixel quality search.
+      void main() {
+        const float REDUCE_MIN = 1.0 / 128.0;
+        const float REDUCE_MUL = 1.0 / 8.0;
+        const float SPAN_MAX = 8.0;
+        const vec3 LUMA = vec3(0.299, 0.587, 0.114);
+
+        vec3 rgbNW = sampleSRGB(vUv + vec2(-1.0, -1.0) * invResolution);
+        vec3 rgbNE = sampleSRGB(vUv + vec2( 1.0, -1.0) * invResolution);
+        vec3 rgbSW = sampleSRGB(vUv + vec2(-1.0,  1.0) * invResolution);
+        vec3 rgbSE = sampleSRGB(vUv + vec2( 1.0,  1.0) * invResolution);
+        vec3 rgbM  = sampleSRGB(vUv);
+
+        float lumaNW = dot(rgbNW, LUMA);
+        float lumaNE = dot(rgbNE, LUMA);
+        float lumaSW = dot(rgbSW, LUMA);
+        float lumaSE = dot(rgbSE, LUMA);
+        float lumaM  = dot(rgbM,  LUMA);
+
+        float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+        float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+        // Edge direction = perpendicular to local luma gradient, in pixel
+        // space. Sign convention is irrelevant since we sample +/- along it.
+        vec2 dir;
+        dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+        dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+        float dirReduce = max(
+          (lumaNW + lumaNE + lumaSW + lumaSE) * 0.25 * REDUCE_MUL,
+          REDUCE_MIN
+        );
+        float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+        dir = clamp(dir * rcpDirMin, -SPAN_MAX, SPAN_MAX) * invResolution;
+
+        // Two-tap inner pair (rgbA) and four-tap outer blend (rgbB). If the
+        // longer-distance blend wanders outside the local luma range — i.e.
+        // we picked up a dissimilar feature past the edge — fall back to the
+        // safer inner pair.
+        vec3 rgbA = 0.5 * (
+          sampleSRGB(vUv + dir * (1.0 / 3.0 - 0.5)) +
+          sampleSRGB(vUv + dir * (2.0 / 3.0 - 0.5))
+        );
+        vec3 rgbB = rgbA * 0.5 + 0.25 * (
+          sampleSRGB(vUv + dir * -0.5) +
+          sampleSRGB(vUv + dir *  0.5)
+        );
+
+        float lumaB = dot(rgbB, LUMA);
+        vec3 outRgb = (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
+
+        gl_FragColor = vec4(outRgb, 1.0);
+      }
+    `
+    : `
+      uniform sampler2D tex;
+      uniform vec2 invResolution;
+      varying vec2 vUv;
+
+      vec3 linearToSRGB(vec3 v) {
+        return mix(
+          pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
+          v * 12.92,
+          vec3(lessThanEqual(v, vec3(0.0031308)))
+        );
+      }
+
+      void main() {
+        // invResolution kept in the uniform set so the shared resize block
+        // can update it unconditionally; unused on this path.
+        vec2 _unused = invResolution;
+        vec4 c = texture2D(tex, vUv);
+        gl_FragColor = vec4(linearToSRGB(c.rgb), c.a);
+      }
+    `
+
   const colorBlitMaterial = new THREE.ShaderMaterial({
-    uniforms: { tex: { value: null as THREE.Texture | null } },
+    uniforms: {
+      tex: { value: null as THREE.Texture | null },
+      invResolution: { value: new THREE.Vector2(1, 1) }
+    },
     vertexShader: `
       varying vec2 vUv;
       void main() {
@@ -96,13 +244,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
         gl_Position = vec4(position.xy, 0.0, 1.0);
       }
     `,
-    fragmentShader: `
-      uniform sampler2D tex;
-      varying vec2 vUv;
-      void main() {
-        gl_FragColor = texture2D(tex, vUv);
-      }
-    `,
+    fragmentShader: colorBlitFragmentShader,
     depthTest: false,
     depthWrite: false
   })
@@ -157,6 +299,8 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
   let lastLog = 0
   const lookTarget = new THREE.Vector3()
   const hostOrigin = config.hostOrigin ?? '*'
+  const outputTarget: Window = config.outputTarget ?? parent
+  const inputFilter = config.inputFilter ?? null
   const fmt = (a: ArrayLike<number>) =>
     `[${Array.from(a, (n) => n.toFixed(3)).join(', ')}]`
 
@@ -167,11 +311,12 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       background: config.background ?? defaultBackground(config.scene),
       viewport: { width: offscreen.width, height: offscreen.height }
     }
-    parent.postMessage(msg, hostOrigin)
+    outputTarget.postMessage(msg, hostOrigin)
   }
 
   const onMessage = (ev: MessageEvent): void => {
     if (!running) return
+    if (inputFilter !== null && ev.source !== inputFilter) return
     const msg = ev.data as PortalMessage
     if (!msg || typeof msg !== 'object') return
     if (msg.type === 'portal:setPose') {
@@ -187,6 +332,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 
   const renderFrame = (msg: PortalSetPoseMessage): void => {
     config.tick?.(msg.time)
+    config.onTime?.(msg.time)
 
     const { pose, projection, viewport } = msg
 
@@ -195,6 +341,10 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       offscreen.height = viewport.height
       renderer.setSize(viewport.width, viewport.height, false)
       sceneRT.setSize(viewport.width, viewport.height)
+      colorBlitMaterial.uniforms.invResolution.value.set(
+        1 / viewport.width,
+        1 / viewport.height
+      )
     }
 
     camera.position.set(pose.position[0], pose.position[1], pose.position[2])
@@ -249,7 +399,7 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
       projection: matToArray(camera.projectionMatrix),
       view: matToArray(camera.matrixWorldInverse)
     }
-    parent.postMessage(frame, hostOrigin, [colorBitmap, depthBitmap])
+    outputTarget.postMessage(frame, hostOrigin, [colorBitmap, depthBitmap])
 
     if (config.log && msg.time - lastLog > 1) {
       lastLog = msg.time
@@ -294,14 +444,24 @@ export const makeIframeTarget = (config: IframeTargetConfig): IframeTarget => {
 
 const compositorVertexShader = `
 varying vec2 vUv;
+varying vec2 vUvNdc;
 void main() {
-  // Flip Y because the iframe's color + depth bitmaps come from
-  // OffscreenCanvas.transferToImageBitmap, and ImageBitmap-sourced textures
-  // ignore UNPACK_FLIP_Y_WEBGL (it's silently dropped by browsers + documented
-  // as such by three.js). Without this flip the sampler returns iframe NDC.y =
-  // -host_NDC.y, which manifests as iframe content appearing to "track gaze"
-  // in the opposite direction of the door when the host pitches.
+  // vUv: y-flipped, used only for SAMPLING the iframe color + depth bitmaps.
+  // ImageBitmap-sourced textures ignore UNPACK_FLIP_Y_WEBGL (browsers silently
+  // drop it; three.js documents flipY as a no-op for ImageBitmap), so the
+  // bitmap is upside-down relative to GL convention. Without this flip the
+  // sampler returns iframe NDC.y = -host_NDC.y, which manifests as iframe
+  // content appearing to "track gaze" in the opposite direction during pitch.
   vUv = vec2(uv.x, 1.0 - uv.y);
+  // vUvNdc: un-flipped, used for NDC RECONSTRUCTION (depth-clip worldPos).
+  // The iframe rendered with standard NDC orientation, so the depth value
+  // sampled at vUv corresponds to the original render's NDC.y = uv.y * 2 - 1
+  // — NOT the flipped vUv.y. Using the flipped vUv here would produce a
+  // worldPos with wrong y/z (after view-inverse and the oblique projection's
+  // y-z coupling), often landing on the camera-side of the portal plane and
+  // getting falsely discarded by the depth-clip — visible as the bottoms of
+  // balls being clipped near the portal in A-to-B.
+  vUvNdc = uv;
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }
 `
@@ -317,14 +477,7 @@ uniform vec3 destinationKeptNormal;
 uniform int debugMode;
 
 varying vec2 vUv;
-
-vec3 linearToSRGB(vec3 v) {
-  return mix(
-    pow(v, vec3(0.41666)) * 1.055 - vec3(0.055),
-    v * 12.92,
-    vec3(lessThanEqual(v, vec3(0.0031308)))
-  );
-}
+varying vec2 vUvNdc;
 
 void main() {
   float depth01 = unpackRGBAToDepth(texture2D(iframeDepth, vUv));
@@ -336,7 +489,7 @@ void main() {
     return;
   }
 
-  vec4 ndc = vec4(vUv * 2.0 - 1.0, depth01 * 2.0 - 1.0, 1.0);
+  vec4 ndc = vec4(vUvNdc * 2.0 - 1.0, depth01 * 2.0 - 1.0, 1.0);
   vec4 worldPos4 = iframeViewProjectionInverse * ndc;
   vec3 worldPos = worldPos4.xyz / worldPos4.w;
 
@@ -371,8 +524,12 @@ void main() {
     if (distFromPlane < 0.0) discard;
   }
 
+  // iframeColor is uploaded with NoColorSpace — the sample returns the raw
+  // sRGB-encoded bytes (as floats in [0,1]) the iframe target's color blit
+  // already wrote to the bitmap. Pass them through unchanged: the canvas
+  // displays bytes as sRGB, so we want sRGB on the way out.
   vec4 colorSample = texture2D(iframeColor, vUv);
-  gl_FragColor = vec4(linearToSRGB(colorSample.rgb), 1.0);
+  gl_FragColor = vec4(colorSample.rgb, 1.0);
 }
 `
 
@@ -382,7 +539,27 @@ const debugModeToInt = (m: CompositorDebugMode): number =>
   m === 'noclip' ? 1 : m === 'depth' ? 2 : m === 'worldpos' ? 3 : m === 'clip' ? 4 : 0
 
 export type IframeEndpointConfig = {
-  iframe: HTMLIFrameElement
+  /**
+   * For the host-side case (most common), pass the iframe element. The
+   * endpoint sends setPose to `iframe.contentWindow` and filters incoming
+   * frames by `event.source === iframe.contentWindow`.
+   *
+   * For the iframe-side case (after iframe-portal traversal, when the iframe
+   * page wants to query its parent), omit this and supply `peerWindow` +
+   * `peerSource` instead.
+   */
+  iframe?: HTMLIFrameElement
+  /**
+   * Direct override of the postMessage target window. Defaults to
+   * `iframe.contentWindow` when `iframe` is provided.
+   */
+  peerWindow?: Window
+  /**
+   * Direct override of the message-source filter for incoming frames.
+   * Defaults to `iframe.contentWindow` when `iframe` is provided. Pass `null`
+   * to accept frames from any source (lax — useful for testing).
+   */
+  peerSource?: MessageEventSource | null
   /** postMessage origin restriction. '*' for dev, explicit origin in prod. */
   iframeOrigin?: string
   /** Stencil ref the iframe's compositor should test against. Must match the host's stencil-mask ref. */
@@ -420,6 +597,12 @@ export type IframePortalEndpoint = PortalEndpoint & {
   }): void
   /** Composite the latest received frame onto the canvas (stencil-tested + depth-clipped). */
   renderAsDestination(renderer: THREE.WebGLRenderer): void
+  /**
+   * Compile the compositor's GLSL programs against the supplied renderer so
+   * the first `renderAsDestination` call doesn't pay program-link cost as a
+   * visible stutter. Call once at startup, before any frames have arrived.
+   */
+  prewarm(renderer: THREE.WebGLRenderer): void
 }
 
 export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEndpoint => {
@@ -430,8 +613,17 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   let lastViewProjection: THREE.Matrix4 | null = null
   let hasUploadedFrame = false
 
+  // NoColorSpace, not SRGB. The bitmap is already sRGB-encoded (the iframe
+  // target's color blit applied linearToSRGB before transferToImageBitmap),
+  // and we want to write those bytes straight to the canvas without a GPU
+  // sRGB-decode + software re-encode round-trip in the compositor. The
+  // round-trip *should* be a no-op, but in practice we saw worldA-via-portal
+  // visibly dimmer than worldA-direct in the B→A view, consistent with a
+  // double-decode somewhere in the SRGB-texture upload path. Treating the
+  // bytes as raw, paired with no encode in the compositor shader, makes the
+  // round-trip byte-exact and matches the direct-render reference exactly.
   const colorTexture = new THREE.Texture()
-  colorTexture.colorSpace = THREE.SRGBColorSpace
+  colorTexture.colorSpace = THREE.NoColorSpace
   colorTexture.minFilter = THREE.LinearFilter
   colorTexture.magFilter = THREE.LinearFilter
   colorTexture.generateMipmaps = false
@@ -478,8 +670,15 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
   compositorScene.add(mesh)
   const compositorCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
+  const peerWindow: Window | null =
+    config.peerWindow ?? config.iframe?.contentWindow ?? null
+  const peerSource: MessageEventSource | null | undefined =
+    config.peerSource !== undefined
+      ? config.peerSource
+      : (config.iframe?.contentWindow ?? null)
+
   const onMessage = (ev: MessageEvent): void => {
-    if (ev.source !== config.iframe.contentWindow) return
+    if (peerSource !== null && ev.source !== peerSource) return
     const msg = ev.data as PortalMessage
     if (!msg || typeof msg !== 'object') return
 
@@ -508,7 +707,7 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
     },
     getBackground: () => background,
     requestFrame(opts) {
-      const win = config.iframe.contentWindow
+      const win = peerWindow
       if (!win) return
       const msg: PortalSetPoseMessage = { type: 'portal:setPose', ...opts }
       win.postMessage(msg, config.iframeOrigin ?? '*')
@@ -559,6 +758,9 @@ export const makeIframeEndpoint = (config: IframeEndpointConfig): IframePortalEn
       )
 
       renderer.render(compositorScene, compositorCamera)
+    },
+    prewarm(renderer) {
+      renderer.compile(compositorScene, compositorCamera)
     }
   }
 }

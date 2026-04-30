@@ -38,7 +38,7 @@ Working in the cooperative-same-origin case:
 - two cooperating worlds (`world-a`, `world-b`) and a host that walks between them
 - a `PortalEndpoint` abstraction with two implementations: a local-three endpoint and an iframe endpoint that runs the destination world in a separate frame and ships color + packed-RGBA depth back over `postMessage`
 
-Both demos are same-origin. Cross-origin iframes, traversal across iframe portals, headless / WebRTC / multi-engine hosting are all still roadmap.
+Both demos are same-origin. Iframe-portal traversal is in (host → iframe and iframe → host, with held-key handoff and a render-then-swap CSS handshake to kill flashes). Cross-origin iframes, headless / WebRTC / multi-engine hosting are still roadmap.
 
 ## Design notes
 
@@ -176,15 +176,15 @@ const result = link.frame({ renderer, hostCamera, dt })
 
    Second implementation of `PortalEndpoint`. Each frame the host extrapolates its pose one frame ahead and posts the mirrored pose + its projection matrix; the iframe applies an oblique near-plane clip aligned with its destination anchor (so camera-side geometry is culled at the rasterizer, not just at the compositor), renders color + packed-RGBA NDC depth to an `OffscreenCanvas`, and posts both back as transferable `ImageBitmap`s. The host composites via a fullscreen quad with stencil test and a per-pixel depth-clip safety net. Same per-pixel correctness as the local case. Three subtleties documented in the demo's README: ImageBitmap-source textures require a manual `vUv.y` flip in the compositor (`UNPACK_FLIP_Y_WEBGL` is silently ignored by browsers); the iframe renders its scene *once* into a `WebGLRenderTarget` with a sampleable `DepthTexture` and derives both color and packed-depth bitmaps via fullscreen-quad blits (halves the per-frame scene work vs the naive two-pass approach); and pose prediction (default 1 frame) cancels iframe-roundtrip lag.
 
-   What's deliberately not in the basic version: traversal across the iframe portal, integration with the existing local-pair `PortalLink`, and origin-restricted `postMessage`.
+   What's deliberately not in the basic version: integration with the existing local-pair `PortalLink`, and origin-restricted `postMessage`.
+
+7. **Iframe-portal traversal (forward + reverse).** Walking through the iframe portal hands the host's pose (and the keys it's currently holding) to the iframe via `portal:traverse`; the iframe sizes its renderer to a viewport carried in the message, renders one synchronous frame, posts `portal:traverse-ack`, and only then does the host commit the CSS swap that hides itself and shows the iframe — so the user never sees a dark flash or a stretched 1-pixel buffer. The reverse direction is symmetric: the iframe walks back through its own portal door, mirrors its pose into worldA coords, and the host re-activates as the source page. While the host is the "destination" service, it runs `makeIframeTarget` against its own scene so the iframe can ask for worldA frames through the portal-back. GL programs (scene + stencil mask + compositor) are pre-warmed at module load to keep the first traversal frame stutter-free.
 
 ### Next
 
-7. **Headless / offscreen render endpoint.** Same `PortalEndpoint` contract but the implementation is a renderer with no window — `OffscreenCanvas` in a worker, or even a node-side renderer feeding frames over a websocket. Useful for compute-heavy worlds (splats, baked light) and for testing the protocol without a DOM.
+8. **Headless / offscreen render endpoint.** Same `PortalEndpoint` contract but the implementation is a renderer with no window — `OffscreenCanvas` in a worker, or even a node-side renderer feeding frames over a websocket. Useful for compute-heavy worlds (splats, baked light) and for testing the protocol without a DOM.
 
-8. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
-
-9. **Iframe-portal traversal.** Walking through an iframe portal hands state to the iframe via `endpoint.enter(state)`; the iframe takes over as the new "here." Symmetric reverse-handoff for walking back.
+9. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
 
 10. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real.
 

@@ -3,6 +3,21 @@ import * as THREE from 'three'
 export type FlyControls = {
   update: (dt: number) => void
   setOrientationFromForward: (forward: THREE.Vector3) => void
+  /**
+   * Drop pressed-key state. Used on portal traversal: focus shifts between
+   * the host and iframe windows, so keyup events get delivered to whichever
+   * window has focus AT release time. The other window misses them and ends
+   * up with stale entries in its keys Set, causing phantom WASD movement.
+   */
+  clearKeys: () => void
+  /**
+   * Snapshot the currently-pressed keys as a flat array. Used by the sender
+   * side of a portal traversal so the receiver can resume held-key motion
+   * without waiting for the OS auto-repeat to re-fire keydown.
+   */
+  getKeys: () => string[]
+  /** Restore pressed-key state from a previous snapshot (clears first). */
+  setKeys: (codes: readonly string[]) => void
 }
 
 export type FlyControlsOptions = {
@@ -61,13 +76,47 @@ export const attachBasicFlyControls = (
     }
   }
 
+  // Reset internal pitch/yaw to match a given forward vector. Used after a
+  // portal traversal hands the camera a new orientation; without this the
+  // next mouse drag snaps back to the (stale) yaw+pitch.
+  //
+  // Extraction goes through Matrix4.lookAt + YXZ Euler from quaternion, NOT
+  // asin(f.y) + atan2(-f.x, -f.z) on the forward alone. With combined yaw +
+  // pitch, the forward's components are products of trig of both angles
+  // (e.g., f.y = sin(pitch) * cos(yaw)), so extracting asin(f.y) silently
+  // loses a factor of cos(yaw) of the pitch. Symptom: oblique traversal
+  // "snaps" by a few degrees on the next controls.update() because
+  // setFromEuler(extractedPitch, extractedYaw) reconstructs a forward
+  // slightly different from the input. Building an intermediate matrix from
+  // the forward + a known up and pulling the Euler out is robust at any
+  // orientation.
+  const _orientMatrix = new THREE.Matrix4()
+  const _orientQuat = new THREE.Quaternion()
+  const _orientEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+  const _orientEye = new THREE.Vector3(0, 0, 0)
+  const _orientTarget = new THREE.Vector3()
+  const _orientUp = new THREE.Vector3(0, 1, 0)
   const setOrientationFromForward = (forward: THREE.Vector3) => {
-    const f = forward.clone().normalize()
-    pitch = Math.asin(THREE.MathUtils.clamp(f.y, -1, 1))
-    yaw = Math.atan2(-f.x, -f.z)
+    _orientTarget.copy(forward).normalize()
+    _orientMatrix.lookAt(_orientEye, _orientTarget, _orientUp)
+    _orientQuat.setFromRotationMatrix(_orientMatrix)
+    _orientEuler.setFromQuaternion(_orientQuat, 'YXZ')
+    pitch = _orientEuler.x
+    yaw = _orientEuler.y
   }
 
-  return { update, setOrientationFromForward }
+  const clearKeys = () => {
+    keys.clear()
+  }
+
+  const getKeys = () => Array.from(keys)
+
+  const setKeys = (codes: readonly string[]) => {
+    keys.clear()
+    for (const code of codes) keys.add(code)
+  }
+
+  return { update, setOrientationFromForward, clearKeys, getKeys, setKeys }
 }
 
 // Single-pointer drag-to-look on `dom`. Tracks the pointerId that started the

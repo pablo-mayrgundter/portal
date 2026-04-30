@@ -3,13 +3,16 @@ import {
   couplePoseAcrossPortal,
   type Mat4,
   type PortalPose,
+  type PortalTraverseMessage,
   type Viewport
 } from '@portal/portal-core'
 import {
   makeIframeEndpoint,
+  makeIframeTarget,
   type CompositorDebugMode
 } from '@portal/portal-iframe'
 import {
+  detectPortalCrossing,
   makeLocalEndpoint,
   makePortalPlane,
   makePortalStencilMask
@@ -60,6 +63,11 @@ const PREDICT = (() => {
   const n = Number(raw)
   return Number.isFinite(n) ? n : 0
 })()
+// Diagnostic: turn off FXAA in BOTH directions of color-blit (iframe target
+// rendering worldB, and host destination service rendering worldA). Lets us
+// A/B test whether FXAA explains an apparent brightness shift through the
+// portal vs. the direct view.
+const FXAA = params.get('fxaa') !== 'off'
 
 // Forward host's URL params to the iframe so the iframe target can pick up the
 // same flags (LOG, etc.) without us hard-coding its URL in index.html.
@@ -74,6 +82,12 @@ const iframe = document.querySelector<HTMLIFrameElement>('#target-iframe')
 if (!iframe) throw new Error('Missing #target-iframe')
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true })
+// Force the GL context's color-space attributes to known values (three's
+// constructor doesn't propagate _outputColorSpace until the setter is
+// invoked). Keeps the canvas exactly in sync with what the iframe sends back
+// over the wire — both halves of the demo render through 'srgb' canvases.
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.toneMapping = THREE.NoToneMapping
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.autoClear = false
@@ -91,7 +105,7 @@ dirLight.position.set(3, 6, 2)
 hostScene.add(dirLight)
 const hostFloor = new THREE.Mesh(
   new THREE.PlaneGeometry(18, 18),
-  new THREE.MeshStandardMaterial({ color: '#1b2a3f', roughness: 0.95 })
+  new THREE.MeshStandardMaterial({ color: '#1b2a3f', roughness: 0.95, metalness: 0.03 })
 )
 hostFloor.rotation.x = -Math.PI / 2
 hostScene.add(hostFloor)
@@ -120,6 +134,36 @@ const iframeEndpoint = makeIframeEndpoint({
   debugMode: DEBUG_MODE,
   composeRaw: COMPOSE_RAW
 })
+// Pre-compile the compositor's GLSL programs so the first portal:frame
+// arriving from the iframe doesn't pay program-link cost as a startup
+// stutter when it lands on the canvas.
+iframeEndpoint.prewarm(renderer)
+
+// Always-on destination service for the host scene. Inactive until the iframe
+// becomes the active page (after portal traversal); from then on it responds
+// to setPose from the iframe with worldA color+depth bitmaps so the iframe
+// can composite the portal-back view through its own stencil mask.
+//
+// Sends portal:ready to the iframe immediately; iframe stashes the host's
+// anchor + background so it doesn't need to hardcode them.
+const hostDestinationServiceTarget = iframe.contentWindow
+if (hostDestinationServiceTarget) {
+  const hostDestinationService = makeIframeTarget({
+    scene: hostScene,
+    anchor: hostEndpoint.getAnchor(),
+    outputTarget: hostDestinationServiceTarget,
+    inputFilter: hostDestinationServiceTarget,
+    log: LOG,
+    fxaa: FXAA
+  })
+  // Wait for the iframe document to load before announcing — postMessage to a
+  // not-yet-loaded contentWindow can race with the iframe's listener setup.
+  if (iframe.contentDocument?.readyState === 'complete') {
+    hostDestinationService.start()
+  } else {
+    iframe.addEventListener('load', () => hostDestinationService.start(), { once: true })
+  }
+}
 
 if (DEBUG_MODE !== 'off') console.log('[host] compositor debug mode:', DEBUG_MODE)
 if (COMPOSE_RAW) console.log('[host] compose=raw: bypassing stencil + depth-clip')
@@ -167,6 +211,117 @@ const sentPose: PortalPose = { position: sentPos, forward: sentFwd, up: sentUp }
 const currentPose: PortalPose = { position: currPos, forward: currFwd, up: currUp }
 let havePrev = false
 
+// Track host position frame-to-frame so we can detect crossings of the host
+// portal plane within the door extent. Set after the first frame.
+const prevHostWorldPos = new THREE.Vector3()
+let prevHostInitialized = false
+let handedOff = false
+
+const sendTraverse = (mirroredPose: PortalPose): void => {
+  if (!iframe.contentWindow) return
+  const msg: PortalTraverseMessage = {
+    type: 'portal:traverse',
+    pose: mirroredPose,
+    // Snapshot the keys the user is currently holding so the iframe's
+    // controls can pre-populate its keys-set after the focus shift —
+    // otherwise a held W (etc.) at crossing would stop motion until the
+    // OS auto-repeat eventually re-delivers the keydown.
+    pressedKeys: controls.getKeys(),
+    // Tell the iframe what size it WILL be once the host applies the
+    // fullscreen CSS swap. The iframe's own window.innerWidth is currently
+    // 1 (it's positioned offscreen at 1×1) but its renderer needs the
+    // eventual viewport dims for the synchronous pre-render — otherwise the
+    // CSS swap stretches a 1-pixel backing buffer over the whole screen.
+    viewport: { width: window.innerWidth, height: window.innerHeight }
+  }
+  iframe.contentWindow.postMessage(msg, '*')
+}
+
+// Apply the visibility swap (host hidden, iframe fullscreen). Idempotent.
+let traverseAckTimer: number | null = null
+let traverseAckApplied = false
+const applyHandoffCss = (): void => {
+  if (traverseAckApplied) return
+  traverseAckApplied = true
+  if (traverseAckTimer !== null) {
+    window.clearTimeout(traverseAckTimer)
+    traverseAckTimer = null
+  }
+  document.body.classList.add('handed-off')
+  iframe.classList.add('fullscreen')
+  iframe.contentWindow?.focus()
+  controls.clearKeys()
+  if (LOG) console.log('[host] traversal: applied CSS swap')
+}
+
+// Handle reverse-traversal messages (iframe → host). When the user walks
+// back through the iframe portal in worldB, the iframe mirrors its pose
+// into worldA coords and posts here. Restore visibility, apply the pose,
+// and let the existing source-mode frame loop pick up where it left off.
+const reverseLookTarget = new THREE.Vector3()
+window.addEventListener('message', (ev) => {
+  if (ev.source !== iframe.contentWindow) return
+  const data = ev.data
+  if (!data || typeof data !== 'object') return
+  if (data.type === 'portal:traverse-ack') {
+    applyHandoffCss()
+    return
+  }
+  if (data.type !== 'portal:traverse') return
+  const pose = data.pose as PortalPose
+  hostCamera.position.set(pose.position[0], pose.position[1], pose.position[2])
+  if (pose.up) hostCamera.up.set(pose.up[0], pose.up[1], pose.up[2])
+  if (pose.forward) {
+    reverseLookTarget.set(
+      pose.position[0] + pose.forward[0],
+      pose.position[1] + pose.forward[1],
+      pose.position[2] + pose.forward[2]
+    )
+    hostCamera.lookAt(reverseLookTarget)
+  }
+  // Sync the controls' yaw/pitch with the new orientation so the next mouse
+  // drag doesn't snap the view back.
+  if (pose.forward) {
+    const f = new THREE.Vector3(pose.forward[0], pose.forward[1], pose.forward[2])
+    controls.setOrientationFromForward?.(f)
+  }
+  // Render a full host frame (worldA + iframe-portal composite) synchronously
+  // BEFORE unhiding the host canvas, so the user sees a complete view on the
+  // first post-reverse frame instead of:
+  //   - one frame of host's stale (pre-traversal) content, or
+  //   - one frame of worldA WITHOUT the iframe portal, until RAF resumes.
+  // The iframe composite uses iframeEndpoint's most recently uploaded frame
+  // (stale by the duration of the iframe-source session) — visibly imperfect
+  // for one frame, but much smoother than the door pops-in alternative.
+  hostCamera.updateMatrixWorld(true)
+  renderer.setRenderTarget(null)
+  renderer.clear(true, true, true)
+  hostEndpoint.renderAsSource(renderer, hostCamera)
+  if (iframeEndpoint.isReady() && iframeEndpoint.hasFrame()) {
+    const tbg = iframeEndpoint.getBackground()
+    stencilBg.setRGB(tbg.r, tbg.g, tbg.b)
+    stencilMask.update(hostAnchor, hostCamera, stencilBg)
+    renderer.render(stencilMask.scene, stencilMask.camera)
+    renderer.clearDepth()
+    iframeEndpoint.renderAsDestination(renderer)
+  }
+
+  document.body.classList.remove('handed-off')
+  iframe.classList.remove('fullscreen')
+  // Pull focus back to the host window so keyboard goes to host controls.
+  window.focus()
+  // Drop stale keys tracked while host was inactive (we never got the keyup
+  // events because focus was on the iframe), then adopt the keys the iframe
+  // was holding at the moment of reverse-crossing so motion is continuous.
+  controls.clearKeys()
+  if (Array.isArray(data.pressedKeys)) controls.setKeys(data.pressedKeys)
+  // Reset traversal state so the user can step through the host portal again.
+  handedOff = false
+  prevHostInitialized = false
+  traverseAckApplied = false
+  if (LOG) console.log('[host] reverse traversal: resumed source role at', pose)
+})
+
 const extrapInto = (
   out: [number, number, number],
   prev: readonly number[],
@@ -197,6 +352,54 @@ const frame = () => {
   const time = clock.elapsedTime
 
   controls.update(dt)
+
+  // --- traversal detection: if the host stepped through the door rectangle
+  // since last frame, hand off to the iframe and stop driving the host scene.
+  if (!handedOff && iframeEndpoint.isReady()) {
+    if (!prevHostInitialized) {
+      prevHostWorldPos.copy(hostCamera.position)
+      prevHostInitialized = true
+    } else {
+      const targetAnchor = iframeEndpoint.getAnchor()
+      const sourceAnchor = hostEndpoint.getAnchor()
+      const crossing = detectPortalCrossing(
+        prevHostWorldPos,
+        hostCamera.position,
+        hostAnchor
+      )
+      if (crossing.crossed) {
+        // Mirror the current host pose across the portal pair into iframe
+        // coords and ship it as the iframe's starting camera state.
+        hostCamera.getWorldPosition(camPos)
+        camFwd.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
+        camUp.set(0, 1, 0).applyQuaternion(hostCamera.quaternion)
+        const mirrored = couplePoseAcrossPortal(
+          {
+            position: [camPos.x, camPos.y, camPos.z],
+            forward: [camFwd.x, camFwd.y, camFwd.z],
+            up: [camUp.x, camUp.y, camUp.z]
+          },
+          { source: sourceAnchor, target: targetAnchor }
+        )
+        sendTraverse(mirrored)
+        // Stop driving the iframe (no more setPose) but DON'T apply visibility
+        // CSS yet — wait for portal:traverse-ack so the iframe can render its
+        // first source frame before we swap. Otherwise we expose an empty
+        // iframe canvas for a frame, visible as a dark flash. Fallback timer
+        // forces the swap if ack never arrives (slow iframe, etc.).
+        handedOff = true
+        if (LOG) console.log('[host] traversal: awaiting iframe ack', mirrored)
+        if (traverseAckTimer !== null) window.clearTimeout(traverseAckTimer)
+        traverseAckTimer = window.setTimeout(applyHandoffCss, 250)
+      }
+    }
+    prevHostWorldPos.copy(hostCamera.position)
+  }
+
+  if (handedOff) {
+    requestAnimationFrame(frame)
+    return
+  }
 
   // --- iframe pose handoff: ask the iframe to render from the mirrored pose.
   if (iframeEndpoint.isReady()) {

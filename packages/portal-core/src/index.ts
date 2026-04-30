@@ -81,10 +81,57 @@ export type PortalFrameMessage = {
   view: Mat4
 }
 
+/**
+ * Traversal handoff. When the user crosses a portal door, the active page
+ * sends this to its peer. The peer adopts the supplied pose as its starting
+ * camera state, becomes the visible / source side, and the sender becomes
+ * inactive (or transitions to destination role).
+ *
+ * The pose is in the receiver's world coordinates — the sender mirrors it
+ * across the portal pair before posting.
+ */
+export type PortalTraverseMessage = {
+  type: 'portal:traverse'
+  pose: PortalPose
+  /**
+   * Keys the user is currently holding on the sender side (e.g. ['KeyW']).
+   * The receiver should pre-populate its own controls' pressed-key set so
+   * movement continues uninterrupted across the focus shift. Without this,
+   * keydown events that fired before the focus moved are lost — the user
+   * has to release and re-press to resume motion.
+   */
+  pressedKeys?: string[]
+  /**
+   * Viewport (CSS pixels) the receiver should size its renderer to BEFORE
+   * its first synchronous frame. Bridges the gap between the receiver's
+   * current DOM-imposed dimensions (e.g. an offscreen 1×1 host iframe) and
+   * the size it will be once the visibility swap commits. Without this, the
+   * pre-render runs at the receiver's pre-swap size; once the CSS swap
+   * enlarges the receiver, that small backing buffer stretches across the
+   * viewport for the brief window before the receiver's own resize handler
+   * fires — visible as a one-pixel smear / single-color flash mid-traversal.
+   */
+  viewport?: Viewport
+}
+
+/**
+ * Acknowledgment from the receiver of `portal:traverse`. Sent only AFTER the
+ * receiver has rendered its first source-mode frame, so the sender knows it's
+ * safe to swap visibility (hide self / show peer) without exposing an
+ * unrendered canvas mid-swap. Without this handshake the sender's CSS swap
+ * commits a frame before the receiver has paint-ready content, producing a
+ * brief dark/empty flash at the moment of crossing.
+ */
+export type PortalTraverseAckMessage = {
+  type: 'portal:traverse-ack'
+}
+
 export type PortalMessage =
   | PortalReadyMessage
   | PortalSetPoseMessage
   | PortalFrameMessage
+  | PortalTraverseMessage
+  | PortalTraverseAckMessage
 
 export type CoupledPoseConfig = {
   source: PortalAnchor
