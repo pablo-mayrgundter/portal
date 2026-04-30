@@ -17,7 +17,7 @@ import {
   makePortalPlane,
   makePortalStencilMask
 } from '@portal/portal-three'
-import { attachBasicFlyControls } from './controls'
+import { attachBasicFlyControls } from '@portal/portal-controls'
 
 // ---------------------------------------------------------------------------
 // Debug toggles via URL params, e.g. http://localhost:5173/?debug=noclip&log=1

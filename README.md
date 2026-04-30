@@ -81,6 +81,8 @@ Controls in the demo:
   /portal-three           # three.js bindings: stencil mask, coupled camera,
                           # local endpoint, link pipeline, traversal helpers
   /portal-iframe          # iframe transport: depth-pack target + depth-aware compositor
+  /portal-controls        # shared host fly-controls: keyboard WASD, drag-to-look,
+                          # on-screen WASD pad for touch devices
 ```
 
 `portal-core` is engine-agnostic and tested with vitest. `portal-three` translates between three.js scenes/cameras and the core data types. `portal-iframe` adds a postMessage transport so a portal's destination world can live in a separate iframe with its own engine context.

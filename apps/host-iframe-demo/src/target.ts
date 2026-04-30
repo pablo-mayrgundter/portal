@@ -17,7 +17,7 @@ import {
   type PortalTraverseAckMessage,
   type PortalTraverseMessage
 } from '@portal/portal-core'
-import { attachBasicFlyControls } from './controls'
+import { attachBasicFlyControls } from '@portal/portal-controls'
 
 const params = new URLSearchParams(location.search)
 const LOG = params.get('log') === '1'

@@ -6,7 +6,7 @@ import {
 } from '@portal/portal-three'
 import { createWorldA } from './world-a'
 import { createWorldB } from './world-b'
-import { attachBasicFlyControls } from './controls'
+import { attachBasicFlyControls } from '@portal/portal-controls'
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
