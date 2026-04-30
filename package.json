@@ -10,6 +10,8 @@
     "dev": "npm run dev:three",
     "dev:three": "npm run dev -w @portal/host-three",
     "dev:iframe": "npm run dev -w @portal/host-iframe-demo",
+    "dev:worker": "npm run dev -w @portal/host-worker-demo",
+    "dev:proxy": "npm run dev -w @portal/snapshot-proxy",
     "build": "npm run build --workspaces --if-present",
     "check": "npm run check --workspaces --if-present",
     "test": "vitest run",

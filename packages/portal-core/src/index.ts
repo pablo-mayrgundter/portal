@@ -286,3 +286,59 @@ export const obliqueClipPlaneForCamera = (
   }
   return { normal, constant }
 }
+
+// ---------------------------------------------------------------------------
+// Permalinks: pack a camera pose into a compact URL-param string and back.
+//
+// Used by the demo apps to drop into a reproducible viewing position — useful
+// for filing parallax / alignment bugs (paste a permalink, see the exact same
+// pose) and for A/B comparing transports (open the iframe demo and the
+// headless demo at the same `?pose=` to compare composited output side by
+// side).
+//
+// Wire format: comma-separated decimal numbers, no spaces:
+//   px,py,pz,fx,fy,fz[,ux,uy,uz]
+// Position uses millimetre precision (3 decimals); direction components use
+// 1e-4 precision (4 decimals). Both rounded to keep URLs short. Up is
+// optional — if omitted on decode, callers can substitute world-up.
+// ---------------------------------------------------------------------------
+
+export type EncodedCameraPose = {
+  position: Vec3
+  forward: Vec3
+  up?: Vec3
+}
+
+const POSITION_PRECISION = 3
+const DIRECTION_PRECISION = 4
+
+const fix = (n: number, decimals: number): string => {
+  if (!Number.isFinite(n)) return '0'
+  const s = n.toFixed(decimals)
+  return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s
+}
+
+export const encodeCameraPose = (pose: EncodedCameraPose): string => {
+  const parts: string[] = []
+  for (const n of pose.position) parts.push(fix(n, POSITION_PRECISION))
+  for (const n of pose.forward) parts.push(fix(n, DIRECTION_PRECISION))
+  if (pose.up) {
+    for (const n of pose.up) parts.push(fix(n, DIRECTION_PRECISION))
+  }
+  return parts.join(',')
+}
+
+export const decodeCameraPose = (s: string | null | undefined): EncodedCameraPose | null => {
+  if (!s) return null
+  const parts = s.split(',').map((t) => Number(t.trim()))
+  if (parts.some((n) => !Number.isFinite(n))) return null
+  if (parts.length !== 6 && parts.length !== 9) return null
+  const pose: EncodedCameraPose = {
+    position: [parts[0], parts[1], parts[2]],
+    forward: [parts[3], parts[4], parts[5]]
+  }
+  if (parts.length === 9) {
+    pose.up = [parts[6], parts[7], parts[8]]
+  }
+  return pose
+}

@@ -262,6 +262,7 @@ omitted.
 | `?scene=grid` | Replace the iframe's swarm scene with a static cube lattice (no animation, predictable geometry) for cleaner alignment debugging. |
 | `?fxaa=off` | Disable FXAA in the color blit (both directions). The default path runs a Lottes-2011 console FXAA on sRGB-encoded samples to recover most of the AA quality lost when the scene RT had to be non-MSAA. Toggle off to A/B test against a single-tap `linearToSRGB` blit when diagnosing brightness or edge-aliasing differences. |
 | `?log=1` | 1 Hz console logging on both halves: pose round-trip, viewport, applied camera basis, view matrix. |
+| `?pose=px,py,pz,fx,fy,fz` | Permalink: land on a specific host-camera position + forward direction. Press `P` in-app to capture the current pose into the URL and copy a shareable permalink to the clipboard. The iframe pose is derived from the host pose via the portal-pair coupling, so encoding the host alone is enough to reproduce the full composite. |
 
 ## Files of interest
 

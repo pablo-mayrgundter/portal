@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   couplePoseAcrossPortal,
+  decodeCameraPose,
+  encodeCameraPose,
   intersectSegmentWithDoor,
   intersectSegmentWithPlane,
   obliqueClipPlaneForCamera,
@@ -105,6 +107,51 @@ describe('projectOntoPlaneRect', () => {
     const out = projectOntoPlaneRect([0.4, 1.6 + 0.2, -3.5], [0, 1.6, -3.5], [1, 0, 0], [0, 1, 0])
     expect(out.x).toBeCloseTo(0.4, 6)
     expect(out.y).toBeCloseTo(0.2, 6)
+  })
+})
+
+describe('encodeCameraPose / decodeCameraPose', () => {
+  it('round-trips position + forward at the documented precision', () => {
+    const encoded = encodeCameraPose({
+      position: [0.1234567, 1.6, -3.5],
+      forward: [0, 0, -1]
+    })
+    const decoded = decodeCameraPose(encoded)
+    expect(decoded).not.toBeNull()
+    // 3 decimals on position, so .1234567 collapses to .123
+    expect(decoded!.position[0]).toBeCloseTo(0.123, 3)
+    expect(decoded!.position[1]).toBeCloseTo(1.6, 3)
+    expect(decoded!.position[2]).toBeCloseTo(-3.5, 3)
+    expect(decoded!.forward).toEqual([0, 0, -1])
+    expect(decoded!.up).toBeUndefined()
+  })
+
+  it('round-trips an optional up triple', () => {
+    const encoded = encodeCameraPose({
+      position: [1, 2, 3],
+      forward: [0, 0, -1],
+      up: [0, 1, 0]
+    })
+    const decoded = decodeCameraPose(encoded)
+    expect(decoded?.up).toEqual([0, 1, 0])
+  })
+
+  it('omits trailing zeros to keep URLs compact', () => {
+    const encoded = encodeCameraPose({
+      position: [0, 1.6, 0],
+      forward: [0, 0, -1]
+    })
+    // Want "0,1.6,0,0,0,-1" not "0.000,1.600,0.000,0.0000,0.0000,-1.0000".
+    expect(encoded).toBe('0,1.6,0,0,0,-1')
+  })
+
+  it('returns null for malformed input', () => {
+    expect(decodeCameraPose('')).toBeNull()
+    expect(decodeCameraPose(null)).toBeNull()
+    expect(decodeCameraPose(undefined)).toBeNull()
+    expect(decodeCameraPose('not,a,pose')).toBeNull()
+    expect(decodeCameraPose('1,2,3')).toBeNull() // wrong length
+    expect(decodeCameraPose('1,2,3,4,5,6,7,8')).toBeNull() // wrong length
   })
 })
 
