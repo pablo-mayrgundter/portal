@@ -106,6 +106,29 @@ Container cold-start adds ~650 ms over bare-metal cold-start; warm requests are 
 
 The proxy is **not** an open URL relay — input params are `scene` (registry-gated), `pose` (six floats), `w/h/depth` (clamped ints). No way to coerce it into reaching internal services, so SSRF risk is zero. Resource-abuse defenses (rate limit, edge cache, signed URLs) aren't wired in yet — add them if the proxy starts taking real public traffic.
 
+## Deploying the share proxy
+
+`apps/share-proxy` is a tiny Express service (~150 lines) that sits between social-media crawlers and the static demo hosting. Its only job is to inject the request URL's `?pose=` into the `og:image` / `twitter:image` meta tags before serving the HTML — that's how a permalink shared on Twitter / Facebook / Slack ends up with a preview that matches the actual view, not the page's default-pose snapshot.
+
+Why it exists: GitHub Pages is pure static, so meta tags are baked at build time. The demos' JS shim updates them at runtime, but crawlers don't run JS. The share proxy is the SSR step the demo doesn't otherwise have.
+
+```bash
+docker build -f apps/share-proxy/Dockerfile -t portal-share .
+docker run --rm -p 3041:8080 -e UPSTREAM_BASE=https://pablo-mayrgundter.github.io/portal portal-share
+curl 'http://localhost:3041/?pose=1,2,3,0,0,-1' | grep og:image   # rewritten
+```
+
+```bash
+fly launch --config fly.portal-share.toml --org bldrs --no-deploy
+fly deploy --config fly.portal-share.toml
+```
+
+It's a full reverse proxy: requests to `/portal/assets/...` and other static paths are streamed through to the upstream unchanged. Only HTML responses with a `?pose=` query are buffered + cheerio-rewritten. ~100 ms cold, ~30 ms warm, 113 MB resident.
+
+`UPSTREAM_BASE` env var lets one image serve any GH-Pages-style demo. Point it at celestiary's deploy via `fly secrets set UPSTREAM_BASE=https://bldrs.ai/celestiary` to reuse the same proxy.
+
+Demos opt in by setting `VITE_SHARE_BASE` in their `.env` (e.g. `VITE_SHARE_BASE=https://portal-share.fly.dev/`). When set, press-`P` writes a share-proxy URL to the clipboard instead of the page's own URL. Local dev keeps copying `localhost:5173` URLs because the env var stays unset.
+
 ## Workspace layout
 
 ```txt
@@ -113,6 +136,8 @@ The proxy is **not** an open URL relay — input params are `scene` (registry-ga
   /host-three             # demo host: two local worlds + traversable portal
   /host-iframe-demo       # demo host: source world + iframe-served portal
   /host-worker-demo       # demo host: source world + Web Worker portal (no DOM)
+  /share-proxy            # node HTTP service: GH-Pages reverse proxy that
+                          # rewrites og:image meta tags per request `?pose=`
   /snapshot-proxy         # node HTTP service: server-side render to PNG
 /packages
   /portal-core            # pure-data geometry + types + wire protocol (no three.js dep)

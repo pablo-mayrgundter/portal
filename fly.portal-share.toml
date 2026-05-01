@@ -1,0 +1,43 @@
+# Fly.io config for portal-share, the OG-rewriting reverse proxy that sits
+# in front of the GitHub Pages demo so social-share permalinks (?pose=...)
+# get crawler-correct preview images.
+#
+# Deploy from the repo root:
+#
+#   fly launch --config fly.portal-share.toml --org bldrs --no-deploy
+#   fly deploy --config fly.portal-share.toml
+
+app = "portal-share"
+primary_region = "iad"
+
+[build]
+  dockerfile = "apps/share-proxy/Dockerfile"
+
+[env]
+  PORT = "8080"
+  # Default upstream is this repo's GH Pages deploy. Override per-deploy:
+  #   fly secrets set UPSTREAM_BASE=https://bldrs.ai/celestiary -a portal-share
+  # to point the same image at a different demo origin.
+  UPSTREAM_BASE = "https://pablo-mayrgundter.github.io/portal"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Auto-stop is fine here — cold-start is sub-second (no native modules,
+  # no jsdom, no Xvfb), so a sleeping machine wakes faster than a crawler
+  # times out. Bump min_machines_running to 1 if you want zero cold-start.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "5s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  # 256 MB is plenty: cheerio + a streamed proxy at low req/s sits at <100 MB.

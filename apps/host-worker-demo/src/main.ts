@@ -126,6 +126,21 @@ const updateSocialPreview = (pose: EncodedCameraPose | null): void => {
 }
 updateSocialPreview(initialPose)
 
+// VITE_SHARE_BASE: when set, press-P copies a permalink rooted at the
+// share-proxy (which rewrites og:image based on ?pose= for crawler-correct
+// social previews). When unset (e.g. local dev), copy the current page URL.
+const SHARE_BASE = import.meta.env.VITE_SHARE_BASE as string | undefined
+const buildShareUrl = (encoded: string): string => {
+  if (SHARE_BASE) {
+    const u = new URL(SHARE_BASE)
+    u.searchParams.set('pose', encoded)
+    return u.toString()
+  }
+  const u = new URL(location.href)
+  u.searchParams.set('pose', encoded)
+  return u.toString()
+}
+
 const camForward = new THREE.Vector3()
 window.addEventListener('keydown', (ev) => {
   if (ev.code !== 'KeyP' || ev.metaKey || ev.ctrlKey || ev.altKey) return
@@ -135,12 +150,13 @@ window.addEventListener('keydown', (ev) => {
     forward: [camForward.x, camForward.y, camForward.z]
   }
   const encoded = encodeCameraPose(pose)
-  const url = new URL(location.href)
-  url.searchParams.set('pose', encoded)
-  history.replaceState(null, '', url.toString())
-  navigator.clipboard?.writeText(url.toString()).catch(() => {})
+  const localUrl = new URL(location.href)
+  localUrl.searchParams.set('pose', encoded)
+  history.replaceState(null, '', localUrl.toString())
+  const shareUrl = buildShareUrl(encoded)
+  navigator.clipboard?.writeText(shareUrl).catch(() => {})
   updateSocialPreview(pose)
-  console.log('[host] permalink:', url.toString())
+  console.log('[host] permalink:', shareUrl)
 })
 
 const onResize = (): void => {
