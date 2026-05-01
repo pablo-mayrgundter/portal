@@ -15,9 +15,13 @@ primary_region = 'iad'
 [http_service]
   internal_port = 8080
   force_https = true
+  # Keep at least one machine running. Auto-stop made cold-start cost ~20 s
+  # (container boot + jsdom + first gl context init), past social-media
+  # crawler timeouts (~5–10 s) — preview previews failed silently. One
+  # always-on shared-cpu-1x is ~$5/mo; surplus machines still auto-stop.
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
   [[http_service.checks]]
     interval = '30s'

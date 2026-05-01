@@ -55,6 +55,13 @@ const handleRender = (req: Request, res: Response): void => {
     res.set('Content-Type', 'image/png')
     res.set('X-Render-MS', String(elapsed))
     res.set('X-Render-Scene', scene.name)
+    // Aggressive caching: scene + pose + w + h + depth are deterministic
+    // inputs and the rendered PNG is byte-identical for the same query. A
+    // social-share permalink doesn't change once shared, so a 1-day TTL
+    // lets any intermediary (Fly's edge cache, Cloudflare, Facebook's own
+    // image cache) absorb repeat traffic. Without this, FB re-fetches per
+    // share and pays the 20 s cold-start each time → no preview.
+    res.set('Cache-Control', 'public, max-age=86400, immutable')
     for (const [k, v] of Object.entries(meta)) res.set(k, v)
     res.send(png)
   } catch (err) {
