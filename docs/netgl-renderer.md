@@ -1,15 +1,28 @@
 # `NetGLRenderer` — design notes
 
-Status: **v0 spike passing in-process** (see `packages/portal-netgl/src/three-spike.test.ts`).
-THREE.WebGLRenderer rendering a cube through a `Proxy<WebGL2RenderingContext>`
-produces byte-equal pixels against a control render in a second context — the
-command-stream interception concept is validated. The next milestone is the
-wire layer: serialise the recorded calls onto a `PortalTransport`, replay on
-the iframe side, and prove the same parity across postMessage.
+Status:
 
-The first prototype targets a three↔three pair over an iframe
-`windowTransport`; that path proves the command-stream NetGL concept end to
-end before the protocol generalises across engines.
+- **v0 (in-process Proxy) passing** — `packages/portal-netgl/src/three-spike.test.ts`.
+  `THREE.WebGLRenderer` driving a `Proxy<WebGL2RenderingContext>` that
+  fans every call out to a second GL context in the same process produces
+  byte-equal pixels against a direct control render. Proves the
+  interception concept: three's GL stream can be intercepted without
+  three noticing.
+- **v0.5 (recorder + replay through PortalTransport) passing** —
+  `packages/portal-netgl/src/loopback-spike.test.ts`. Same cube, same
+  parity, but the two sides no longer share an object graph. The
+  recorder mints opaque netglIDs for every GL resource, encodes each
+  call as a structured-clone-safe `NetGLCall`, and posts it onto
+  `createLoopbackPair().hostTransport`. The replay engine listens on the
+  target side, decodes netglIDs against its own ID → receiver-handle
+  table, and re-executes against its WebGL2 context. This is what the
+  iframe path will use over postMessage with no protocol changes — the
+  loopback transport is API-shape-identical to `windowTransport`.
+
+The remaining work targets a real `NetGLRenderer` (three.js-level façade
+that hides the recorder construction from callers) and integration into
+`apps/host-iframe-demo` to retire the depth-pack codepath for three↔three
+pairs.
 
 ## Goal
 
@@ -263,25 +276,33 @@ correctness change.
 
 ## Where this lives
 
-`packages/portal-netgl/`. Current state after the v0 spike:
+`packages/portal-netgl/`. Current state after the v0 + v0.5 spikes:
 
 ```
 packages/portal-netgl/
   src/
-    proxy.ts                 // makeNetGLProxy({ shadow, receiver })
+    messages.ts              // NetGLCall + NetGLEncodedValue (wire shape)
+    proxy.ts                 // makeNetGLProxy — in-process two-context dispatch
+    recorder.ts              // makeNetGLRecorder — Proxy that emits NetGLCalls
+                             //   over a `post(call)` function
+    replay.ts                // makeNetGLReplay — consumes NetGLCalls and
+                             //   executes against a receiver context
     index.ts                 // public exports
     spike.test.ts            // clear + manual triangle through the proxy
-    three-spike.test.ts      // THREE.WebGLRenderer cube vs control,
-                             //   pixel parity assertion
+    three-spike.test.ts      // v0: in-process proxy, three cube vs control
+    loopback-spike.test.ts   // v0.5: recorder → createLoopbackPair → replay,
+                             //   three cube vs control
 ```
 
-The v0 spike does in-process dispatch — the proxy holds direct references
-to both contexts. The next milestone (`replay.ts` + `messages.ts`) inserts a
-serialise-then-deserialise step between them and proves the same parity
-across a `PortalTransport`. After that, `renderer.ts` exposes a
-`NetGLRenderer` that wires the proxy into a stock `THREE.WebGLRenderer`
-construction so callers can swap renderers without touching their scene
-setup.
+The two spikes share a build of the same scene (a 64×64 textureless cube
+through `MeshBasicMaterial`); both must hit byte-equal pixels against a
+direct control render to pass.
+
+Next: `renderer.ts` exposes a `NetGLRenderer` that wires the recorder into a
+stock `THREE.WebGLRenderer` construction so callers can swap renderers
+without touching their scene setup. After that, integration into
+`apps/host-iframe-demo` so the iframe-portal's destination side talks
+NetGL over `windowTransport` instead of frame-RPC.
 
 ## Spike scope
 
