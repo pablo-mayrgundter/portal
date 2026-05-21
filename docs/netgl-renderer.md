@@ -1,8 +1,15 @@
 # `NetGLRenderer` — design notes
 
-Status: pre-spike scoping. The first prototype targets a three↔three pair
-over an iframe `windowTransport`; that path proves the command-stream
-NetGL concept before the protocol generalises across engines.
+Status: **v0 spike passing in-process** (see `packages/portal-netgl/src/three-spike.test.ts`).
+THREE.WebGLRenderer rendering a cube through a `Proxy<WebGL2RenderingContext>`
+produces byte-equal pixels against a control render in a second context — the
+command-stream interception concept is validated. The next milestone is the
+wire layer: serialise the recorded calls onto a `PortalTransport`, replay on
+the iframe side, and prove the same parity across postMessage.
+
+The first prototype targets a three↔three pair over an iframe
+`windowTransport`; that path proves the command-stream NetGL concept end to
+end before the protocol generalises across engines.
 
 ## Goal
 
@@ -256,23 +263,25 @@ correctness change.
 
 ## Where this lives
 
-Eventual home: `packages/portal-netgl/` (new package). Skeleton:
+`packages/portal-netgl/`. Current state after the v0 spike:
 
 ```
 packages/portal-netgl/
   src/
-    proxy.ts             // makeProxiedGL + Recorder
-    replay.ts            // ReplayEngine
-    renderer.ts          // NetGLRenderer (extends THREE.WebGLRenderer)
-    messages.ts          // NetGLMessage union + encode/decode
-    index.ts             // public exports
-  test/
-    replay.spike.test.ts // in-process spike
+    proxy.ts                 // makeNetGLProxy({ shadow, receiver })
+    index.ts                 // public exports
+    spike.test.ts            // clear + manual triangle through the proxy
+    three-spike.test.ts      // THREE.WebGLRenderer cube vs control,
+                             //   pixel parity assertion
 ```
 
-Pre-spike, none of this exists. Spike goal is to prove the
-in-process replay works; if it does, that's when we materialise the
-package.
+The v0 spike does in-process dispatch — the proxy holds direct references
+to both contexts. The next milestone (`replay.ts` + `messages.ts`) inserts a
+serialise-then-deserialise step between them and proves the same parity
+across a `PortalTransport`. After that, `renderer.ts` exposes a
+`NetGLRenderer` that wires the proxy into a stock `THREE.WebGLRenderer`
+construction so callers can swap renderers without touching their scene
+setup.
 
 ## Spike scope
 

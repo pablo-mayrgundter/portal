@@ -1,0 +1,21 @@
+{
+  "name": "@portal/portal-netgl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^25.6.0",
+    "@types/three": "^0.184.0",
+    "gl": "9.0.0-rc.10",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  }
+}
