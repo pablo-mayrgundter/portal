@@ -4,7 +4,7 @@ Live 3D portals between independent browser worlds.
 
 This is a demo lab for browser-native **spatial portals**: live, traversable views into other 3D web apps, with camera, input, and eventually avatar/world-state handoff.
 
-The later, more general protocol/project name may be **WorldLink**. For now this repo is the concrete demo: one portal pair, then many.
+The protocol that emerges from this work is **NetGL** — the realtime signalling and serialization transport linking GL contexts across processes, origins, and machines (see [Thesis](#thesis)). For now this repo is the concrete demo: one portal pair, then many.
 
 ## Thesis
 
@@ -21,11 +21,19 @@ Modern 3D web apps often sit on incompatible render stacks:
 
 Each framework provides power, but also creates an integration boundary. Portal explores a hypermedia alternative: keep engines sovereign, but make the seams explicit.
 
+The seam has to live at the right layer. Scene graphs and entity formats are the wrong layer — each engine's is incompatible by design, and standardising one is what we're trying to avoid. The least common denominator one layer down is **OpenGL**: every spatial renderer above, whatever its scene-graph dialect, ultimately emits draws to a GL/GPU surface. WebGL gives a process its own GL context. It has no sibling for *linking* GL contexts across processes, origins, or machines.
+
+**NetGL** is that missing piece: a realtime signalling and serialization transport for GL data, linking spatial hypermedia scenes. Signalling carries the things processes need to agree on across the wire — handshake, pose, time, viewport, traversal handoff. Serialization carries the things one process needs to ship to another GL context so the other side can render — a GL command stream, plus the textures, buffers, and shader programs the calls reference. The substrate is transport-agnostic: `postMessage` between iframes, `MessagePort` between workers, in-process loopback, server-side loopback, WebRTC / WebTransport across the network.
+
+The concrete Three.js shape is a **`NetGLRenderer`** — a drop-in for `THREE.WebGLRenderer` in the same family as `WebGPURenderer` or an `OffscreenCanvas`-backed renderer. Attach it to scene A at a portal endpoint; instantiate the matching counterpart in scene B's iframe. The draw calls from A's side cross the wire and execute in B's GL context. Composition happens **B-side**, in a single GL context, with full GL fidelity — no depth-pack round-trip, no per-pixel host-side compositor, no artificial limits on what kind of screen content can flow through the portal. Resources sync as draw calls reference them: when both endpoints share a process the GPU already holds the data and handles pass through unchanged (zero-copy); when they don't, textures / buffers / programs ship over the wire on first reference and cache on the receiver.
+
 A portal is not just a flat HTML page texture on a cube. It is a **live 3D scene endpoint**:
 
 ```txt
 remote world -> rendered surface -> portal material -> camera/input handoff -> optional traversal
 ```
+
+Portal is the user-facing primitive — the door in a 3D scene linking to another GL context. NetGL is the wire protocol that makes the door work across processes, origins, and machines. Both names belong; they sit at different layers.
 
 ## Status
 
@@ -217,6 +225,10 @@ type PortalEndpoint = {
 
 `makeIframeEndpoint(...)` (browser, postMessage), `makeWorkerEndpoint(...)` (browser, Web Worker), `makeHeadlessEndpoint(...)` (server-side node, loopback), and a future `makeWebrtcEndpoint(...)` are sibling implementations of the same interface — they differ only in the underlying `PortalTransport`.
 
+### NetGL granularities at the wire
+
+What these endpoint implementations *speak* is the wire form of NetGL. The message set in `packages/portal-core/src/index.ts` (`PortalReadyMessage`, `PortalSetPoseMessage`, `PortalFrameMessage`, `PortalTraverseMessage`, `PortalTraverseAckMessage`) is **frame-RPC NetGL** — one message per rendered frame, body is a color + packed-RGBA depth `ImageBitmap` pair. The future `NetGLRenderer` (see Roadmap) is **command-stream NetGL** on the same transport surface — one message per GL call (or batch), body is a serialized GL command plus a resource handle. Both granularities ride the shared `PortalTransport` interface in `packages/portal-iframe/src/index.ts` (`windowTransport`, `workerSelfTransport`, `workerHostTransport`, `createLoopbackPair`); the transport substrate is already engineered to carry whatever message shape the layer above asks of it. Frame-RPC composes well across engines that don't expose their command stream (Cesium, Unity WebGL, neural renderers). Command-stream is higher fidelity and natural for three-talks-to-three. The protocol holds the full range; endpoints pick the granularity that fits their renderer.
+
 On top of that:
 
 ```ts
@@ -260,11 +272,15 @@ const result = link.frame({ renderer, hostCamera, dt })
 
 ### Next
 
-10. **WebRTC preview portal.** For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` message becomes a video track. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
+NetGL conformance is the through-line for what's left. Each item below tightens or generalises the protocol on a different axis — the transport, the granularity, or the engines on each end.
 
-11. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real.
+11. **WebRTC preview portal.** Frame-RPC NetGL over a real-network transport. For genuinely independent endpoints (different origins, different engines, possibly different machines): the iframe protocol's `portal:frame` `ImageBitmap` becomes a video track; same signalling shape, different serialization. Trades a chunk of pixel-correctness for engine independence — bandwidth/latency story replaces the geometric coupling story, no per-pixel depth (so no host-side clip).
 
-12. **Scene merging.** Past simple preview: shared physics or selection across worlds, depth/occlusion sharing where it's possible to share at all, multi-child portal composites at one level (currently single-child).
+12. **`NetGLRenderer` prototype (three ↔ three).** Command-stream NetGL: a `THREE.WebGLRenderer` subclass (or thin wrapper) that intercepts GL calls, serializes them over a `PortalTransport`, and replays them on the iframe side against a real `WebGL2RenderingContext`. Resource sync via reference-counted handles, eager-ship on first bind, receiver-side cache. Composition happens in the iframe's GL context — full GL fidelity, no depth-pack precision loss. Validate by removing the depth-pack codepath in the iframe compositor for three↔three pairs and confirming pixel parity against today's frame-RPC path.
+
+13. **Multi-engine endpoints.** Cesium, Babylon, Unity WebGL, custom WebGPU. The first non-three engine forces the protocol to become real. Most engines won't expose their command stream, so they'll conform via frame-RPC NetGL; where an engine does permit intercepting its GL stream (or speaks WebGPU and the protocol grows a parallel command-stream form there), command-stream NetGL gives full fidelity.
+
+14. **Scene merging.** NetGL beyond per-frame: shared physics or selection across worlds, depth/occlusion sharing where it's possible to share at all, multi-child portal composites at one level (currently single-child).
 
 ## Open follow-ups
 
