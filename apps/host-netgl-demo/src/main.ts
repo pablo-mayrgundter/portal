@@ -1,0 +1,223 @@
+// Host page for the NetGL portal demo.
+//
+// Same worldA scene + portal door + stencil-mask machinery as
+// apps/host-iframe-demo, so the two demos are visually equivalent. The
+// difference is what happens between the stencil-mask render and the user
+// seeing pixels behind the door:
+//
+//   - host-iframe-demo: host posts setPose, iframe renders worldB into an
+//     OffscreenCanvas, ships ImageBitmap (color) + ImageBitmap (packed-RGBA
+//     depth) back, host composites via a fullscreen-quad shader with stencil
+//     + per-pixel depth-clip. The depth round-trip is the precision-limited
+//     step.
+//
+//   - host-netgl-demo (this file): host posts setPose, iframe's
+//     NetGLRenderer ships its draw calls themselves back over the wire, host
+//     replays them against the canvas's own WebGL2 context. worldB's
+//     geometry depth-tests against worldA's depth buffer natively. No
+//     compositor shader, no depth pack, no precision loss.
+//
+// Scope cut from host-iframe-demo for v0: no traversal (forward or
+// reverse), no permalinks/OG, no debug toggles. Add them back once the
+// transport-side composition is proven in the browser.
+
+import * as THREE from 'three'
+import {
+  couplePoseAcrossPortal,
+  type Mat4,
+  type PortalAnchor,
+  type PortalPose
+} from '@portal/portal-core'
+import { windowTransport } from '@portal/portal-iframe'
+import {
+  makeLocalEndpoint,
+  makePortalPlane,
+  makePortalStencilMask
+} from '@portal/portal-three'
+import { attachBasicFlyControls } from '@portal/portal-controls'
+import { makeNetGLReplay, type NetGLCall } from '@portal/portal-netgl'
+
+const app = document.querySelector<HTMLDivElement>('#app')
+if (!app) throw new Error('Missing #app')
+const iframe = document.querySelector<HTMLIFrameElement>('#target-iframe')
+if (!iframe) throw new Error('Missing #target-iframe')
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  stencil: true,
+  depth: true,
+  preserveDrawingBuffer: false
+})
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.toneMapping = THREE.NoToneMapping
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.autoClear = false
+app.appendChild(renderer.domElement)
+
+const hostCamera = new THREE.PerspectiveCamera(
+  70,
+  window.innerWidth / window.innerHeight,
+  0.02,
+  200
+)
+hostCamera.position.set(0, 1.6, 5.5)
+
+// ---------------------------------------------------------------------------
+// worldA — same room + blue-cube cluster as host-iframe-demo so the two
+// demos are visually side-by-side comparable.
+// ---------------------------------------------------------------------------
+
+const hostScene = new THREE.Scene()
+hostScene.background = new THREE.Color('#101826')
+hostScene.add(new THREE.HemisphereLight(0xb9ccff, 0x223344, 1))
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.65)
+dirLight.position.set(3, 6, 2)
+hostScene.add(dirLight)
+const hostFloor = new THREE.Mesh(
+  new THREE.PlaneGeometry(18, 18),
+  new THREE.MeshStandardMaterial({ color: '#1b2a3f', roughness: 0.95, metalness: 0.03 })
+)
+hostFloor.rotation.x = -Math.PI / 2
+hostScene.add(hostFloor)
+const cubeGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9)
+const cubeMat = new THREE.MeshStandardMaterial({ color: '#5da9ff', roughness: 0.35 })
+for (let i = 0; i < 14; i += 1) {
+  const c = new THREE.Mesh(cubeGeo, cubeMat)
+  c.position.set(Math.sin(i * 0.5) * 4, 0.45, -3 - i * 0.65)
+  hostScene.add(c)
+}
+
+const portalSize = new THREE.Vector2(2.6, 3.2)
+const hostAnchorMesh = makePortalPlane(portalSize)
+hostAnchorMesh.position.set(0, 1.6, -3.5)
+hostScene.add(hostAnchorMesh)
+const hostLocalEndpoint = makeLocalEndpoint({ scene: hostScene, anchor: hostAnchorMesh })
+
+const stencilMask = makePortalStencilMask()
+
+// ---------------------------------------------------------------------------
+// NetGL receiver: every NetGLCall the iframe posts gets replayed against
+// the host canvas's WebGL2 context. The iframe never touches the canvas
+// itself — it writes pixels into it through the wire.
+// ---------------------------------------------------------------------------
+
+const gl = renderer.getContext()
+const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext)
+
+// Iframe's anchor + background arrive on a netgl:ready handshake; until
+// then we don't post setPose (otherwise the iframe receives requests
+// before its scene is built).
+let iframeReady = false
+let iframeAnchor: PortalAnchor | null = null
+const iframeBg = new THREE.Color('#220d17')
+
+const transport = windowTransport({
+  output: iframe.contentWindow!,
+  inputFilter: iframe.contentWindow
+})
+
+transport.onMessage((msg) => {
+  if (!msg || typeof msg !== 'object') return
+  const data = msg as unknown as
+    | { type: 'netgl:ready'; anchor: PortalAnchor; background: { r: number; g: number; b: number } }
+    | NetGLCall
+  if ('type' in data && data.type === 'netgl:ready') {
+    iframeAnchor = data.anchor
+    iframeBg.setRGB(data.background.r, data.background.g, data.background.b)
+    iframeReady = true
+    return
+  }
+  if ('name' in data && typeof data.name === 'string') {
+    netglReplay(data)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Controls + resize.
+// ---------------------------------------------------------------------------
+
+const controls = attachBasicFlyControls(hostCamera, renderer.domElement)
+
+const onResize = (): void => {
+  const w = window.innerWidth
+  const h = window.innerHeight
+  renderer.setSize(w, h)
+  hostCamera.aspect = w / h
+  hostCamera.updateProjectionMatrix()
+}
+window.addEventListener('resize', onResize)
+
+// ---------------------------------------------------------------------------
+// Frame loop. Pipelined: each frame the host renders worldA + stencil mask
+// + clearDepth, then posts setPose. The iframe's reply (a flurry of
+// NetGLCalls then nothing for the frame) lands as messages arrive — they
+// replay into the canvas asynchronously. The browser presents on vsync.
+// This is the same pipelining the iframe demo uses; one frame of iframe
+// lag is the trade we accept for not blocking on the round-trip.
+// ---------------------------------------------------------------------------
+
+const clock = new THREE.Clock()
+const stencilBg = new THREE.Color()
+const camPos = new THREE.Vector3()
+const camFwd = new THREE.Vector3()
+const camUp = new THREE.Vector3()
+
+const frame = (): void => {
+  const dt = clock.getDelta()
+  const time = clock.elapsedTime
+
+  controls.update(dt)
+
+  // Three's WebGLState caches GL state to avoid redundant set calls. The
+  // iframe's NetGLCalls between frames have written to the shared GL
+  // context behind three's back, so the cache is stale. Reset it so the
+  // host's render re-issues all the state it needs.
+  renderer.resetState()
+
+  renderer.setRenderTarget(null)
+  renderer.clear(true, true, true)
+  hostLocalEndpoint.renderAsSource(renderer, hostCamera)
+
+  // Paint the stencil mask: writes stencil=1 inside the portal door's
+  // screen-space halfspace, fills with the iframe's background colour so
+  // pixels before the first iframe frame don't show worldA bleeding
+  // through. Resets depth in the door region so the iframe's draws can
+  // populate fresh depth.
+  if (iframeReady && iframeAnchor) {
+    stencilBg.copy(iframeBg)
+    stencilMask.update(hostAnchorMesh, hostCamera, stencilBg)
+    renderer.render(stencilMask.scene, stencilMask.camera)
+    renderer.clearDepth()
+
+    // --- iframe pose handoff over NetGL ---
+    hostCamera.getWorldPosition(camPos)
+    camFwd.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
+    camUp.set(0, 1, 0).applyQuaternion(hostCamera.quaternion)
+    const coupled = couplePoseAcrossPortal(
+      {
+        position: [camPos.x, camPos.y, camPos.z],
+        forward: [camFwd.x, camFwd.y, camFwd.z],
+        up: [camUp.x, camUp.y, camUp.z]
+      },
+      { source: hostLocalEndpoint.getAnchor(), target: iframeAnchor }
+    )
+
+    const projection: Mat4 = Array.from(hostCamera.projectionMatrix.elements)
+    const pixelRatio = renderer.getPixelRatio()
+    const width = Math.max(1, Math.floor(window.innerWidth * pixelRatio))
+    const height = Math.max(1, Math.floor(window.innerHeight * pixelRatio))
+
+    transport.post({
+      type: 'netgl:setPose',
+      pose: coupled as PortalPose,
+      projection,
+      viewport: { width, height },
+      time
+    } as unknown as Parameters<typeof transport.post>[0])
+  }
+
+  requestAnimationFrame(frame)
+}
+
+frame()

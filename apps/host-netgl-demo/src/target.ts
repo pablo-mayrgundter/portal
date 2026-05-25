@@ -1,0 +1,171 @@
+// Iframe target for the NetGL portal demo.
+//
+// Owns worldB and a NetGLRenderer pointed at `parent`. On each
+// `netgl:setPose` from the host, computes the portal camera pose and
+// renders worldB — every GL call the renderer issues posts back to the
+// host, where the replay engine executes it against the host canvas's
+// WebGL2 context.
+//
+// applyPortalStencilTest is applied to worldB's materials so the iframe's
+// draws stencil-test against ref=1, the value the host's stencil mask
+// wrote in the door region. Combined with autoClear=false (don't clear
+// the host's canvas) and writing into the host's default framebuffer
+// (because the iframe's renderer's render target is null), worldB
+// composes naturally with worldA in one GL context.
+
+import * as THREE from 'three'
+import type { PortalAnchor, PortalPose, Viewport, Mat4 } from '@portal/portal-core'
+import { windowTransport } from '@portal/portal-iframe'
+import { applyPortalStencilTest } from '@portal/portal-three'
+import { createNetGLRenderer, type NetGLTransport } from '@portal/portal-netgl'
+
+// ---------------------------------------------------------------------------
+// worldB — same red-room + sphere-swarm scene as host-iframe-demo's
+// target. Animated via a per-frame tick.
+// ---------------------------------------------------------------------------
+
+const anchor: PortalAnchor = {
+  position: [0, 1.6, 0],
+  normal: [0, 0, -1],
+  up: [0, 1, 0],
+  halfWidth: 1.3,
+  halfHeight: 1.6
+}
+
+const scene = new THREE.Scene()
+const background = new THREE.Color('#220d17')
+scene.background = background
+scene.add(new THREE.AmbientLight(0xfff3f7, 0.5))
+const key = new THREE.PointLight(0xff7799, 18)
+key.position.set(0, 3, 3)
+scene.add(key)
+
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(12, 64),
+  new THREE.MeshStandardMaterial({ color: '#2f0f22', roughness: 0.95 })
+)
+floor.rotation.x = -Math.PI / 2
+scene.add(floor)
+
+const sphereGeo = new THREE.IcosahedronGeometry(0.45, 1)
+const sphereMat = new THREE.MeshStandardMaterial({
+  color: '#ff89ad',
+  metalness: 0.2,
+  roughness: 0.25
+})
+const swarm: THREE.Mesh[] = []
+for (let i = 0; i < 24; i += 1) {
+  const m = new THREE.Mesh(sphereGeo, sphereMat)
+  m.position.set(Math.cos(i * 0.35) * 2.6, 0.8 + (i % 4) * 0.4, Math.sin(i * 0.35) * 2.6)
+  scene.add(m)
+  swarm.push(m)
+}
+const tick = (t: number): void => {
+  swarm.forEach((m, idx) => {
+    m.position.y = 1.1 + Math.sin(t * 1.2 + idx * 0.3) * 0.5
+    m.rotation.y = t * 0.6 + idx * 0.2
+  })
+}
+
+// worldB's materials need stencilFunc=EQUAL,ref=1 so they only write
+// pixels where the host's stencil mask painted ref=1 (the door region).
+// Without scene.background being suppressed, the bg would also paint
+// into the door region on the host's canvas — set to null so only the
+// stenciled geometry contributes.
+applyPortalStencilTest(scene)
+scene.background = null
+
+// ---------------------------------------------------------------------------
+// NetGLRenderer: shadow GL context lives in an OffscreenCanvas (just for
+// three's synchronous state queries and handle minting); every GL call
+// posts to the host as a NetGLCall on the same windowTransport channel
+// that carries netgl:setPose the other direction.
+// ---------------------------------------------------------------------------
+
+const shadowCanvas = new OffscreenCanvas(1, 1)
+const shadow = shadowCanvas.getContext('webgl2', {
+  antialias: false,
+  stencil: true,
+  depth: true,
+  preserveDrawingBuffer: false
+}) as WebGL2RenderingContext
+if (!shadow) {
+  throw new Error('NetGL target: failed to create WebGL2 shadow context')
+}
+
+const transport = windowTransport({
+  output: parent,
+  inputFilter: parent
+})
+
+const netglRenderer = createNetGLRenderer({
+  shadow,
+  transport: transport as unknown as NetGLTransport,
+  antialias: false,
+  stencil: true,
+  depth: true,
+  preserveDrawingBuffer: false
+})
+netglRenderer.outputColorSpace = THREE.SRGBColorSpace
+netglRenderer.toneMapping = THREE.NoToneMapping
+// Critical: don't clear the host's canvas. The host has already drawn
+// worldA + painted the stencil mask + clearDepth'd inside the door
+// region. Clearing here would wipe all of it.
+netglRenderer.autoClear = false
+
+const sourceCamera = new THREE.PerspectiveCamera(70, 1, 0.02, 200)
+
+// Tell the host we're alive and where the door sits in worldB.
+transport.post({
+  type: 'netgl:ready',
+  anchor,
+  background: { r: background.r, g: background.g, b: background.b }
+} as unknown as Parameters<typeof transport.post>[0])
+
+// ---------------------------------------------------------------------------
+// Frame handling: each setPose message → set camera + render. The render
+// emits a flurry of NetGL calls onto the transport, which the host's
+// replay engine consumes.
+// ---------------------------------------------------------------------------
+
+type SetPoseMessage = {
+  type: 'netgl:setPose'
+  pose: PortalPose
+  projection: Mat4
+  viewport: Viewport
+  time: number
+}
+
+const lookTarget = new THREE.Vector3()
+
+const handleSetPose = (msg: SetPoseMessage): void => {
+  tick(msg.time)
+
+  // Position + orientation from the coupled pose.
+  sourceCamera.position.set(msg.pose.position[0], msg.pose.position[1], msg.pose.position[2])
+  if (msg.pose.up) sourceCamera.up.set(msg.pose.up[0], msg.pose.up[1], msg.pose.up[2])
+  if (msg.pose.forward) {
+    lookTarget.set(
+      msg.pose.position[0] + msg.pose.forward[0],
+      msg.pose.position[1] + msg.pose.forward[1],
+      msg.pose.position[2] + msg.pose.forward[2]
+    )
+    sourceCamera.lookAt(lookTarget)
+  }
+
+  // Use the host's projection matrix verbatim — FOV, aspect, near/far
+  // all match what the host is composing against. Bypass aspect/fov
+  // computation; three will use projectionMatrix as-is for rendering.
+  sourceCamera.projectionMatrix.fromArray(msg.projection as readonly number[])
+  sourceCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrix).invert()
+
+  netglRenderer.setSize(msg.viewport.width, msg.viewport.height, false)
+  netglRenderer.render(scene, sourceCamera)
+}
+
+transport.onMessage((m) => {
+  const data = m as unknown as { type?: string }
+  if (data?.type === 'netgl:setPose') {
+    handleSetPose(m as unknown as SetPoseMessage)
+  }
+})
