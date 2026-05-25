@@ -15,13 +15,26 @@ Status:
   call as a structured-clone-safe `NetGLCall`, and posts it onto
   `createLoopbackPair().hostTransport`. The replay engine listens on the
   target side, decodes netglIDs against its own ID → receiver-handle
-  table, and re-executes against its WebGL2 context. This is what the
-  iframe path will use over postMessage with no protocol changes — the
-  loopback transport is API-shape-identical to `windowTransport`.
+  table, and re-executes against its WebGL2 context. The loopback
+  transport is API-shape-identical to `windowTransport`, so the same
+  wiring works over postMessage with no protocol changes.
+- **v1 (NetGLRenderer façade + cross-context composition) passing** —
+  `packages/portal-netgl/src/renderer.ts`,
+  `packages/portal-netgl/src/composition-spike.test.ts`.
+  `createNetGLRenderer({ shadow, transport, ...threeOpts })` returns a
+  bona-fide `THREE.WebGLRenderer` whose underlying context is a recorder
+  Proxy; `attachNetGLReceiver({ context, transport })` wires the
+  receiving side. The composition spike renders a back-plane scene into
+  a target context with a local `THREE.WebGLRenderer`, then renders a
+  front-cube scene through a `NetGLRenderer` (over `createLoopbackPair`)
+  into the **same target context**, and the resulting framebuffer is
+  byte-equal to a single-renderer control rendering both scenes back-to-
+  back. Two THREE.WebGLRenderers, one shared GL context, native
+  depth/stencil/blending across the wire boundary.
 
-The remaining work targets a real `NetGLRenderer` (three.js-level façade
-that hides the recorder construction from callers) and integration into
-`apps/host-iframe-demo` to retire the depth-pack codepath for three↔three
+The remaining major work is integration into `apps/host-iframe-demo` so
+the iframe-portal's destination talks NetGL over `windowTransport`
+instead of frame-RPC, retiring the depth-pack codepath for three↔three
 pairs.
 
 ## Goal
@@ -276,33 +289,40 @@ correctness change.
 
 ## Where this lives
 
-`packages/portal-netgl/`. Current state after the v0 + v0.5 spikes:
+`packages/portal-netgl/`. Current state after the v0 / v0.5 / v1 spikes:
 
 ```
 packages/portal-netgl/
   src/
-    messages.ts              // NetGLCall + NetGLEncodedValue (wire shape)
-    proxy.ts                 // makeNetGLProxy — in-process two-context dispatch
-    recorder.ts              // makeNetGLRecorder — Proxy that emits NetGLCalls
-                             //   over a `post(call)` function
-    replay.ts                // makeNetGLReplay — consumes NetGLCalls and
-                             //   executes against a receiver context
-    index.ts                 // public exports
-    spike.test.ts            // clear + manual triangle through the proxy
-    three-spike.test.ts      // v0: in-process proxy, three cube vs control
-    loopback-spike.test.ts   // v0.5: recorder → createLoopbackPair → replay,
-                             //   three cube vs control
+    messages.ts                // NetGLCall + NetGLEncodedValue (wire shape)
+    proxy.ts                   // makeNetGLProxy — in-process two-context dispatch
+    recorder.ts                // makeNetGLRecorder — Proxy that emits NetGLCalls
+                               //   over a `post(call)` function
+    replay.ts                  // makeNetGLReplay — consumes NetGLCalls and
+                               //   executes against a receiver context
+    renderer.ts                // createNetGLRenderer + attachNetGLReceiver
+                               //   (THREE-shaped façade over recorder/replay)
+    index.ts                   // public exports
+    spike.test.ts              // clear + manual triangle through the proxy
+    three-spike.test.ts        // v0: in-process proxy, three cube vs control
+    loopback-spike.test.ts     // v0.5: recorder → createLoopbackPair → replay,
+                               //   three cube vs control
+    composition-spike.test.ts  // v1: local back + NetGL front into one
+                               //   shared context vs single-renderer control
 ```
 
-The two spikes share a build of the same scene (a 64×64 textureless cube
-through `MeshBasicMaterial`); both must hit byte-equal pixels against a
-direct control render to pass.
+All four spikes assert byte-equal pixels against a direct control render —
+the protocol carries enough state that the two contexts diverge by 0
+across every transport boundary we've put it through.
 
-Next: `renderer.ts` exposes a `NetGLRenderer` that wires the recorder into a
-stock `THREE.WebGLRenderer` construction so callers can swap renderers
-without touching their scene setup. After that, integration into
-`apps/host-iframe-demo` so the iframe-portal's destination side talks
-NetGL over `windowTransport` instead of frame-RPC.
+Next milestone: integration into `apps/host-iframe-demo`. The iframe's
+destination renderer becomes a `createNetGLRenderer` pointed at
+`windowTransport({ output: parent })`; the host attaches a NetGL receiver
+to its own canvas's GL context, behind the existing portal stencil mask.
+That retires the depth-pack codepath, the host-side compositor shader,
+and the per-pixel depth-clip safety net — all of which exist only to work
+around the precision loss of shipping depth as packed-RGBA over the
+wire. With NetGL, depth never crosses the wire — only the draw calls do.
 
 ## Spike scope
 
