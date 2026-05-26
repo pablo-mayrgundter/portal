@@ -111,6 +111,16 @@ export const makeNetGLProxy = (config: NetGLProxyConfig): WebGL2RenderingContext
 
         return shadowResult
       }
+    },
+    // Native WebGL2 setters brand-check `this` at the C++ level in real
+    // browsers (e.g. `gl.drawingBufferColorSpace = ...` from three's
+    // outputColorSpace setter). Default Proxy `set` passes the Proxy as the
+    // receiver, which fails with "Illegal invocation". Route to the shadow.
+    // We also mirror the assignment to the receiver so cross-context property
+    // state matches.
+    set(target, prop, value) {
+      Reflect.set(receiver as unknown as object, prop, value, receiver)
+      return Reflect.set(target, prop, value, target)
     }
   }) as unknown as WebGL2RenderingContext
 }
