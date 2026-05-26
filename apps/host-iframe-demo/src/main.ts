@@ -21,7 +21,9 @@ import {
   makePortalPlane,
   makePortalStencilMask
 } from '@portal/portal-three'
-import { attachBasicFlyControls } from '@portal/portal-controls'
+import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
+
+attachNavDrawer('iframe')
 
 // ---------------------------------------------------------------------------
 // Debug toggles via URL params, e.g. http://localhost:5173/?debug=noclip&log=1

@@ -238,3 +238,5 @@ const attachMobileWasdPad = (keys: Set<string>) => {
     btn.addEventListener('contextmenu', (e) => e.preventDefault())
   }
 }
+
+export { attachNavDrawer, type NavDemoKey } from "./nav-drawer"

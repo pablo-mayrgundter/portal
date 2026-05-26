@@ -15,7 +15,9 @@ import {
   makePortalPlane,
   makePortalStencilMask
 } from '@portal/portal-three'
-import { attachBasicFlyControls } from '@portal/portal-controls'
+import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
+
+attachNavDrawer('worker')
 
 // Diagnostic flags: same vocabulary as the iframe demo so a developer can
 // switch transports without re-learning the URL surface. The `?pose=`

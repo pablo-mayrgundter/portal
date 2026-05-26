@@ -1,9 +1,9 @@
 name: Build portal demos
-description: Build the four demo apps with the given base path and assemble a single dist/ tree rooted at a landing nav page.
+description: Build the four demo apps with the given base path and assemble a single dist/ tree. host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo live at /iframe/, /worker/, /netgl/ siblings.
 
 inputs:
   base-path:
-    description: Base URL path with trailing slash, e.g. /portal/ or /portal/pr-preview/pr-17/. Each demo is built under this base + its own subdir (three/, iframe/, worker/, netgl/).
+    description: Base URL path with trailing slash, e.g. /portal/ or /portal/pr-preview/pr-17/. host-three is built directly under this base; the others get a /<name>/ subpath.
     required: true
 
 runs:
@@ -13,9 +13,9 @@ runs:
       shell: bash
       run: npm ci
 
-    - name: Build host-three
+    - name: Build host-three (root)
       shell: bash
-      run: npm run build -w @portal/host-three -- --base=${{ inputs.base-path }}three/
+      run: npm run build -w @portal/host-three -- --base=${{ inputs.base-path }}
 
     - name: Build host-iframe-demo
       shell: bash
@@ -34,8 +34,7 @@ runs:
       run: |
         rm -rf dist
         mkdir -p dist
-        cp landing/index.html dist/index.html
-        cp -r apps/host-three/dist        dist/three
-        cp -r apps/host-iframe-demo/dist  dist/iframe
-        cp -r apps/host-worker-demo/dist  dist/worker
-        cp -r apps/host-netgl-demo/dist   dist/netgl
+        cp -r apps/host-three/dist/.       dist/
+        cp -r apps/host-iframe-demo/dist   dist/iframe
+        cp -r apps/host-worker-demo/dist   dist/worker
+        cp -r apps/host-netgl-demo/dist    dist/netgl

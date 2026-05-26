@@ -34,13 +34,15 @@ import {
   makePortalPlane,
   makePortalStencilMask
 } from '@portal/portal-three'
-import { attachBasicFlyControls } from '@portal/portal-controls'
+import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
 import {
   isNetGLCall,
   isNetGLFrameEnd,
   makeNetGLReplay,
   type NetGLCall
 } from '@portal/portal-netgl'
+
+attachNavDrawer('netgl')
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
