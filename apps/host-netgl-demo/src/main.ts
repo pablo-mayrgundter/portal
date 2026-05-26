@@ -247,11 +247,14 @@ const frame = (): void => {
           return 'UNKNOWN(' + code + ')'
         }
         let firstErr: { call: NetGLCall; code: number } | null = null
+        const counts: Record<string, number> = {}
         for (let i = 0; i < batch.length; i += 1) {
-          netglReplay(batch[i])
+          const call = batch[i]
+          counts[call.name] = (counts[call.name] ?? 0) + 1
+          netglReplay(call)
           if (!firstErr) {
             const code = gl.getError()
-            if (code !== gl.NO_ERROR) firstErr = { call: batch[i], code }
+            if (code !== gl.NO_ERROR) firstErr = { call, code }
           }
         }
         if (firstErr) {
@@ -260,6 +263,12 @@ const frame = (): void => {
             'on call:', firstErr.call.name,
             'args:', firstErr.call.args
           )
+        }
+        if (time - lastLogTime > 0.99) {
+          // Histogram-style summary so we can see whether drawElements is
+          // actually in the stream and how often each setup call runs.
+          // Throttled to 1Hz so it doesn't drown out other logs.
+          console.log('[host] drain calls:', counts)
         }
       } else {
         for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
