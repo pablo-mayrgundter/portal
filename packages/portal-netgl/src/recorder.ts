@@ -148,6 +148,20 @@ export const makeNetGLRecorder = (
 
         return result
       }
+    },
+    // Native WebGL2 setters (e.g. gl.drawingBufferColorSpace = 'srgb' from
+    // three's outputColorSpace setter) are brand-checked at the C++ level —
+    // `this instanceof WebGL2RenderingContext`. The default Proxy `set`
+    // behaviour passes the Proxy as the receiver, which fails the brand check
+    // with "Illegal invocation" in real browsers. Explicitly route the
+    // assignment to the shadow so the native setter sees a real context.
+    //
+    // We don't ship property assignments over the wire — the receiver-side
+    // renderer manages its own context-property state independently (both
+    // sides set the same things from their own three configuration). If
+    // mismatches show up, this is the place to also forward.
+    set(target, prop, value) {
+      return Reflect.set(target, prop, value, target)
     }
   }) as unknown as WebGL2RenderingContext
 }
