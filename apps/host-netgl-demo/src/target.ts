@@ -76,13 +76,39 @@ const tick = (t: number): void => {
   })
 }
 
-// worldB's materials need stencilFunc=EQUAL,ref=1 so they only write
-// pixels where the host's stencil mask painted ref=1 (the door region).
-// Without scene.background being suppressed, the bg would also paint
-// into the door region on the host's canvas — set to null so only the
-// stenciled geometry contributes.
-applyPortalStencilTest(scene)
-scene.background = null
+// ?test=1 replaces the whole scene with one big bright cube at the origin.
+// Diagnostic: if THIS shows up but the swarm doesn't, the swarm scene has
+// something specific going wrong (frustum culling, lights, normalmatrix,
+// etc.). If even the test cube doesn't appear, the failure is fundamental
+// — draws are reaching the host's GL context but producing no visible
+// pixels (stencil ref mismatch, depth test, target framebuffer wrong, …).
+const TEST = new URLSearchParams(location.search).get('test') === '1'
+if (TEST) {
+  // Replace scene contents with one obvious test object.
+  while (scene.children.length > 0) scene.remove(scene.children[0])
+  const cube = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshBasicMaterial({ color: '#ffff00' })
+  )
+  cube.position.set(0, 1.6, -2)
+  scene.add(cube)
+}
+
+// ?nostencil=1 skips applyPortalStencilTest AND keeps the scene background.
+// Diagnostic: if balls then appear *covering the whole host canvas* (not
+// just inside the door), the wire works for opaque draws and the failure
+// is in stencil-test setup. If still nothing visible, draws are dropped
+// for some other reason.
+const NOSTENCIL = new URLSearchParams(location.search).get('nostencil') === '1'
+if (!NOSTENCIL) {
+  // worldB's materials need stencilFunc=EQUAL,ref=1 so they only write
+  // pixels where the host's stencil mask painted ref=1 (the door region).
+  // Without scene.background being suppressed, the bg would also paint
+  // into the door region on the host's canvas — set to null so only the
+  // stenciled geometry contributes.
+  applyPortalStencilTest(scene)
+  scene.background = null
+}
 
 // ---------------------------------------------------------------------------
 // NetGLRenderer: shadow GL context lives in an OffscreenCanvas (just for
