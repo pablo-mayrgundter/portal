@@ -1,0 +1,41 @@
+name: Build portal demos
+description: Build the four demo apps with the given base path and assemble a single dist/ tree rooted at a landing nav page.
+
+inputs:
+  base-path:
+    description: Base URL path with trailing slash, e.g. /portal/ or /portal/pr-preview/pr-17/. Each demo is built under this base + its own subdir (three/, iframe/, worker/, netgl/).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Build host-three
+      shell: bash
+      run: npm run build -w @portal/host-three -- --base=${{ inputs.base-path }}three/
+
+    - name: Build host-iframe-demo
+      shell: bash
+      run: npm run build -w @portal/host-iframe-demo -- --base=${{ inputs.base-path }}iframe/
+
+    - name: Build host-worker-demo
+      shell: bash
+      run: npm run build -w @portal/host-worker-demo -- --base=${{ inputs.base-path }}worker/
+
+    - name: Build host-netgl-demo
+      shell: bash
+      run: npm run build -w @portal/host-netgl-demo -- --base=${{ inputs.base-path }}netgl/
+
+    - name: Assemble dist/
+      shell: bash
+      run: |
+        rm -rf dist
+        mkdir -p dist
+        cp landing/index.html dist/index.html
+        cp -r apps/host-three/dist        dist/three
+        cp -r apps/host-iframe-demo/dist  dist/iframe
+        cp -r apps/host-worker-demo/dist  dist/worker
+        cp -r apps/host-netgl-demo/dist   dist/netgl
