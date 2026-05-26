@@ -16,8 +16,8 @@
 import * as THREE from 'three'
 import type { PortalAnchor, PortalPose, Viewport, Mat4 } from '@portal/portal-core'
 import { windowTransport } from '@portal/portal-iframe'
-import { applyPortalStencilTest } from '@portal/portal-three'
-import { createNetGLRenderer, type NetGLTransport } from '@portal/portal-netgl'
+import { applyObliqueClipFromAnchor, applyPortalStencilTest } from '@portal/portal-three'
+import { createNetGLRenderer, type NetGLFrameEnd, type NetGLTransport } from '@portal/portal-netgl'
 
 // ---------------------------------------------------------------------------
 // worldB — same red-room + sphere-swarm scene as host-iframe-demo's
@@ -152,6 +152,11 @@ const handleSetPose = (msg: SetPoseMessage): void => {
     )
     sourceCamera.lookAt(lookTarget)
   }
+  // Belt-and-braces: three.WebGLRenderer.render() also updates these, but
+  // makeIframeTarget calls them explicitly and we mirror that to keep
+  // behaviour identical between the iframe-demo and netgl-demo.
+  sourceCamera.updateMatrixWorld(true)
+  sourceCamera.matrixWorldInverse.copy(sourceCamera.matrixWorld).invert()
 
   // Use the host's projection matrix verbatim — FOV, aspect, near/far
   // all match what the host is composing against. Bypass aspect/fov
@@ -159,8 +164,35 @@ const handleSetPose = (msg: SetPoseMessage): void => {
   sourceCamera.projectionMatrix.fromArray(msg.projection as readonly number[])
   sourceCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrix).invert()
 
+  // Oblique near-plane clip aligned with the iframe portal: cull any
+  // worldB geometry on the CAMERA side of the portal plane at rasterise
+  // time. Without this, balls between camera and door render and occlude
+  // the (correct) balls on the far side — visible as the near-side ring
+  // showing through the door even though geometrically they shouldn't.
+  // The host's stencil-mask handles the screen-space halfspace test;
+  // this handles the world-space plane clip.
+  applyObliqueClipFromAnchor(sourceCamera, anchor)
+  sourceCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrix).invert()
+
   netglRenderer.setSize(msg.viewport.width, msg.viewport.height, false)
+
+  // Force three to re-issue every GL state call this frame instead of
+  // skipping anything it considers "already set". The host's own
+  // THREE.WebGLRenderer mutates the shared GL context (worldA render +
+  // stencil mask) between our frames; our renderer's per-instance
+  // WebGLState cache thinks the context is in the state we left it in,
+  // and would otherwise omit a redundant gl.useProgram / gl.enable / etc.
+  // — leading to mismatches like "uniform3f: location is not from the
+  // associated program" when our uniform calls assume a useProgram we
+  // never re-emitted.
+  netglRenderer.resetState()
   netglRenderer.render(scene, sourceCamera)
+
+  // Signal end-of-frame so the host can replay our calls as one atomic
+  // batch (no host-side renders interleaving with our useProgram /
+  // uniform pairs).
+  const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
+  transport.post(frameEnd as unknown as Parameters<typeof transport.post>[0])
 }
 
 transport.onMessage((m) => {

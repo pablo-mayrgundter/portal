@@ -60,8 +60,17 @@ export type NetGLRendererConfig = Omit<THREE.WebGLRendererParameters, 'context'>
 export const createNetGLRenderer = (config: NetGLRendererConfig): THREE.WebGLRenderer => {
   const { shadow, transport, ...threeOpts } = config
   const recorder = makeNetGLRecorder(shadow, (call: NetGLCall) => transport.post(call))
+  // Pass the shadow's canvas explicitly. Without this, three's WebGLRenderer
+  // constructor falls back to its own createCanvasElement() — and setSize()
+  // resizes THAT canvas, while `gl.canvas` (read via the recorder proxy)
+  // still returns the shadow's OffscreenCanvas (stuck at its initial 1×1).
+  // state.reset() reads `gl.canvas.width` and ships gl.viewport(0,0,1,1)
+  // to the receiver, clipping all subsequent draws to a single corner
+  // pixel. Pinning three to the shadow canvas keeps the two views in sync.
+  const recorderWithCanvas = recorder as unknown as WebGL2RenderingContext & { canvas: HTMLCanvasElement | OffscreenCanvas }
   return new THREE.WebGLRenderer({
     ...threeOpts,
+    canvas: recorderWithCanvas.canvas,
     context: recorder
   })
 }

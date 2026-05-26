@@ -9,4 +9,10 @@ export {
   type NetGLReceiverHandle,
   type NetGLTransport
 } from './renderer'
-export type { NetGLCall, NetGLEncodedValue } from './messages'
+export type {
+  NetGLCall,
+  NetGLEncodedValue,
+  NetGLFrameEnd,
+  NetGLWireMessage
+} from './messages'
+export { isNetGLCall, isNetGLFrameEnd } from './messages'

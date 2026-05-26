@@ -35,7 +35,12 @@ import {
   makePortalStencilMask
 } from '@portal/portal-three'
 import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
-import { makeNetGLReplay, type NetGLCall } from '@portal/portal-netgl'
+import {
+  isNetGLCall,
+  isNetGLFrameEnd,
+  makeNetGLReplay,
+  type NetGLCall
+} from '@portal/portal-netgl'
 
 attachNavDrawer('netgl')
 
@@ -119,19 +124,46 @@ const transport = windowTransport({
   inputFilter: iframe.contentWindow
 })
 
+// Buffer incoming NetGLCalls instead of replaying them immediately. The
+// host's own renderer (worldA + stencil mask) mutates the shared GL context
+// between message-event tasks; if we let the iframe's calls land mid-host-
+// frame, the iframe's useProgram/uniform/draw triple can be split by a host
+// `useProgram`, causing "uniform3f: location is not from the associated
+// program". Instead, accumulate the iframe's calls until it sends
+// `netgl:frame-end`, then atomically drain the latest complete frame at one
+// fixed point in the host's render loop (after stencil mask + clearDepth).
+//
+// `lastFrame` caches the most recent fully-drained batch as a fallback for
+// host frames where the iframe hasn't responded yet. The batch starts with
+// resetState (which re-issues all GL state) so it's self-contained — safe
+// to replay multiple times. Without the cache, an iframe roundtrip that
+// occasionally exceeds the host's frame budget shows up as door-region
+// flicker: stencil-painted bg color one frame, full worldB the next.
+let inFlightFrame: NetGLCall[] = []
+let pendingFrame: NetGLCall[] | null = null
+let lastFrame: NetGLCall[] | null = null
+
+type NetGLReady = {
+  type: 'netgl:ready'
+  anchor: PortalAnchor
+  background: { r: number; g: number; b: number }
+}
+
 transport.onMessage((msg) => {
-  if (!msg || typeof msg !== 'object') return
-  const data = msg as unknown as
-    | { type: 'netgl:ready'; anchor: PortalAnchor; background: { r: number; g: number; b: number } }
-    | NetGLCall
-  if ('type' in data && data.type === 'netgl:ready') {
-    iframeAnchor = data.anchor
-    iframeBg.setRGB(data.background.r, data.background.g, data.background.b)
-    iframeReady = true
+  if (isNetGLFrameEnd(msg)) {
+    pendingFrame = inFlightFrame
+    inFlightFrame = []
     return
   }
-  if ('name' in data && typeof data.name === 'string') {
-    netglReplay(data)
+  if (isNetGLCall(msg)) {
+    inFlightFrame.push(msg)
+    return
+  }
+  const ready = msg as unknown as NetGLReady | null
+  if (ready && ready.type === 'netgl:ready') {
+    iframeAnchor = ready.anchor
+    iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
+    iframeReady = true
   }
 })
 
@@ -164,7 +196,6 @@ const stencilBg = new THREE.Color()
 const camPos = new THREE.Vector3()
 const camFwd = new THREE.Vector3()
 const camUp = new THREE.Vector3()
-
 const frame = (): void => {
   const dt = clock.getDelta()
   const time = clock.elapsedTime
@@ -191,6 +222,32 @@ const frame = (): void => {
     stencilMask.update(hostAnchorMesh, hostCamera, stencilBg)
     renderer.render(stencilMask.scene, stencilMask.camera)
     renderer.clearDepth()
+
+    // Drain the latest complete iframe frame as an atomic block. We're now
+    // past worldA + stencil + clearDepth and before posting the next setPose;
+    // nothing else mutates the GL context here, so the iframe's useProgram /
+    // uniform / draw sequences land in order against the program they were
+    // recorded for. Stale partial frames are dropped — only the most recent
+    // frame-end'd batch composites.
+    //
+    // If the iframe's response for this host frame isn't in yet (its
+    // roundtrip exceeded the host's frame budget), fall back to replaying
+    // the last successfully-drained batch. That batch's first call is
+    // resetState, so it's self-contained — replays cleanly against
+    // whatever GL state the host left the context in. Visually: one frame
+    // of stale worldB content is invisible; door-region flicker is gone.
+    let batch: NetGLCall[] | null = pendingFrame
+    if (batch) {
+      pendingFrame = null
+      lastFrame = batch
+    } else {
+      batch = lastFrame
+    }
+    if (batch) {
+      for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
+      // Sync three's view of GL state — the iframe just clobbered it.
+      renderer.resetState()
+    }
 
     // --- iframe pose handoff over NetGL ---
     hostCamera.getWorldPosition(camPos)
