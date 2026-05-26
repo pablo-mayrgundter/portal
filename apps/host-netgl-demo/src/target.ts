@@ -138,7 +138,13 @@ type SetPoseMessage = {
 
 const lookTarget = new THREE.Vector3()
 
+const params = new URLSearchParams(location.search)
+const LOG = params.get('log') === '1'
+let lastLogTime = 0
+let setPoseCount = 0
+
 const handleSetPose = (msg: SetPoseMessage): void => {
+  setPoseCount += 1
   tick(msg.time)
 
   // Position + orientation from the coupled pose.
@@ -152,6 +158,11 @@ const handleSetPose = (msg: SetPoseMessage): void => {
     )
     sourceCamera.lookAt(lookTarget)
   }
+  // Belt-and-braces: three.WebGLRenderer.render() also updates these, but
+  // makeIframeTarget calls them explicitly and we mirror that to keep
+  // behaviour identical between the iframe-demo and netgl-demo.
+  sourceCamera.updateMatrixWorld(true)
+  sourceCamera.matrixWorldInverse.copy(sourceCamera.matrixWorld).invert()
 
   // Use the host's projection matrix verbatim — FOV, aspect, near/far
   // all match what the host is composing against. Bypass aspect/fov
@@ -177,6 +188,18 @@ const handleSetPose = (msg: SetPoseMessage): void => {
   // batch (no host-side renders interleaving with our useProgram /
   // uniform pairs).
   transport.post({ type: 'netgl:frame-end' } as unknown as Parameters<typeof transport.post>[0])
+
+  if (LOG && msg.time - lastLogTime > 1) {
+    lastLogTime = msg.time
+    const fmt = (a: number[]): string => `[${a.map((n) => n.toFixed(2)).join(', ')}]`
+    console.log(
+      '[iframe] setPose#' + setPoseCount,
+      'pos:', fmt(msg.pose.position),
+      'fwd:', fmt(msg.pose.forward ?? [0, 0, -1]),
+      'viewport:', msg.viewport.width + 'x' + msg.viewport.height,
+      'children:', scene.children.length
+    )
+  }
 }
 
 transport.onMessage((m) => {

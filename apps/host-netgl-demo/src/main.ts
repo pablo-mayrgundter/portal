@@ -42,6 +42,12 @@ if (!app) throw new Error('Missing #app')
 const iframe = document.querySelector<HTMLIFrameElement>('#target-iframe')
 if (!iframe) throw new Error('Missing #target-iframe')
 
+// Forward host's URL params to the iframe so flags like ?log=1 reach
+// target.ts at module-load. Mirrors the host-iframe-demo's pattern.
+const params = new URLSearchParams(location.search)
+const LOG = params.get('log') === '1'
+if (location.search) iframe.src = `target.html${location.search}`
+
 const renderer = new THREE.WebGLRenderer({
   antialias: false,
   stencil: true,
@@ -182,6 +188,9 @@ const stencilBg = new THREE.Color()
 const camPos = new THREE.Vector3()
 const camFwd = new THREE.Vector3()
 const camUp = new THREE.Vector3()
+let lastLogTime = 0
+let setPosesSent = 0
+let lastDrainSize = 0
 
 const frame = (): void => {
   const dt = clock.getDelta()
@@ -219,6 +228,7 @@ const frame = (): void => {
     if (pendingFrame) {
       const batch = pendingFrame
       pendingFrame = null
+      lastDrainSize = batch.length
       for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
       // Sync three's view of GL state — the iframe just clobbered it.
       renderer.resetState()
@@ -249,6 +259,21 @@ const frame = (): void => {
       viewport: { width, height },
       time
     } as unknown as Parameters<typeof transport.post>[0])
+    setPosesSent += 1
+
+    if (LOG && time - lastLogTime > 1) {
+      lastLogTime = time
+      const fmt = (a: number[]): string => `[${a.map((n) => n.toFixed(2)).join(', ')}]`
+      console.log(
+        '[host] setPose#' + setPosesSent,
+        'host pos:', fmt([camPos.x, camPos.y, camPos.z]),
+        'coupled pos:', fmt(coupled.position),
+        'coupled fwd:', fmt(coupled.forward ?? [0, 0, -1]),
+        'viewport:', width + 'x' + height,
+        'lastDrain:', lastDrainSize + ' calls',
+        'iframeAnchor:', iframeAnchor
+      )
+    }
   }
 
   requestAnimationFrame(frame)
