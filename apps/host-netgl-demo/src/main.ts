@@ -229,7 +229,41 @@ const frame = (): void => {
       const batch = pendingFrame
       pendingFrame = null
       lastDrainSize = batch.length
-      for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
+      if (LOG) {
+        // Diagnostic: check GL error after every replay call. Identifies
+        // the first call that pushes the context into an error state
+        // (silent failures like INVALID_ENUM on a missing extension,
+        // INVALID_VALUE on a bad buffer ref, etc. would otherwise just
+        // discard draws without writing pixels). Cheap on a few frames,
+        // skip outside ?log=1 because gl.getError() forces a sync barrier.
+        const errStr = (code: number): string => {
+          if (code === gl.NO_ERROR) return 'NO_ERROR'
+          if (code === gl.INVALID_ENUM) return 'INVALID_ENUM'
+          if (code === gl.INVALID_VALUE) return 'INVALID_VALUE'
+          if (code === gl.INVALID_OPERATION) return 'INVALID_OPERATION'
+          if (code === gl.INVALID_FRAMEBUFFER_OPERATION) return 'INVALID_FRAMEBUFFER_OPERATION'
+          if (code === gl.OUT_OF_MEMORY) return 'OUT_OF_MEMORY'
+          if (code === gl.CONTEXT_LOST_WEBGL) return 'CONTEXT_LOST_WEBGL'
+          return 'UNKNOWN(' + code + ')'
+        }
+        let firstErr: { call: NetGLCall; code: number } | null = null
+        for (let i = 0; i < batch.length; i += 1) {
+          netglReplay(batch[i])
+          if (!firstErr) {
+            const code = gl.getError()
+            if (code !== gl.NO_ERROR) firstErr = { call: batch[i], code }
+          }
+        }
+        if (firstErr) {
+          console.warn(
+            '[host] replay GL error:', errStr(firstErr.code),
+            'on call:', firstErr.call.name,
+            'args:', firstErr.call.args
+          )
+        }
+      } else {
+        for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
+      }
       // Sync three's view of GL state — the iframe just clobbered it.
       renderer.resetState()
     }

@@ -47,12 +47,21 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI / 2
 scene.add(floor)
 
+// ?simple=1 swaps the swarm to MeshBasicMaterial (flat colour, no lights).
+// Diagnostic: if balls appear under ?simple=1 but not without, the GL stream
+// of PBR shaders / light uniforms / default envmap textures isn't surviving
+// NetGL interception. If they don't appear under ?simple either, the failure
+// is upstream of material shading (transport, viewport, stencil, etc.).
+const SIMPLE = new URLSearchParams(location.search).get('simple') === '1'
+
 const sphereGeo = new THREE.IcosahedronGeometry(0.45, 1)
-const sphereMat = new THREE.MeshStandardMaterial({
-  color: '#ff89ad',
-  metalness: 0.2,
-  roughness: 0.25
-})
+const sphereMat = SIMPLE
+  ? new THREE.MeshBasicMaterial({ color: '#ff89ad' })
+  : new THREE.MeshStandardMaterial({
+      color: '#ff89ad',
+      metalness: 0.2,
+      roughness: 0.25
+    })
 const swarm: THREE.Mesh[] = []
 for (let i = 0; i < 24; i += 1) {
   const m = new THREE.Mesh(sphereGeo, sphereMat)
