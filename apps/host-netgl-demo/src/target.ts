@@ -160,7 +160,23 @@ const handleSetPose = (msg: SetPoseMessage): void => {
   sourceCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrix).invert()
 
   netglRenderer.setSize(msg.viewport.width, msg.viewport.height, false)
+
+  // Force three to re-issue every GL state call this frame instead of
+  // skipping anything it considers "already set". The host's own
+  // THREE.WebGLRenderer mutates the shared GL context (worldA render +
+  // stencil mask) between our frames; our renderer's per-instance
+  // WebGLState cache thinks the context is in the state we left it in,
+  // and would otherwise omit a redundant gl.useProgram / gl.enable / etc.
+  // — leading to mismatches like "uniform3f: location is not from the
+  // associated program" when our uniform calls assume a useProgram we
+  // never re-emitted.
+  netglRenderer.resetState()
   netglRenderer.render(scene, sourceCamera)
+
+  // Signal end-of-frame so the host can replay our calls as one atomic
+  // batch (no host-side renders interleaving with our useProgram /
+  // uniform pairs).
+  transport.post({ type: 'netgl:frame-end' } as unknown as Parameters<typeof transport.post>[0])
 }
 
 transport.onMessage((m) => {

@@ -117,19 +117,39 @@ const transport = windowTransport({
   inputFilter: iframe.contentWindow
 })
 
+// Buffer incoming NetGLCalls instead of replaying them immediately. The
+// host's own renderer (worldA + stencil mask) mutates the shared GL context
+// between message-event tasks; if we let the iframe's calls land mid-host-
+// frame, the iframe's useProgram/uniform/draw triple can be split by a host
+// `useProgram`, causing "uniform3f: location is not from the associated
+// program". Instead, accumulate the iframe's calls until it sends
+// `netgl:frame-end`, then atomically drain the latest complete frame at one
+// fixed point in the host's render loop (after stencil mask + clearDepth).
+let inFlightFrame: NetGLCall[] = []
+let pendingFrame: NetGLCall[] | null = null
+
 transport.onMessage((msg) => {
   if (!msg || typeof msg !== 'object') return
   const data = msg as unknown as
     | { type: 'netgl:ready'; anchor: PortalAnchor; background: { r: number; g: number; b: number } }
+    | { type: 'netgl:frame-end' }
     | NetGLCall
-  if ('type' in data && data.type === 'netgl:ready') {
-    iframeAnchor = data.anchor
-    iframeBg.setRGB(data.background.r, data.background.g, data.background.b)
-    iframeReady = true
-    return
+  if ('type' in data) {
+    if (data.type === 'netgl:ready') {
+      const ready = data as { type: 'netgl:ready'; anchor: PortalAnchor; background: { r: number; g: number; b: number } }
+      iframeAnchor = ready.anchor
+      iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
+      iframeReady = true
+      return
+    }
+    if (data.type === 'netgl:frame-end') {
+      pendingFrame = inFlightFrame
+      inFlightFrame = []
+      return
+    }
   }
   if ('name' in data && typeof data.name === 'string') {
-    netglReplay(data)
+    inFlightFrame.push(data)
   }
 })
 
@@ -189,6 +209,20 @@ const frame = (): void => {
     stencilMask.update(hostAnchorMesh, hostCamera, stencilBg)
     renderer.render(stencilMask.scene, stencilMask.camera)
     renderer.clearDepth()
+
+    // Drain the latest complete iframe frame as an atomic block. We're now
+    // past worldA + stencil + clearDepth and before posting the next setPose;
+    // nothing else mutates the GL context here, so the iframe's useProgram /
+    // uniform / draw sequences land in order against the program they were
+    // recorded for. Stale partial frames are dropped — only the most recent
+    // frame-end'd batch composites.
+    if (pendingFrame) {
+      const batch = pendingFrame
+      pendingFrame = null
+      for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
+      // Sync three's view of GL state — the iframe just clobbered it.
+      renderer.resetState()
+    }
 
     // --- iframe pose handoff over NetGL ---
     hostCamera.getWorldPosition(camPos)
