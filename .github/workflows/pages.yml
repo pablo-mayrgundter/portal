@@ -1,4 +1,9 @@
-name: Deploy host-three demo to GitHub Pages
+name: Deploy demos to GitHub Pages
+
+# Build all four demo apps under /portal/<demo>/ and a landing nav at
+# /portal/. Deploys to the gh-pages branch with clean-exclude=pr-preview so
+# that PR preview directories (managed by .github/workflows/pr-preview.yml)
+# survive main-branch deploys.
 
 on:
   push:
@@ -6,36 +11,32 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
-  group: pages
+  group: gh-pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm run build -w @portal/host-three -- --base=/portal/
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: apps/host-three/dist
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: ./.github/actions/build
+        with:
+          base-path: /portal/
+
+      - name: Deploy to gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist
+          branch: gh-pages
+          clean: true
+          clean-exclude: |
+            pr-preview

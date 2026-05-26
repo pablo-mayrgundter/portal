@@ -77,7 +77,7 @@ const FXAA = params.get('fxaa') !== 'off'
 // same flags (LOG, etc.) without us hard-coding its URL in index.html.
 const iframeForUrl = document.querySelector<HTMLIFrameElement>('#target-iframe')
 if (iframeForUrl && location.search) {
-  iframeForUrl.src = `/target.html${location.search}`
+  iframeForUrl.src = `target.html${location.search}`
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')
