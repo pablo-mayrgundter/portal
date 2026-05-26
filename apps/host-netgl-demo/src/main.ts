@@ -248,9 +248,32 @@ const frame = (): void => {
         }
         let firstErr: { call: NetGLCall; code: number } | null = null
         const counts: Record<string, number> = {}
+        // Track interesting calls so we can see args without dumping the
+        // whole stream. Captures the FIRST call of each kind per drain so
+        // mid-frame state changes don't get drowned out.
+        const INTERESTING = new Set([
+          'viewport',
+          'scissor',
+          'bindFramebuffer',
+          'useProgram',
+          'bindVertexArray',
+          'drawArrays',
+          'drawElements',
+          'colorMask',
+          'depthMask',
+          'depthFunc',
+          'stencilMask',
+          'stencilFunc',
+          'enable',
+          'disable'
+        ])
+        const firstArgs: Record<string, unknown[]> = {}
         for (let i = 0; i < batch.length; i += 1) {
           const call = batch[i]
           counts[call.name] = (counts[call.name] ?? 0) + 1
+          if (INTERESTING.has(call.name) && !(call.name in firstArgs)) {
+            firstArgs[call.name] = call.args
+          }
           netglReplay(call)
           if (!firstErr) {
             const code = gl.getError()
@@ -269,6 +292,31 @@ const frame = (): void => {
           // actually in the stream and how often each setup call runs.
           // Throttled to 1Hz so it doesn't drown out other logs.
           console.log('[host] drain calls:', counts)
+          console.log('[host] first args:', firstArgs)
+          // Also dump the *current* GL state the receiver context ended up in
+          // — pinpoints viewport/program/framebuffer mismatches.
+          const fb = gl.getParameter(gl.FRAMEBUFFER_BINDING)
+          const vp = gl.getParameter(gl.VIEWPORT) as Int32Array
+          const prog = gl.getParameter(gl.CURRENT_PROGRAM)
+          const colorMask = gl.getParameter(gl.COLOR_WRITEMASK) as boolean[]
+          const stencilTest = gl.getParameter(gl.STENCIL_TEST)
+          const stencilFunc = gl.getParameter(gl.STENCIL_FUNC)
+          const stencilRef = gl.getParameter(gl.STENCIL_REF)
+          const stencilValueMask = gl.getParameter(gl.STENCIL_VALUE_MASK)
+          const depthTest = gl.getParameter(gl.DEPTH_TEST)
+          const depthFunc = gl.getParameter(gl.DEPTH_FUNC)
+          console.log('[host] post-drain GL state:', {
+            framebuffer: fb ? 'non-null' : 'null',
+            viewport: vp ? [vp[0], vp[1], vp[2], vp[3]] : null,
+            currentProgram: prog ? 'non-null' : 'null',
+            colorMask: colorMask ? [colorMask[0], colorMask[1], colorMask[2], colorMask[3]] : null,
+            stencilTest,
+            stencilFunc: '0x' + (stencilFunc as number)?.toString(16),
+            stencilRef,
+            stencilValueMask: '0x' + (stencilValueMask as number)?.toString(16),
+            depthTest,
+            depthFunc: '0x' + (depthFunc as number)?.toString(16)
+          })
         }
       } else {
         for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
