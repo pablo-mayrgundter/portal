@@ -31,3 +31,25 @@ export type NetGLCall = {
    */
   returnId?: number
 }
+
+/**
+ * End-of-frame marker posted by the sender after a complete render() pass.
+ * Lets the receiver buffer in-flight NetGLCalls until a coherent frame is
+ * available and then replay the whole batch atomically — necessary when
+ * the receiver shares its GL context with other renderers that would
+ * otherwise interleave calls between the sender's useProgram and uniform
+ * sets, breaking program-location associations.
+ */
+export type NetGLFrameEnd = { type: 'netgl:frame-end' }
+
+/** Union of every message kind the NetGL protocol sends on the wire. */
+export type NetGLWireMessage = NetGLCall | NetGLFrameEnd
+
+/** Type guard: is this wire message a NetGLCall (rather than a marker)? */
+export const isNetGLCall = (msg: unknown): msg is NetGLCall =>
+  typeof msg === 'object' && msg !== null && typeof (msg as { name?: unknown }).name === 'string'
+
+/** Type guard: is this wire message a frame-end marker? */
+export const isNetGLFrameEnd = (msg: unknown): msg is NetGLFrameEnd =>
+  typeof msg === 'object' && msg !== null && (msg as { type?: unknown }).type === 'netgl:frame-end'
+

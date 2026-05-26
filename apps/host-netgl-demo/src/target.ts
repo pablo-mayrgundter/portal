@@ -17,7 +17,7 @@ import * as THREE from 'three'
 import type { PortalAnchor, PortalPose, Viewport, Mat4 } from '@portal/portal-core'
 import { windowTransport } from '@portal/portal-iframe'
 import { applyObliqueClipFromAnchor, applyPortalStencilTest } from '@portal/portal-three'
-import { createNetGLRenderer, type NetGLTransport } from '@portal/portal-netgl'
+import { createNetGLRenderer, type NetGLFrameEnd, type NetGLTransport } from '@portal/portal-netgl'
 
 // ---------------------------------------------------------------------------
 // worldB — same red-room + sphere-swarm scene as host-iframe-demo's
@@ -47,21 +47,12 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI / 2
 scene.add(floor)
 
-// ?simple=1 swaps the swarm to MeshBasicMaterial (flat colour, no lights).
-// Diagnostic: if balls appear under ?simple=1 but not without, the GL stream
-// of PBR shaders / light uniforms / default envmap textures isn't surviving
-// NetGL interception. If they don't appear under ?simple either, the failure
-// is upstream of material shading (transport, viewport, stencil, etc.).
-const SIMPLE = new URLSearchParams(location.search).get('simple') === '1'
-
 const sphereGeo = new THREE.IcosahedronGeometry(0.45, 1)
-const sphereMat = SIMPLE
-  ? new THREE.MeshBasicMaterial({ color: '#ff89ad' })
-  : new THREE.MeshStandardMaterial({
-      color: '#ff89ad',
-      metalness: 0.2,
-      roughness: 0.25
-    })
+const sphereMat = new THREE.MeshStandardMaterial({
+  color: '#ff89ad',
+  metalness: 0.2,
+  roughness: 0.25
+})
 const swarm: THREE.Mesh[] = []
 for (let i = 0; i < 24; i += 1) {
   const m = new THREE.Mesh(sphereGeo, sphereMat)
@@ -76,39 +67,13 @@ const tick = (t: number): void => {
   })
 }
 
-// ?test=1 replaces the whole scene with one big bright cube at the origin.
-// Diagnostic: if THIS shows up but the swarm doesn't, the swarm scene has
-// something specific going wrong (frustum culling, lights, normalmatrix,
-// etc.). If even the test cube doesn't appear, the failure is fundamental
-// — draws are reaching the host's GL context but producing no visible
-// pixels (stencil ref mismatch, depth test, target framebuffer wrong, …).
-const TEST = new URLSearchParams(location.search).get('test') === '1'
-if (TEST) {
-  // Replace scene contents with one obvious test object.
-  while (scene.children.length > 0) scene.remove(scene.children[0])
-  const cube = new THREE.Mesh(
-    new THREE.BoxGeometry(2, 2, 2),
-    new THREE.MeshBasicMaterial({ color: '#ffff00' })
-  )
-  cube.position.set(0, 1.6, -2)
-  scene.add(cube)
-}
-
-// ?nostencil=1 skips applyPortalStencilTest AND keeps the scene background.
-// Diagnostic: if balls then appear *covering the whole host canvas* (not
-// just inside the door), the wire works for opaque draws and the failure
-// is in stencil-test setup. If still nothing visible, draws are dropped
-// for some other reason.
-const NOSTENCIL = new URLSearchParams(location.search).get('nostencil') === '1'
-if (!NOSTENCIL) {
-  // worldB's materials need stencilFunc=EQUAL,ref=1 so they only write
-  // pixels where the host's stencil mask painted ref=1 (the door region).
-  // Without scene.background being suppressed, the bg would also paint
-  // into the door region on the host's canvas — set to null so only the
-  // stenciled geometry contributes.
-  applyPortalStencilTest(scene)
-  scene.background = null
-}
+// worldB's materials need stencilFunc=EQUAL,ref=1 so they only write
+// pixels where the host's stencil mask painted ref=1 (the door region).
+// Without scene.background being suppressed, the bg would also paint
+// into the door region on the host's canvas — set to null so only the
+// stenciled geometry contributes.
+applyPortalStencilTest(scene)
+scene.background = null
 
 // ---------------------------------------------------------------------------
 // NetGLRenderer: shadow GL context lives in an OffscreenCanvas (just for
@@ -173,13 +138,7 @@ type SetPoseMessage = {
 
 const lookTarget = new THREE.Vector3()
 
-const params = new URLSearchParams(location.search)
-const LOG = params.get('log') === '1'
-let lastLogTime = 0
-let setPoseCount = 0
-
 const handleSetPose = (msg: SetPoseMessage): void => {
-  setPoseCount += 1
   tick(msg.time)
 
   // Position + orientation from the coupled pose.
@@ -232,19 +191,8 @@ const handleSetPose = (msg: SetPoseMessage): void => {
   // Signal end-of-frame so the host can replay our calls as one atomic
   // batch (no host-side renders interleaving with our useProgram /
   // uniform pairs).
-  transport.post({ type: 'netgl:frame-end' } as unknown as Parameters<typeof transport.post>[0])
-
-  if (LOG && msg.time - lastLogTime > 1) {
-    lastLogTime = msg.time
-    const fmt = (a: number[]): string => `[${a.map((n) => n.toFixed(2)).join(', ')}]`
-    console.log(
-      '[iframe] setPose#' + setPoseCount,
-      'pos:', fmt(msg.pose.position),
-      'fwd:', fmt(msg.pose.forward ?? [0, 0, -1]),
-      'viewport:', msg.viewport.width + 'x' + msg.viewport.height,
-      'children:', scene.children.length
-    )
-  }
+  const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
+  transport.post(frameEnd as unknown as Parameters<typeof transport.post>[0])
 }
 
 transport.onMessage((m) => {

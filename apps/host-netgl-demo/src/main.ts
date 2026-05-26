@@ -35,18 +35,17 @@ import {
   makePortalStencilMask
 } from '@portal/portal-three'
 import { attachBasicFlyControls } from '@portal/portal-controls'
-import { makeNetGLReplay, type NetGLCall } from '@portal/portal-netgl'
+import {
+  isNetGLCall,
+  isNetGLFrameEnd,
+  makeNetGLReplay,
+  type NetGLCall
+} from '@portal/portal-netgl'
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
 const iframe = document.querySelector<HTMLIFrameElement>('#target-iframe')
 if (!iframe) throw new Error('Missing #target-iframe')
-
-// Forward host's URL params to the iframe so flags like ?log=1 reach
-// target.ts at module-load. Mirrors the host-iframe-demo's pattern.
-const params = new URLSearchParams(location.search)
-const LOG = params.get('log') === '1'
-if (location.search) iframe.src = `target.html${location.search}`
 
 const renderer = new THREE.WebGLRenderer({
   antialias: false,
@@ -142,28 +141,27 @@ let inFlightFrame: NetGLCall[] = []
 let pendingFrame: NetGLCall[] | null = null
 let lastFrame: NetGLCall[] | null = null
 
+type NetGLReady = {
+  type: 'netgl:ready'
+  anchor: PortalAnchor
+  background: { r: number; g: number; b: number }
+}
+
 transport.onMessage((msg) => {
-  if (!msg || typeof msg !== 'object') return
-  const data = msg as unknown as
-    | { type: 'netgl:ready'; anchor: PortalAnchor; background: { r: number; g: number; b: number } }
-    | { type: 'netgl:frame-end' }
-    | NetGLCall
-  if ('type' in data) {
-    if (data.type === 'netgl:ready') {
-      const ready = data as { type: 'netgl:ready'; anchor: PortalAnchor; background: { r: number; g: number; b: number } }
-      iframeAnchor = ready.anchor
-      iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
-      iframeReady = true
-      return
-    }
-    if (data.type === 'netgl:frame-end') {
-      pendingFrame = inFlightFrame
-      inFlightFrame = []
-      return
-    }
+  if (isNetGLFrameEnd(msg)) {
+    pendingFrame = inFlightFrame
+    inFlightFrame = []
+    return
   }
-  if ('name' in data && typeof data.name === 'string') {
-    inFlightFrame.push(data)
+  if (isNetGLCall(msg)) {
+    inFlightFrame.push(msg)
+    return
+  }
+  const ready = msg as unknown as NetGLReady | null
+  if (ready && ready.type === 'netgl:ready') {
+    iframeAnchor = ready.anchor
+    iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
+    iframeReady = true
   }
 })
 
@@ -196,10 +194,6 @@ const stencilBg = new THREE.Color()
 const camPos = new THREE.Vector3()
 const camFwd = new THREE.Vector3()
 const camUp = new THREE.Vector3()
-let lastLogTime = 0
-let setPosesSent = 0
-let lastDrainSize = 0
-
 const frame = (): void => {
   const dt = clock.getDelta()
   const time = clock.elapsedTime
@@ -248,90 +242,7 @@ const frame = (): void => {
       batch = lastFrame
     }
     if (batch) {
-      lastDrainSize = batch.length
-      if (LOG) {
-        // Diagnostic: check GL error after every replay call. Identifies
-        // the first call that pushes the context into an error state
-        // (silent failures like INVALID_ENUM on a missing extension,
-        // INVALID_VALUE on a bad buffer ref, etc. would otherwise just
-        // discard draws without writing pixels). Cheap on a few frames,
-        // skip outside ?log=1 because gl.getError() forces a sync barrier.
-        const errStr = (code: number): string => {
-          if (code === gl.NO_ERROR) return 'NO_ERROR'
-          if (code === gl.INVALID_ENUM) return 'INVALID_ENUM'
-          if (code === gl.INVALID_VALUE) return 'INVALID_VALUE'
-          if (code === gl.INVALID_OPERATION) return 'INVALID_OPERATION'
-          if (code === gl.INVALID_FRAMEBUFFER_OPERATION) return 'INVALID_FRAMEBUFFER_OPERATION'
-          if (code === gl.OUT_OF_MEMORY) return 'OUT_OF_MEMORY'
-          if (code === gl.CONTEXT_LOST_WEBGL) return 'CONTEXT_LOST_WEBGL'
-          return 'UNKNOWN(' + code + ')'
-        }
-        let firstErr: { call: NetGLCall; code: number } | null = null
-        const counts: Record<string, number> = {}
-        // Track ALL args for a small set of state-setting calls — we
-        // need to see e.g. every viewport/scissor call's args, not just
-        // the first, because the bug is that a LATER call is clobbering
-        // the correct earlier one.
-        const INTERESTING = new Set([
-          'viewport',
-          'scissor',
-          'bindFramebuffer',
-          'useProgram',
-          'bindVertexArray'
-        ])
-        const allArgs: Record<string, unknown[][]> = {}
-        for (let i = 0; i < batch.length; i += 1) {
-          const call = batch[i]
-          counts[call.name] = (counts[call.name] ?? 0) + 1
-          if (INTERESTING.has(call.name)) {
-            ;(allArgs[call.name] ??= []).push(call.args)
-          }
-          netglReplay(call)
-          if (!firstErr) {
-            const code = gl.getError()
-            if (code !== gl.NO_ERROR) firstErr = { call, code }
-          }
-        }
-        if (firstErr) {
-          console.warn(
-            '[host] replay GL error:', errStr(firstErr.code),
-            'on call:', firstErr.call.name,
-            'args:', firstErr.call.args
-          )
-        }
-        if (time - lastLogTime > 0.99) {
-          console.log('[host] drain calls:', counts)
-          console.log('[host] all interesting args:', allArgs)
-          const fb = gl.getParameter(gl.FRAMEBUFFER_BINDING)
-          const vp = gl.getParameter(gl.VIEWPORT) as Int32Array
-          const sc = gl.getParameter(gl.SCISSOR_BOX) as Int32Array
-          const prog = gl.getParameter(gl.CURRENT_PROGRAM)
-          const colorMask = gl.getParameter(gl.COLOR_WRITEMASK) as boolean[]
-          const stencilTest = gl.getParameter(gl.STENCIL_TEST)
-          const stencilFunc = gl.getParameter(gl.STENCIL_FUNC)
-          const stencilRef = gl.getParameter(gl.STENCIL_REF)
-          const stencilValueMask = gl.getParameter(gl.STENCIL_VALUE_MASK)
-          const scissorTest = gl.getParameter(gl.SCISSOR_TEST)
-          const depthTest = gl.getParameter(gl.DEPTH_TEST)
-          const depthFunc = gl.getParameter(gl.DEPTH_FUNC)
-          console.log('[host] post-drain GL state:', {
-            framebuffer: fb ? 'non-null' : 'null',
-            viewport: vp ? [vp[0], vp[1], vp[2], vp[3]] : null,
-            scissor: sc ? [sc[0], sc[1], sc[2], sc[3]] : null,
-            scissorTest,
-            currentProgram: prog ? 'non-null' : 'null',
-            colorMask: colorMask ? [colorMask[0], colorMask[1], colorMask[2], colorMask[3]] : null,
-            stencilTest,
-            stencilFunc: '0x' + (stencilFunc as number)?.toString(16),
-            stencilRef,
-            stencilValueMask: '0x' + (stencilValueMask as number)?.toString(16),
-            depthTest,
-            depthFunc: '0x' + (depthFunc as number)?.toString(16)
-          })
-        }
-      } else {
-        for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
-      }
+      for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
       // Sync three's view of GL state — the iframe just clobbered it.
       renderer.resetState()
     }
@@ -361,21 +272,6 @@ const frame = (): void => {
       viewport: { width, height },
       time
     } as unknown as Parameters<typeof transport.post>[0])
-    setPosesSent += 1
-
-    if (LOG && time - lastLogTime > 1) {
-      lastLogTime = time
-      const fmt = (a: number[]): string => `[${a.map((n) => n.toFixed(2)).join(', ')}]`
-      console.log(
-        '[host] setPose#' + setPosesSent,
-        'host pos:', fmt([camPos.x, camPos.y, camPos.z]),
-        'coupled pos:', fmt(coupled.position),
-        'coupled fwd:', fmt(coupled.forward ?? [0, 0, -1]),
-        'viewport:', width + 'x' + height,
-        'lastDrain:', lastDrainSize + ' calls',
-        'iframeAnchor:', iframeAnchor
-      )
-    }
   }
 
   requestAnimationFrame(frame)
