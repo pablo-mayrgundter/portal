@@ -12,7 +12,9 @@ import {
 } from '@portal/portal-three'
 import { createWorldA } from './world-a'
 import { createWorldB } from './world-b'
-import { attachBasicFlyControls } from '@portal/portal-controls'
+import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
+
+attachNavDrawer('three')
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
