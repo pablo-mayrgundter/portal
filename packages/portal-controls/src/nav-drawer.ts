@@ -138,7 +138,10 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
 
   const drawer = document.createElement('aside')
   drawer.id = 'portal-nav-drawer'
-  drawer.setAttribute('aria-hidden', 'true')
+  // Open by default so the demo lineup is the first thing a visitor sees;
+  // they tap the close icon (or click out / press Esc) to focus on the
+  // running demo.
+  drawer.setAttribute('aria-hidden', 'false')
   drawer.setAttribute('aria-label', 'Portal demos')
   drawer.innerHTML = `
     <h2>Portal demos</h2>
@@ -159,10 +162,10 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
   const toggle = document.createElement('button')
   toggle.id = 'portal-nav-toggle'
   toggle.type = 'button'
-  toggle.setAttribute('aria-label', 'Toggle demos menu')
-  toggle.setAttribute('aria-expanded', 'false')
+  toggle.setAttribute('aria-label', 'Close demos menu')
+  toggle.setAttribute('aria-expanded', 'true')
   toggle.setAttribute('aria-controls', 'portal-nav-drawer')
-  toggle.innerHTML = HAMBURGER_SVG
+  toggle.innerHTML = CLOSE_SVG
 
   document.body.appendChild(drawer)
   document.body.appendChild(toggle)
