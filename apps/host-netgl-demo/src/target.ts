@@ -16,7 +16,7 @@
 import * as THREE from 'three'
 import type { PortalAnchor, PortalPose, Viewport, Mat4 } from '@portal/portal-core'
 import { windowTransport } from '@portal/portal-iframe'
-import { applyPortalStencilTest } from '@portal/portal-three'
+import { applyObliqueClipFromAnchor, applyPortalStencilTest } from '@portal/portal-three'
 import { createNetGLRenderer, type NetGLTransport } from '@portal/portal-netgl'
 
 // ---------------------------------------------------------------------------
@@ -203,6 +203,16 @@ const handleSetPose = (msg: SetPoseMessage): void => {
   // all match what the host is composing against. Bypass aspect/fov
   // computation; three will use projectionMatrix as-is for rendering.
   sourceCamera.projectionMatrix.fromArray(msg.projection as readonly number[])
+  sourceCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrix).invert()
+
+  // Oblique near-plane clip aligned with the iframe portal: cull any
+  // worldB geometry on the CAMERA side of the portal plane at rasterise
+  // time. Without this, balls between camera and door render and occlude
+  // the (correct) balls on the far side — visible as the near-side ring
+  // showing through the door even though geometrically they shouldn't.
+  // The host's stencil-mask handles the screen-space halfspace test;
+  // this handles the world-space plane clip.
+  applyObliqueClipFromAnchor(sourceCamera, anchor)
   sourceCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrix).invert()
 
   netglRenderer.setSize(msg.viewport.width, msg.viewport.height, false)
