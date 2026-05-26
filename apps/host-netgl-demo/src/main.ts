@@ -131,8 +131,16 @@ const transport = windowTransport({
 // program". Instead, accumulate the iframe's calls until it sends
 // `netgl:frame-end`, then atomically drain the latest complete frame at one
 // fixed point in the host's render loop (after stencil mask + clearDepth).
+//
+// `lastFrame` caches the most recent fully-drained batch as a fallback for
+// host frames where the iframe hasn't responded yet. The batch starts with
+// resetState (which re-issues all GL state) so it's self-contained — safe
+// to replay multiple times. Without the cache, an iframe roundtrip that
+// occasionally exceeds the host's frame budget shows up as door-region
+// flicker: stencil-painted bg color one frame, full worldB the next.
 let inFlightFrame: NetGLCall[] = []
 let pendingFrame: NetGLCall[] | null = null
+let lastFrame: NetGLCall[] | null = null
 
 transport.onMessage((msg) => {
   if (!msg || typeof msg !== 'object') return
@@ -225,9 +233,21 @@ const frame = (): void => {
     // uniform / draw sequences land in order against the program they were
     // recorded for. Stale partial frames are dropped — only the most recent
     // frame-end'd batch composites.
-    if (pendingFrame) {
-      const batch = pendingFrame
+    //
+    // If the iframe's response for this host frame isn't in yet (its
+    // roundtrip exceeded the host's frame budget), fall back to replaying
+    // the last successfully-drained batch. That batch's first call is
+    // resetState, so it's self-contained — replays cleanly against
+    // whatever GL state the host left the context in. Visually: one frame
+    // of stale worldB content is invisible; door-region flicker is gone.
+    let batch: NetGLCall[] | null = pendingFrame
+    if (batch) {
       pendingFrame = null
+      lastFrame = batch
+    } else {
+      batch = lastFrame
+    }
+    if (batch) {
       lastDrainSize = batch.length
       if (LOG) {
         // Diagnostic: check GL error after every replay call. Identifies
