@@ -40,4 +40,11 @@ echo "==> Copying celestiary/docs into apps/host-netgl-celestiary/public/celesti
 mkdir -p "$APP_PUBLIC/celestiary"
 cp -a "$CELESTIARY/docs/." "$APP_PUBLIC/celestiary/"
 
+echo "==> Restoring celestiary submodule to clean state"
+# The build artifacts in public/celestiary/ are self-contained; vite serves
+# them without needing the submodule's working tree to stay patched. Cleaning
+# up keeps `git status` quiet on the parent repo.
+git -C "$CELESTIARY" checkout -- .
+git -C "$CELESTIARY" clean -fd
+
 echo "==> Done. npm run dev:netgl-celestiary"
