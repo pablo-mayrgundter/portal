@@ -140,9 +140,15 @@ function installPortalShim() {
     renderer.outputColorSpace = 'srgb'
     renderer.toneMapping = 0 // NoToneMapping
     // Don't clear the host canvas — host already drew its own scene + stencil
-    // mask in the portal door region. Clearing here would wipe it.
+    // mask in the portal door region. We toggle autoClear per-render in the
+    // patched render below: false for screen renders (preserve worldA), true
+    // for RT renders (so the _sceneRT gets fresh contents each frame instead
+    // of stale garbage that the atm pass would then blit as solid color).
     renderer.autoClear = false
-    renderer.setClearColor(backgroundColor, 0)
+    // Alpha 1 so cleared RT pixels are opaque — the atm shader's
+    // texture2D(tDiffuse, vUv) reads the RGBA including alpha, and any
+    // downstream blend assumes opaque.
+    renderer.setClearColor(backgroundColor, 1)
 
     // Monkey-patch setAnimationLoop so we can post netgl:frame-end after each
     // RAF callback. This lets the host batch all of one frame's GL calls and
@@ -165,17 +171,17 @@ function installPortalShim() {
     const origRender = renderer.render.bind(renderer)
     let renderCount = 0
     renderer.render = function (scene, camera) {
-      // Capture the caller's render target BEFORE resetState. Three's
-      // resetState() doesn't just clear cached GL state — it also sets
-      // _currentRenderTarget = null (three 0.171, three.module.js:17541).
-      // Without saving + restoring, celestiary's `setRenderTarget(_sceneRT)
-      // ; render(scene, camera)` becomes "render to null" once we hit
-      // resetState inside the patched render — the scene draws onto the
-      // host canvas (where the atm pass then blits an empty RT).
       const savedTarget = renderer.getRenderTarget()
       renderer.resetState()
       if (savedTarget !== null) renderer.setRenderTarget(savedTarget)
       const toScreen = savedTarget === null
+
+      // autoClear: false for screen renders (don't wipe host's worldA), true
+      // for RT renders (clear stale contents so the atm pass blits fresh
+      // celestiary pixels instead of garbage left from frame N-1).
+      const savedAutoClear = renderer.autoClear
+      renderer.autoClear = !toScreen
+
       if (toScreen) {
         if (!noStencil) {
           const touched = applyStencilTest(scene)
@@ -188,7 +194,11 @@ function installPortalShim() {
         diag(`render→RT ${scene?.type ?? scene?.constructor?.name}`)
       }
       renderCount++
-      return origRender(scene, camera)
+      try {
+        return origRender(scene, camera)
+      } finally {
+        renderer.autoClear = savedAutoClear
+      }
     }
 
     const origSAL = renderer.setAnimationLoop.bind(renderer)
