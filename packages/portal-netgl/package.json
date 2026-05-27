@@ -1,24 +1,56 @@
 {
-  "name": "@portal/portal-netgl",
+  "name": "@pablo-mayrgundter/portal-netgl",
   "version": "0.1.0",
-  "private": true,
+  "description": "Command-stream WebGL portals: route a three.js renderer's GL calls over a postMessage transport so an iframe's draws compose into the host canvas without a bitmap round-trip.",
   "type": "module",
-  "main": "./src/index.ts",
-  "dependencies": {
-    "@portal/portal-core": "0.1.0",
-    "@portal/portal-iframe": "0.1.0",
-    "@portal/portal-three": "0.1.0",
-    "three": "^0.180.0"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "DESIGN.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pablo-mayrgundter/portal.git",
+    "directory": "packages/portal-netgl"
+  },
+  "license": "MIT",
+  "keywords": [
+    "webgl",
+    "portal",
+    "iframe",
+    "three.js",
+    "postmessage",
+    "compositing"
+  ],
+  "peerDependencies": {
+    "three": ">=0.171.0 <1.0.0"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.7",
     "@types/node": "^25.6.0",
     "@types/three": "^0.184.0",
+    "@portal/portal-iframe": "0.1.0",
     "gl": "9.0.0-rc.10",
     "jsdom": "^26.1.0",
-    "typescript": "^5.9.3"
+    "three": "^0.180.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
   },
   "scripts": {
-    "check": "tsc --noEmit"
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
   }
 }

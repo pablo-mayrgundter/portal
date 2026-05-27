@@ -23,18 +23,18 @@
 //     `tick` is the hook.
 
 import * as THREE from 'three'
+import type { NetGLFrameEnd } from './messages'
 import type {
   ColorRGB,
   Mat4,
   PortalAnchor,
   PortalPose,
   Viewport
-} from '@portal/portal-core'
-import { windowTransport } from '@portal/portal-iframe'
-import { applyObliqueClipFromAnchor, applyPortalStencilTest } from '@portal/portal-three'
-import type { NetGLFrameEnd } from './messages'
+} from './portal-types'
 import type { NetGLTransport } from './renderer'
 import { createNetGLRenderer } from './renderer'
+import { applyObliqueClipFromAnchor, applyPortalStencilTest } from './three-helpers'
+import { windowTransport } from './window-transport'
 
 /** Inbound message: host asks the target to render from a given pose. */
 type SetPoseMessage = {

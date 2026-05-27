@@ -3,11 +3,11 @@
 // All the heavy lifting (shadow GL context, transport, NetGLRenderer,
 // stencil-test application, oblique near-plane clip, setPose handler, ready
 // handshake, frame-end marker) lives in `makeNetGLPortalTarget` in
-// `@portal/portal-netgl`. This file just builds worldB and animates it.
+// `@pablo-mayrgundter/portal-netgl`. This file just builds worldB and animates it.
 
 import * as THREE from 'three'
 import type { PortalAnchor } from '@portal/portal-core'
-import { makeNetGLPortalTarget } from '@portal/portal-netgl'
+import { makeNetGLPortalTarget } from '@pablo-mayrgundter/portal-netgl'
 
 // ---------------------------------------------------------------------------
 // worldB — red-room + sphere-swarm scene, animated via a per-frame tick.

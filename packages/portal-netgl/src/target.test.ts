@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
-import type { PortalAnchor } from '@portal/portal-core'
+import type { PortalAnchor } from './portal-types'
 import type { NetGLTransport } from './renderer'
 import { makeNetGLPortalTarget } from './target'
 

@@ -1,0 +1,72 @@
+name: Publish @pablo-mayrgundter/portal-netgl to npm
+
+# Push-on-green: when a commit lands on main with all tests + checks
+# passing, publish `@pablo-mayrgundter/portal-netgl` to npm under @latest
+# — but only if the version in package.json differs from what's already
+# on the registry. That way:
+#   - bumping `version` in package.json + merging to main = a release
+#   - other commits on main are skipped (no version bump → no publish)
+#   - no manual `npm publish` ceremony
+#
+# Requires the repo to have an NPM_TOKEN secret with publish permission
+# to the @pablo-mayrgundter scope. Set via:
+#   gh secret set NPM_TOKEN --body "$(npm token create --read-only=false)"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run check
+
+      - name: Test
+        run: npm test
+
+      - name: Build portal-netgl
+        run: npm run build -w @pablo-mayrgundter/portal-netgl
+
+      - name: Compare local vs published version
+        id: version-check
+        working-directory: packages/portal-netgl
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @pablo-mayrgundter/portal-netgl version 2>/dev/null || echo "none")
+          echo "local=$LOCAL"     >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL" = "$PUBLISHED" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Local version $LOCAL matches @latest on npm — nothing to publish."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Local $LOCAL differs from published $PUBLISHED — will publish."
+          fi
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.skip == 'false'
+        working-directory: packages/portal-netgl
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag latest

@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noEmit": false,
+    "emitDeclarationOnly": false
+  },
+  "include": [
+    "src/guest.ts",
+    "src/index.ts",
+    "src/messages.ts",
+    "src/portal-types.ts",
+    "src/proxy.ts",
+    "src/recorder.ts",
+    "src/renderer.ts",
+    "src/replay.ts",
+    "src/target.ts",
+    "src/three-helpers.ts",
+    "src/window-transport.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*-spike.test.ts"
+  ]
+}
