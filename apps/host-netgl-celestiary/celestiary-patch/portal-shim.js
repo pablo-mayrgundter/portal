@@ -201,6 +201,7 @@ function installPortalShim() {
           }
         } finally {
           transport.post({type: 'netgl:frame-end'})
+        }
       })
     }
 
