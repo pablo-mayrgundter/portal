@@ -5,7 +5,7 @@ export {
   type NetGLPortalTarget
 } from './target'
 export { makeNetGLRecorder } from './recorder'
-export { makeNetGLReplay, type NetGLReplay } from './replay'
+export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
 export {
   createNetGLRenderer,
   attachNetGLReceiver,

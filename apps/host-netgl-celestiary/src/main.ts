@@ -25,7 +25,8 @@ import { windowTransport } from '@portal/portal-iframe'
 import {
   makeLocalEndpoint,
   makePortalPlane,
-  makePortalStencilMask
+  makePortalStencilMask,
+  portalScreenRect
 } from '@portal/portal-three'
 import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
 import {
@@ -96,7 +97,20 @@ const stencilMask = makePortalStencilMask()
 // NetGL receiver: replay celestiary's GL calls against the host canvas's
 // WebGL2 context.
 const gl = renderer.getContext()
-const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext)
+// Door-fit viewport remap: the iframe's atm pass renders its fullscreen
+// quad at full canvas viewport; we want those pixels to land inside the
+// door rect instead so the embedded scene reads as "fit to door" rather
+// than "screen-positional crop". `currentDoorRect` is recomputed each
+// host frame (right before drain); remapScreenViewport returns it for
+// every screen-target viewport call. RT-targeted viewport calls pass
+// through unchanged so celestiary's offscreen renders stay full-RT-sized.
+let currentDoorRect: { x: number; y: number; w: number; h: number } | null = null
+const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
+  remapScreenViewport: () => {
+    const r = currentDoorRect
+    return r ? [r.x, r.y, r.w, r.h] : null
+  }
+})
 
 let iframeReady = false
 let iframeAnchor: PortalAnchor | null = null
@@ -202,6 +216,20 @@ const frame = (): void => {
     renderer.render(stencilMask.scene, stencilMask.camera)
     renderer.clearDepth()
 
+    // Compute the door's pixel rect on the host canvas (camera-projected
+    // bounding box of the anchor mesh). The NetGL replay reads this via
+    // `remapScreenViewport` so the iframe's fullscreen screen-target
+    // viewport calls land inside the door instead of overdrawing the
+    // whole canvas.
+    const pixelRatio = renderer.getPixelRatio()
+    const cw = Math.floor(window.innerWidth * pixelRatio)
+    const ch = Math.floor(window.innerHeight * pixelRatio)
+    currentDoorRect = portalScreenRect(
+      hostAnchorMesh,
+      hostCamera,
+      { width: cw, height: ch }
+    )
+
     let batch: NetGLCall[] | null = pendingFrame
     if (batch) {
       pendingFrame = null
@@ -227,9 +255,8 @@ const frame = (): void => {
     )
 
     const projection: Mat4 = Array.from(hostCamera.projectionMatrix.elements)
-    const pixelRatio = renderer.getPixelRatio()
-    const width = Math.max(1, Math.floor(window.innerWidth * pixelRatio))
-    const height = Math.max(1, Math.floor(window.innerHeight * pixelRatio))
+    const width = Math.max(1, cw)
+    const height = Math.max(1, ch)
 
     transport.post({
       type: 'netgl:setPose',

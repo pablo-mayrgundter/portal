@@ -376,6 +376,98 @@ export const clearPortalStencilTest = (scene: THREE.Object3D): void => {
 }
 
 /**
+ * Axis-aligned pixel-space rectangle covering a portal-anchor mesh as seen
+ * from `camera`. Computed by projecting the four corners of the anchor
+ * mesh's local-space [-halfW..+halfW] × [-halfH..+halfH] plane through the
+ * camera and taking the bounding box of the resulting NDC coordinates,
+ * remapped to pixel coords using `viewport`.
+ *
+ * Useful for door-fit compositing: an embedded NetGL target renders to its
+ * fullscreen viewport; the host computes this rect each frame and feeds it
+ * to `makeNetGLReplay`'s `remapScreenViewport` so the embedded app's
+ * default-framebuffer draws land inside the door rect instead of overdrawing
+ * the host canvas.
+ *
+ * The rect is clipped to the viewport — door corners behind the camera or
+ * outside the visible frustum get clamped. Returns `null` when ALL corners
+ * project behind the camera (rect is meaningless / not visible).
+ */
+export type PixelRect = {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+const portalProjScratch = new THREE.Vector3()
+
+export const portalScreenRect = (
+  anchor: THREE.Object3D,
+  camera: THREE.Camera,
+  viewport: { width: number; height: number },
+  halfExtents?: { halfWidth: number; halfHeight: number }
+): PixelRect | null => {
+  // Pull halfW/halfH from explicit arg, or fall back to `makePortalPlane`'s
+  // userData.portalSize (a Vector2 of full w/h). Else default to a unit quad
+  // centred on the anchor's origin.
+  let halfW: number
+  let halfH: number
+  if (halfExtents) {
+    halfW = halfExtents.halfWidth
+    halfH = halfExtents.halfHeight
+  } else {
+    const size = (anchor as THREE.Object3D & {
+      userData?: { portalSize?: THREE.Vector2 }
+    }).userData?.portalSize
+    halfW = size ? size.x / 2 : 0.5
+    halfH = size ? size.y / 2 : 0.5
+  }
+
+  anchor.updateMatrixWorld(true)
+  if (!camera.matrixWorldInverse) return null
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let visibleCorners = 0
+
+  for (let i = 0; i < 4; i += 1) {
+    const lx = (i & 1) === 0 ? -halfW : halfW
+    const ly = (i & 2) === 0 ? -halfH : halfH
+    portalProjScratch.set(lx, ly, 0)
+    portalProjScratch.applyMatrix4(anchor.matrixWorld)
+    portalProjScratch.project(camera)
+    // .project returns NDC where z > 1 means behind the camera in
+    // three's projection convention. Skip those corners; if none are in
+    // front, the door isn't visible at all.
+    if (portalProjScratch.z > 1) continue
+    visibleCorners += 1
+    const px = (portalProjScratch.x + 1) * 0.5 * viewport.width
+    const py = (portalProjScratch.y + 1) * 0.5 * viewport.height
+    if (px < minX) minX = px
+    if (px > maxX) maxX = px
+    if (py < minY) minY = py
+    if (py > maxY) maxY = py
+  }
+
+  if (visibleCorners === 0) return null
+
+  // Clip to the viewport. gl.viewport tolerates out-of-range coords (clips
+  // when drawing), but keeping the rect inside the canvas means the
+  // embedded app's content stays within the user's view rather than being
+  // partially scissored off-canvas.
+  const x = Math.max(0, Math.floor(minX))
+  const y = Math.max(0, Math.floor(minY))
+  const x2 = Math.min(viewport.width, Math.ceil(maxX))
+  const y2 = Math.min(viewport.height, Math.ceil(maxY))
+  const w = Math.max(0, x2 - x)
+  const h = Math.max(0, y2 - y)
+  if (w === 0 || h === 0) return null
+  return { x, y, w, h }
+}
+
+/**
  * A `PortalEndpoint` backed by a local THREE.Scene + anchor mesh.
  *
  * This is where the per-frame hidden contract lives:

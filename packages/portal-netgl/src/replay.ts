@@ -26,8 +26,45 @@ const TYPED_ARRAY_CTORS: Record<string, TypedArrayCtor> = {
 
 export type NetGLReplay = (call: NetGLCall) => void
 
-export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay => {
+export type NetGLReplayConfig = {
+  /**
+   * Remap viewport calls that target the default framebuffer (i.e. the
+   * host canvas) to a different rect. Lets the host place an embedded
+   * app's fullscreen render inside a specific region (e.g. the portal
+   * door) without the embedded app needing to know about the host's
+   * compositing scheme.
+   *
+   * Called once per `gl.viewport(x, y, w, h)` while the current
+   * draw-framebuffer is null. Return the rect to actually apply
+   * (`[x, y, w, h]` in pixel coords), or `null` to pass the sender's
+   * original args through unchanged.
+   *
+   * Render-target viewport calls (current draw-framebuffer != null)
+   * always pass through unchanged — sub-RT viewports are app-internal.
+   */
+  remapScreenViewport?: (
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ) => readonly [number, number, number, number] | null
+}
+
+// WebGL constants we need at decode time. Hardcoded because we don't always
+// have a context around (the replay closure does, but the decode logic is
+// uniform). Values are from the GL spec, identical across WebGL1/WebGL2.
+const GL_FRAMEBUFFER = 0x8D40
+const GL_DRAW_FRAMEBUFFER = 0x8CA9
+
+export const makeNetGLReplay = (
+  receiver: WebGL2RenderingContext,
+  config: NetGLReplayConfig = {}
+): NetGLReplay => {
   const idToHandle = new Map<number, object>()
+  // Current draw-framebuffer binding. Null = default framebuffer (host
+  // canvas). Tracked here rather than read from gl.getParameter so we
+  // don't trigger a synchronous query per call.
+  let currentDrawFb: object | null = null
 
   const decodeArg = (arg: NetGLEncodedValue): unknown => {
     if (arg == null) return null
@@ -87,6 +124,32 @@ export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay =
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(`NetGL replay (decoding ${call.name}): ${msg}`)
     }
+
+    // Track framebuffer binding so we know when subsequent viewport calls
+    // target the host canvas (currentDrawFb === null) vs an offscreen RT.
+    if (call.name === 'bindFramebuffer') {
+      const target = decodedArgs[0] as number
+      if (target === GL_FRAMEBUFFER || target === GL_DRAW_FRAMEBUFFER) {
+        currentDrawFb = decodedArgs[1] as object | null
+      }
+    }
+
+    // Door-fit viewport remap: when the sender targets the host canvas
+    // (default FB) and the host has configured a remap, replace the
+    // viewport call's args with the host-supplied rect. RT-targeted
+    // viewports pass through unchanged.
+    if (
+      call.name === 'viewport' &&
+      currentDrawFb === null &&
+      config.remapScreenViewport
+    ) {
+      const [x, y, w, h] = decodedArgs as [number, number, number, number]
+      const remapped = config.remapScreenViewport(x, y, w, h)
+      if (remapped !== null) {
+        decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
+      }
+    }
+
     const method = (receiver as unknown as Record<string, (...a: unknown[]) => unknown>)[
       call.name
     ]
