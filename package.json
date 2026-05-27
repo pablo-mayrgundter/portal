@@ -11,6 +11,8 @@
     "dev:three": "npm run dev -w @portal/host-three",
     "dev:iframe": "npm run dev -w @portal/host-iframe-demo",
     "dev:netgl": "npm run dev -w @portal/host-netgl-demo",
+    "dev:netgl-celestiary": "npm run dev -w @portal/host-netgl-celestiary",
+    "setup:celestiary": "npm run setup-celestiary -w @portal/host-netgl-celestiary",
     "dev:worker": "npm run dev -w @portal/host-worker-demo",
     "dev:proxy": "npm run dev -w @portal/snapshot-proxy",
     "build": "npm run build --workspaces --if-present",

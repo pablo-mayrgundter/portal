@@ -1,0 +1,37 @@
+diff --git a/js/ThreeUI.js b/js/ThreeUI.js
+index 4f5f5f1..b03e71c 100644
+--- a/js/ThreeUI.js
++++ b/js/ThreeUI.js
+@@ -49,6 +49,15 @@ export default class ThreeUi {
+     this.camera.platform.add(this.camera)
+ 
+     this.renderer = renderer ||
++      // Portal hook: when a host page (running celestiary inside a portal
++      // iframe) sets `window.__portalCreateRenderer`, the hook constructs the
++      // WebGLRenderer using celestiary's own `WebGLRenderer` constructor (passed
++      // through so we don't risk a two-three.js version mismatch) and returns
++      // it. The hook is responsible for any GL-call routing — e.g. wrapping the
++      // GL context in a NetGL recorder Proxy that ships calls to the host. If
++      // the hook is absent or returns null, fall back to the normal path.
++      (typeof window !== 'undefined' &&
++        window.__portalCreateRenderer?.(this.threeContainer, backgroundColor || 0x000000, {WebGLRenderer})) ||
+       this.initRenderer(this.threeContainer, backgroundColor || 0x000000)
+     // Post-process atmosphere pass
+     this._sceneRT = this._makeSceneRT()
+diff --git a/public/index.html b/public/index.html
+index 245199e..88e87a8 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -35,6 +35,12 @@
+   </head>
+   <body style="background-color: black">
+     <div id="root"></div>
++    <!-- Portal shim: when the page loads inside an iframe with ?portal=1,
++         installs window.__portalCreateRenderer so celestiary's ThreeUI builds
++         a NetGL-recording WebGLRenderer that ships GL calls to the host.
++         Safe no-op when standalone. Must load BEFORE index.js so the hook
++         is in place before ThreeUI constructs its renderer. -->
++    <script type="module" src="portal-shim.js"></script>
+     <script type="module" src="index.js"></script>
+   </body>
+ </html>

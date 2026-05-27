@@ -95,6 +95,63 @@ export const makeNetGLRecorder = (
   const handleToId = new Map<object, number>()
   let nextId = 1
 
+  // Scratch 2D canvas reused across encodes to avoid GC churn when an app
+  // uploads many textures per frame. Lazily created on first image-source
+  // encode — worker realms have no `document` AND can't see
+  // HTMLImageElement / HTMLCanvasElement / HTMLVideoElement anyway (they
+  // can only be passed an ImageBitmap, which has its own no-canvas
+  // encoding path via createImageBitmap → ArrayBuffer). The throw below
+  // surfaces the unsupported case loudly rather than silently producing
+  // a broken texture.
+  let scratch2d: CanvasRenderingContext2D | null = null
+  const getScratch2d = (): CanvasRenderingContext2D => {
+    if (!scratch2d) {
+      if (typeof document === 'undefined') {
+        throw new Error(
+          'NetGL recorder: image-source encoding needs a document. ' +
+          'Worker hosts should convert image sources to ImageBitmap ' +
+          'before passing to gl.texImage2D (and we can extend the encoder ' +
+          'to take ImageBitmap directly with no 2D-canvas detour).'
+        )
+      }
+      const c = document.createElement('canvas')
+      const ctx = c.getContext('2d', { willReadFrequently: true })
+      if (!ctx) throw new Error('NetGL recorder: failed to get 2d context for scratch canvas')
+      scratch2d = ctx
+    }
+    return scratch2d
+  }
+
+  /**
+   * Convert an image-source DOM object (Image / Canvas / Video / ImageBitmap)
+   * to an ImageData envelope. The receiver reconstructs an `ImageData` and
+   * passes it to `texImage2D` / `texSubImage2D` — both accept ImageData as
+   * an alternative to the original source. Synchronous via 2D canvas; works
+   * for any source that's already loaded.
+   */
+  const encodeImageSource = (src: TexImageSource): NetGLEncodedValue => {
+    const anySrc = src as unknown as {
+      naturalWidth?: number
+      naturalHeight?: number
+      videoWidth?: number
+      videoHeight?: number
+      width: number
+      height: number
+    }
+    const w = anySrc.naturalWidth ?? anySrc.videoWidth ?? anySrc.width
+    const h = anySrc.naturalHeight ?? anySrc.videoHeight ?? anySrc.height
+    if (!w || !h) {
+      throw new Error(`NetGL recorder: image source has zero dims (${(src as object).constructor.name})`)
+    }
+    const ctx = getScratch2d()
+    ctx.canvas.width = w
+    ctx.canvas.height = h
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(src as CanvasImageSource, 0, 0)
+    const data = ctx.getImageData(0, 0, w, h)
+    return { __netgl_imagedata: true, width: w, height: h, buffer: data.data.buffer }
+  }
+
   const encodeArg = (arg: unknown): NetGLEncodedValue => {
     if (arg == null) return null
     const t = typeof arg
@@ -114,6 +171,18 @@ export const makeNetGLRecorder = (
       }
     }
     if (arg instanceof ArrayBuffer) return { __netgl_arraybuffer: arg }
+    // DOM image sources accepted by gl.texImage2D / gl.texSubImage2D.
+    if (
+      (typeof HTMLImageElement !== 'undefined' && arg instanceof HTMLImageElement) ||
+      (typeof HTMLCanvasElement !== 'undefined' && arg instanceof HTMLCanvasElement) ||
+      (typeof HTMLVideoElement !== 'undefined' && arg instanceof HTMLVideoElement) ||
+      (typeof ImageBitmap !== 'undefined' && arg instanceof ImageBitmap)
+    ) {
+      return encodeImageSource(arg as TexImageSource)
+    }
+    if (typeof ImageData !== 'undefined' && arg instanceof ImageData) {
+      return { __netgl_imagedata: true, width: arg.width, height: arg.height, buffer: arg.data.buffer }
+    }
     if (Array.isArray(arg)) return arg.map(encodeArg)
     // Unknown object — fall back to null. Most likely cause: a WebGL handle
     // we forgot to intern. Surface loudly during dev rather than silently

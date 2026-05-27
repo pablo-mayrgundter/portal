@@ -1,0 +1,3 @@
+[submodule "external/celestiary"]
+	path = external/celestiary
+	url = https://github.com/celestiary/web

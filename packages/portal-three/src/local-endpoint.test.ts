@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import type { PortalAnchor } from '@portal/portal-core'
-import { applyObliqueClipFromAnchor, makeLocalEndpoint, makePortalPlane } from './index'
+import {
+  applyObliqueClipFromAnchor,
+  makeLocalEndpoint,
+  makePortalPlane,
+  portalScreenRect
+} from './index'
 
 const makeSceneWithPortal = (background = '#101826') => {
   const scene = new THREE.Scene()
@@ -174,5 +179,117 @@ describe('applyObliqueClipFromAnchor', () => {
     const farSide = new THREE.Vector3(0, 1.6, -2.6)
     const ndcFar = projectToNDC(cam, farSide)
     expect(ndcFar[2]).toBeGreaterThan(-1.0)
+  })
+})
+
+describe('portalScreenRect', () => {
+  // Square camera at z=5 looking -z, 90° FOV. With 90° FOV, world distance
+  // 1 at z=4 (= 1 unit in front of the camera) maps to NDC 1.0. So a
+  // ±1×±1 quad at z=4 projects to NDC ±1 — fills the viewport exactly.
+  const makeSquareCam = (): THREE.PerspectiveCamera => {
+    const cam = new THREE.PerspectiveCamera(90, 1, 0.1, 100)
+    cam.position.set(0, 0, 5)
+    cam.lookAt(0, 0, 0)
+    cam.updateMatrixWorld(true)
+    return cam
+  }
+
+  // Looser tolerance to absorb 1-pixel slop from floor/ceil at integer
+  // boundaries (e.g. an ideal y of 25.0 produced by projection arithmetic
+  // can land at 24.9999... and floor to 24).
+  const PIXEL_TOL = 2
+
+  it('returns the full viewport rect when the door fills the camera view', () => {
+    const cam = makeSquareCam()
+    const portal = makePortalPlane(new THREE.Vector2(2, 2))
+    portal.position.set(0, 0, 4)
+    portal.updateMatrixWorld(true)
+    const rect = portalScreenRect(portal, cam, { width: 100, height: 100 })
+    expect(rect).not.toBeNull()
+    expect(rect!.x).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(rect!.y).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(rect!.w).toBeGreaterThanOrEqual(100 - PIXEL_TOL)
+    expect(rect!.h).toBeGreaterThanOrEqual(100 - PIXEL_TOL)
+  })
+
+  it('returns a centred rect when the door is smaller than the view', () => {
+    const cam = makeSquareCam()
+    // Door at half-size (1×1) → fills the centre quarter of the viewport
+    // (50×50 px centred in the 100×100 canvas).
+    const portal = makePortalPlane(new THREE.Vector2(1, 1))
+    portal.position.set(0, 0, 4)
+    portal.updateMatrixWorld(true)
+    const rect = portalScreenRect(portal, cam, { width: 100, height: 100 })
+    expect(rect).not.toBeNull()
+    expect(Math.abs(rect!.x - 25)).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(Math.abs(rect!.y - 25)).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(Math.abs(rect!.w - 50)).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(Math.abs(rect!.h - 50)).toBeLessThanOrEqual(PIXEL_TOL)
+  })
+
+  it('shifts the rect when the door moves off-centre', () => {
+    const cam = makeSquareCam()
+    // Door at the right edge of the camera view.
+    const portal = makePortalPlane(new THREE.Vector2(1, 1))
+    portal.position.set(0.5, 0, 4)
+    portal.updateMatrixWorld(true)
+    const rect = portalScreenRect(portal, cam, { width: 100, height: 100 })
+    expect(rect).not.toBeNull()
+    expect(Math.abs(rect!.x - 50)).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(Math.abs(rect!.y - 25)).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(Math.abs(rect!.w - 50)).toBeLessThanOrEqual(PIXEL_TOL)
+    expect(Math.abs(rect!.h - 50)).toBeLessThanOrEqual(PIXEL_TOL)
+  })
+
+  it('clips the rect to the viewport when the door extends off-screen', () => {
+    const cam = makeSquareCam()
+    // Door extends past the right edge.
+    const portal = makePortalPlane(new THREE.Vector2(2, 1))
+    portal.position.set(0.5, 0, 4)
+    portal.updateMatrixWorld(true)
+    const rect = portalScreenRect(portal, cam, { width: 100, height: 100 })
+    expect(rect).not.toBeNull()
+    // Right edge clipped at canvas width.
+    expect(rect!.x + rect!.w).toBeLessThanOrEqual(100)
+  })
+
+  it('returns null when all door corners are behind the camera', () => {
+    const cam = makeSquareCam()
+    // Door behind the camera (z > camera.z).
+    const portal = makePortalPlane(new THREE.Vector2(1, 1))
+    portal.position.set(0, 0, 10)
+    portal.updateMatrixWorld(true)
+    const rect = portalScreenRect(portal, cam, { width: 100, height: 100 })
+    expect(rect).toBeNull()
+  })
+
+  it('reads half-extents from userData.portalSize by default', () => {
+    const cam = makeSquareCam()
+    const portal = makePortalPlane(new THREE.Vector2(1, 1))
+    portal.position.set(0, 0, 4)
+    portal.updateMatrixWorld(true)
+    // Implicit (from userData) and explicit half-extents should agree.
+    const implicit = portalScreenRect(portal, cam, { width: 100, height: 100 })
+    const explicit = portalScreenRect(portal, cam, { width: 100, height: 100 }, {
+      halfWidth: 0.5,
+      halfHeight: 0.5
+    })
+    expect(implicit).toEqual(explicit)
+  })
+
+  it('explicit half-extents override userData.portalSize', () => {
+    const cam = makeSquareCam()
+    // Mesh has 1×1 portalSize in userData, but we pass 2×2 explicit.
+    const portal = makePortalPlane(new THREE.Vector2(1, 1))
+    portal.position.set(0, 0, 4)
+    portal.updateMatrixWorld(true)
+    const rect = portalScreenRect(portal, cam, { width: 100, height: 100 }, {
+      halfWidth: 1,
+      halfHeight: 1
+    })
+    expect(rect).not.toBeNull()
+    // 2×2 door at z=4 in 90° fov fills the viewport.
+    expect(rect!.w).toBeGreaterThanOrEqual(100 - PIXEL_TOL)
+    expect(rect!.h).toBeGreaterThanOrEqual(100 - PIXEL_TOL)
   })
 })

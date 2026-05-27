@@ -27,6 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # netgl-celestiary's build pulls celestiary out of the external/
+          # submodule; without this the checkout is just the pointer.
+          submodules: recursive
 
       - uses: actions/setup-node@v4
         with:

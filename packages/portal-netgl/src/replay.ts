@@ -26,8 +26,69 @@ const TYPED_ARRAY_CTORS: Record<string, TypedArrayCtor> = {
 
 export type NetGLReplay = (call: NetGLCall) => void
 
-export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay => {
+export type NetGLReplayConfig = {
+  /**
+   * Remap viewport calls that target the default framebuffer (i.e. the
+   * host canvas) to a different rect. Lets the host place an embedded
+   * app's fullscreen render inside a specific region (e.g. the portal
+   * door) without the embedded app needing to know about the host's
+   * compositing scheme.
+   *
+   * Called once per `gl.viewport(x, y, w, h)` while the current
+   * draw-framebuffer is null. Return the rect to actually apply
+   * (`[x, y, w, h]` in pixel coords), or `null` to pass the sender's
+   * original args through unchanged.
+   *
+   * Render-target viewport calls (current draw-framebuffer != null)
+   * always pass through unchanged — sub-RT viewports are app-internal.
+   */
+  remapScreenViewport?: (
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ) => readonly [number, number, number, number] | null
+
+  /**
+   * @internal — debug-only hook with no API stability guarantee.
+   *
+   * Called with a one-line description of every viewport, scissor, and
+   * SCISSOR_TEST enable/disable call as it replays. Useful while tracing
+   * why a door-fit remap isn't sticking, but the exact line format,
+   * what calls trigger it, and even whether it exists at all can change
+   * across releases. Production code should leave this unset.
+   */
+  __debugTraceViewport?: (line: string) => void
+}
+
+// WebGL constants we need at decode time. Hardcoded because we don't always
+// have a context around (the replay closure does, but the decode logic is
+// uniform). Values are from the GL spec, identical across WebGL1/WebGL2.
+const GL_FRAMEBUFFER = 0x8D40
+const GL_DRAW_FRAMEBUFFER = 0x8CA9
+
+export const makeNetGLReplay = (
+  receiver: WebGL2RenderingContext,
+  config: NetGLReplayConfig = {}
+): NetGLReplay => {
   const idToHandle = new Map<number, object>()
+  // Current draw-framebuffer binding. Null = default framebuffer (host
+  // canvas). Tracked here rather than read from gl.getParameter so we
+  // don't trigger a synchronous query per call.
+  let currentDrawFb: object | null = null
+  // The sender's intended viewport before any host-side remap. Captured
+  // from every viewport call. We re-issue this on the host after any
+  // bindFramebuffer transition because the sender's WebGLState caches its
+  // own viewport value and skips redundant gl.viewport calls when its
+  // cached value matches the new target's intended viewport — but the
+  // host's *actual* gl.viewport may have been remapped to the door rect
+  // in the meantime, so without re-issuing we'd render the next bound
+  // framebuffer at the wrong viewport. (Concretely: the sender's atm pass
+  // sets viewport to door rect via our remap; then next frame's
+  // setRenderTarget(rt) wants viewport = (0,0,W,H), three's cache says
+  // "same as before" and skips, so the RT render runs at the door-rect
+  // viewport on the host, populating only a tiny region of the RT.)
+  let lastIntendedViewport: readonly [number, number, number, number] | null = null
 
   const decodeArg = (arg: NetGLEncodedValue): unknown => {
     if (arg == null) return null
@@ -57,11 +118,94 @@ export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay =
     if ('__netgl_arraybuffer' in obj) {
       return obj.__netgl_arraybuffer as ArrayBuffer
     }
+    if ('__netgl_imagedata' in obj) {
+      // ImageData envelope: sender converted an HTMLImageElement /
+      // HTMLCanvasElement / HTMLVideoElement / ImageBitmap / ImageData to
+      // raw pixels via a 2D canvas. Reconstruct an ImageData; texImage2D /
+      // texSubImage2D both accept ImageData as an alternative to the
+      // original DOM source.
+      const width = obj.width as number
+      const height = obj.height as number
+      const buffer = obj.buffer as ArrayBuffer
+      const data = new Uint8ClampedArray(buffer)
+      return new ImageData(data, width, height)
+    }
     throw new Error(`NetGL replay: unknown encoded value shape`)
   }
 
   return (call: NetGLCall): void => {
-    const decodedArgs = call.args.map(decodeArg)
+    let decodedArgs: unknown[]
+    try {
+      decodedArgs = call.args.map(decodeArg)
+    } catch (err) {
+      // Re-throw with call name so the cause is visible. The most common
+      // shape is "unknown handle id N" while decoding an arg — that means
+      // a handle-returning call (createTexture, createProgram,
+      // getUniformLocation, etc.) referenced by this call never reached the
+      // receiver. Usually means the sender's frame-batching dropped a
+      // batch that contained the mint; see host main.ts's frame-end
+      // concat logic.
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`NetGL replay (decoding ${call.name}): ${msg}`)
+    }
+
+    // Track framebuffer binding so we know when subsequent viewport calls
+    // target the host canvas (currentDrawFb === null) vs an offscreen RT.
+    // Note that we update `currentDrawFb` BEFORE applying the original
+    // method below; the post-bind viewport re-issue at the bottom reads
+    // the updated value.
+    //
+    // Identity comparison (`!==`) is correct here: the sender's recorder
+    // and our replay agree on FBO identity through the netglID interning
+    // — `bindFramebuffer(target, fbo)` ships the FBO as a __netgl_handle
+    // ref, decodeArg resolves it back to the same WebGLFramebuffer
+    // instance held in `idToHandle`. So the same FBO at two different
+    // bind sites compares equal.
+    let didBindTransition = false
+    if (call.name === 'bindFramebuffer') {
+      const target = decodedArgs[0] as number
+      if (target === GL_FRAMEBUFFER || target === GL_DRAW_FRAMEBUFFER) {
+        const newFb = decodedArgs[1] as object | null
+        if (newFb !== currentDrawFb) didBindTransition = true
+        currentDrawFb = newFb
+      }
+    }
+
+    // Door-fit viewport remap: when the sender targets the host canvas
+    // (default FB) and the host has configured a remap, replace the
+    // viewport call's args with the host-supplied rect. RT-targeted
+    // viewports pass through unchanged. Either way, capture the sender's
+    // INTENDED (pre-remap) viewport so we can re-apply it across bind
+    // transitions.
+    if (call.name === 'viewport') {
+      const [x, y, w, h] = decodedArgs as [number, number, number, number]
+      lastIntendedViewport = [x, y, w, h]
+      if (currentDrawFb === null && config.remapScreenViewport) {
+        const remapped = config.remapScreenViewport(x, y, w, h)
+        if (remapped !== null) {
+          decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
+        }
+      }
+    }
+
+    // Diagnostic: dump every viewport + scissor + scissor-enable call with
+    // context so we can see if something downstream undoes the remap.
+    if (
+      config.__debugTraceViewport &&
+      (call.name === 'viewport' || call.name === 'scissor' || call.name === 'enable' || call.name === 'disable')
+    ) {
+      if (call.name === 'enable' || call.name === 'disable') {
+        const cap = decodedArgs[0] as number
+        // GL_SCISSOR_TEST = 0xC11
+        if (cap === 0xC11) {
+          config.__debugTraceViewport(`${call.name}(SCISSOR_TEST) drawFb=${currentDrawFb ? 'RT' : 'null'}`)
+        }
+      } else {
+        const [x, y, w, h] = decodedArgs as [number, number, number, number]
+        config.__debugTraceViewport(`${call.name}(${x},${y},${w}x${h}) drawFb=${currentDrawFb ? 'RT' : 'null'}`)
+      }
+    }
+
     const method = (receiver as unknown as Record<string, (...a: unknown[]) => unknown>)[
       call.name
     ]
@@ -69,6 +213,30 @@ export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay =
       throw new Error(`NetGL replay: receiver has no method '${call.name}'`)
     }
     const result = method.apply(receiver, decodedArgs)
+
+    // After a bindFramebuffer transition, re-issue gl.viewport with the
+    // appropriate rect for the new binding. See the comment on
+    // `lastIntendedViewport` above for why this is needed.
+    if (didBindTransition && lastIntendedViewport) {
+      const [x, y, w, h] = lastIntendedViewport
+      // Compute the rect once (the remap callback may have side effects /
+      // be non-trivial work like projecting the door corners through the
+      // host camera) so we don't call it twice for the same transition.
+      const remapped = currentDrawFb === null && config.remapScreenViewport
+        ? config.remapScreenViewport(x, y, w, h)
+        : null
+      const rx = remapped ? remapped[0] : x
+      const ry = remapped ? remapped[1] : y
+      const rw = remapped ? remapped[2] : w
+      const rh = remapped ? remapped[3] : h
+      receiver.viewport(rx, ry, rw, rh)
+      if (config.__debugTraceViewport) {
+        config.__debugTraceViewport(
+          `post-bind re-issue viewport(${rx},${ry},${rw}x${rh}) drawFb=${currentDrawFb ? 'RT' : 'null'}`
+        )
+      }
+    }
+
     if (
       call.returnId !== undefined &&
       result != null &&

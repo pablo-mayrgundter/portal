@@ -1,9 +1,9 @@
 name: Deploy demos to GitHub Pages
 
-# Build all four demo apps under /portal/<demo>/ and a landing nav at
-# /portal/. Deploys to the gh-pages branch with clean-exclude=pr-preview so
-# that PR preview directories (managed by .github/workflows/pr-preview.yml)
-# survive main-branch deploys.
+# Build all demo apps under /portal/<demo>/ and a landing nav at /portal/.
+# Deploys to the gh-pages branch with clean-exclude=pr-preview so that PR
+# preview directories (managed by .github/workflows/pr-preview.yml) survive
+# main-branch deploys.
 
 on:
   push:
@@ -22,6 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # netgl-celestiary's build pulls celestiary out of the external/
+          # submodule; without this the checkout is just the pointer.
+          submodules: recursive
 
       - uses: actions/setup-node@v4
         with:

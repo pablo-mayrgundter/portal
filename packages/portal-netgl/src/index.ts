@@ -1,6 +1,11 @@
 export { makeNetGLProxy, type NetGLProxyConfig } from './proxy'
+export {
+  makeNetGLPortalTarget,
+  type NetGLPortalTargetConfig,
+  type NetGLPortalTarget
+} from './target'
 export { makeNetGLRecorder } from './recorder'
-export { makeNetGLReplay, type NetGLReplay } from './replay'
+export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
 export {
   createNetGLRenderer,
   attachNetGLReceiver,

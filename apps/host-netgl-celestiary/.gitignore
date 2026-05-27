@@ -1,0 +1,5 @@
+# celestiary's built docs/ are copied here by celestiary-patch/apply.sh.
+# Regenerate locally with `npm run setup-celestiary` from this app's dir
+# (or `npm run setup:celestiary` from the repo root). Submodule + script
+# are the source of truth — don't track the built artifacts.
+public/celestiary/
