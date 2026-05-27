@@ -105,9 +105,17 @@ const gl = renderer.getContext()
 // every screen-target viewport call. RT-targeted viewport calls pass
 // through unchanged so celestiary's offscreen renders stay full-RT-sized.
 let currentDoorRect: { x: number; y: number; w: number; h: number } | null = null
+let remapDiagCount = 0
 const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
-  remapScreenViewport: () => {
+  remapScreenViewport: (x, y, w, h) => {
     const r = currentDoorRect
+    if (remapDiagCount < 4) {
+      console.log(
+        `[host] screen viewport call (${x},${y},${w}x${h}) → ` +
+        (r ? `remapped to (${r.x},${r.y},${r.w}x${r.h})` : 'no door rect, passthrough')
+      )
+      remapDiagCount++
+    }
     return r ? [r.x, r.y, r.w, r.h] : null
   }
 })
@@ -196,6 +204,7 @@ const stencilBg = new THREE.Color()
 const camPos = new THREE.Vector3()
 const camFwd = new THREE.Vector3()
 const camUp = new THREE.Vector3()
+let totalFrameCount = 0
 const frame = (): void => {
   const dt = clock.getDelta()
   const time = clock.elapsedTime
@@ -229,6 +238,10 @@ const frame = (): void => {
       hostCamera,
       { width: cw, height: ch }
     )
+    if (totalFrameCount < 3) {
+      console.log(`[host] frame ${totalFrameCount}: door rect`, currentDoorRect, `canvas ${cw}x${ch}`)
+    }
+    totalFrameCount++
 
     let batch: NetGLCall[] | null = pendingFrame
     if (batch) {
