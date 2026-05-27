@@ -47,8 +47,14 @@
     <!-- Relative so vite's --base prefix carries through. Local dev:
          resolves to /celestiary/index.html. GH Pages deploy under
          /portal/netgl-celestiary/: resolves to
-         /portal/netgl-celestiary/celestiary/index.html. -->
-    <iframe id="target-iframe" src="celestiary/index.html?portal=1"></iframe>
+         /portal/netgl-celestiary/celestiary/index.html.
+
+         referrerpolicy=no-referrer: celestiary's Routed.jsx reads
+         document.referrer on mount and navigates to that pathname.
+         Without this, the iframe sees our host page's URL as referrer,
+         tries to navigate there (outside wouter's base), and renders
+         nothing — leaving ThreeUI uninstantiated. -->
+    <iframe id="target-iframe" src="celestiary/index.html?portal=1" referrerpolicy="no-referrer"></iframe>
     <div class="label">
       WASD + drag mouse. The portal shows celestiary rendered by an iframe —
       but the iframe's draw calls themselves cross the wire (NetGL) and
