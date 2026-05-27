@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal - NetGL celestiary demo (host)</title>
+    <style>
+      html, body, #app {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000000;
+      }
+      .label {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        color: #d8e7ff;
+        font-family: Inter, system-ui, sans-serif;
+        font-size: 13px;
+        line-height: 1.4;
+        background: rgba(4, 9, 18, 0.65);
+        border: 1px solid rgba(216, 231, 255, 0.2);
+        border-radius: 8px;
+        padding: 8px 10px;
+        pointer-events: none;
+        max-width: 380px;
+      }
+      /* Iframe is full-viewport-sized but transparent. The 1×1 hidden-
+         offscreen pattern (used by host-netgl-demo for its synthetic
+         scene) doesn't work for a real app like celestiary — React
+         components measure their container's offsetWidth/offsetHeight,
+         layout work gets throttled in zero-size frames, and RAF either
+         doesn't run or runs at degraded rates. Giving the iframe a real
+         viewport lets celestiary lay out + render normally; opacity:0
+         keeps it visually invisible so the user only sees the host's
+         canvas + the door-composited celestiary content. pointer-events:
+         none routes clicks/drags to the host canvas underneath. */
+      #target-iframe {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        pointer-events: none;
+        border: 0;
+        z-index: -1;
+      }
+    </style>
+    <script type="module" crossorigin src="/portal/netgl-celestiary/assets/index-DsVIIZD3.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- Relative so vite's --base prefix carries through. Local dev:
+         resolves to /celestiary/index.html. GH Pages deploy under
+         /portal/netgl-celestiary/: resolves to
+         /portal/netgl-celestiary/celestiary/index.html.
+
+         referrerpolicy=no-referrer: celestiary's Routed.jsx reads
+         document.referrer on mount and navigates to that pathname.
+         Without this, the iframe sees our host page's URL as referrer,
+         tries to navigate there (outside wouter's base), and renders
+         nothing — leaving ThreeUI uninstantiated. -->
+    <iframe id="target-iframe" src="celestiary/index.html?portal=1" referrerpolicy="no-referrer"></iframe>
+    <div class="label">
+      WASD + drag mouse. The portal shows celestiary rendered by an iframe —
+      but the iframe's draw calls themselves cross the wire (NetGL) and
+      execute in the host canvas's GL context. Celestiary's renderer is
+      substituted via a `window.__portalCreateRenderer` hook + a small shim
+      in celestiary's bundle. No image bitmap round-trip.
+    </div>
+  </body>
+</html>
