@@ -122,8 +122,7 @@ type NetGLReady = {
 }
 
 let firstCallLogged = false
-let totalCalls = 0
-let totalFrames = 0
+let firstFrameEndLogged = false
 transport.onMessage((msg) => {
   // Diagnostic relay from the iframe's shim — log to host console so the
   // user sees both sides in one place.
@@ -134,9 +133,10 @@ transport.onMessage((msg) => {
     return
   }
   if (isNetGLFrameEnd(msg)) {
-    totalFrames += 1
-    if (totalFrames === 1) console.log(`[host] first frame-end received (${inFlightFrame.length} calls)`)
-    if (totalFrames % 120 === 0) console.log(`[host] ${totalFrames} frames, ${totalCalls} calls so far`)
+    if (!firstFrameEndLogged) {
+      firstFrameEndLogged = true
+      console.log(`[host] first frame-end received (${inFlightFrame.length} calls)`)
+    }
     pendingFrame = inFlightFrame
     inFlightFrame = []
     return
@@ -146,7 +146,6 @@ transport.onMessage((msg) => {
       firstCallLogged = true
       console.log(`[host] first NetGLCall received: ${msg.name}`)
     }
-    totalCalls += 1
     inFlightFrame.push(msg)
     return
   }
