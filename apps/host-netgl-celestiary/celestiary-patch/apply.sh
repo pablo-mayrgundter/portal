@@ -30,6 +30,9 @@ git -C "$CELESTIARY" clean -fd
 echo "==> Applying celestiary.patch"
 git -C "$CELESTIARY" apply "$PATCH_DIR/celestiary.patch"
 
+echo "==> Syntax-checking portal-shim.js"
+node --check "$PATCH_DIR/portal-shim.js"
+
 echo "==> Copying portal-shim.js into celestiary/public/"
 cp "$PATCH_DIR/portal-shim.js" "$CELESTIARY/public/portal-shim.js"
 
