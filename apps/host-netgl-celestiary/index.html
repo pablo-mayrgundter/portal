@@ -43,7 +43,11 @@
   </head>
   <body>
     <div id="app"></div>
-    <iframe id="target-iframe" src="/celestiary/index.html?portal=1"></iframe>
+    <!-- Relative so vite's --base prefix carries through. Local dev:
+         resolves to /celestiary/index.html. GH Pages deploy under
+         /portal/netgl-celestiary/: resolves to
+         /portal/netgl-celestiary/celestiary/index.html. -->
+    <iframe id="target-iframe" src="celestiary/index.html?portal=1"></iframe>
     <div class="label">
       WASD + drag mouse. The portal shows celestiary rendered by an iframe —
       but the iframe's draw calls themselves cross the wire (NetGL) and

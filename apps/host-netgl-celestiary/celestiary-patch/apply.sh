@@ -12,6 +12,11 @@ PORTAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CELESTIARY="$PORTAL_ROOT/external/celestiary"
 PATCH_DIR="$PORTAL_ROOT/apps/host-netgl-celestiary/celestiary-patch"
 APP_PUBLIC="$PORTAL_ROOT/apps/host-netgl-celestiary/public"
+# Public URL prefix celestiary's <base href> resolves against. For local
+# dev (vite at /), `/celestiary/` is correct. For GH Pages, the CI passes
+# the full prefix (e.g. `/portal/netgl-celestiary/celestiary/`) so
+# celestiary's bundled assets resolve under the site's base path.
+CELESTIARY_BASE_PATH="${CELESTIARY_BASE_PATH:-/celestiary/}"
 
 if [ ! -d "$CELESTIARY/.git" ] && [ ! -f "$CELESTIARY/.git" ]; then
   echo "celestiary submodule missing — run: git submodule update --init"
@@ -33,8 +38,8 @@ if [ ! -d "$CELESTIARY/node_modules" ]; then
   (cd "$CELESTIARY" && yarn install)
 fi
 
-echo "==> Building celestiary with BASE_PATH=/celestiary/"
-(cd "$CELESTIARY" && BASE_PATH=/celestiary/ yarn build)
+echo "==> Building celestiary with BASE_PATH=$CELESTIARY_BASE_PATH"
+(cd "$CELESTIARY" && BASE_PATH="$CELESTIARY_BASE_PATH" yarn build)
 
 echo "==> Copying celestiary/docs into apps/host-netgl-celestiary/public/celestiary/"
 mkdir -p "$APP_PUBLIC/celestiary"

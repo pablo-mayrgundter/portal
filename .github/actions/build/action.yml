@@ -1,5 +1,5 @@
 name: Build portal demos
-description: Build the four demo apps with the given base path and assemble a single dist/ tree. host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo live at /iframe/, /worker/, /netgl/ siblings.
+description: Build the demo apps with the given base path and assemble a single dist/ tree. host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary live at /iframe/, /worker/, /netgl/, /netgl-celestiary/ siblings.
 
 inputs:
   base-path:
@@ -29,12 +29,26 @@ runs:
       shell: bash
       run: npm run build -w @portal/host-netgl-demo -- --base=${{ inputs.base-path }}netgl/
 
+    - name: Build celestiary (with patches applied)
+      shell: bash
+      env:
+        # celestiary's <base href> needs the full public prefix so its bundle
+        # resolves under the GH Pages base path. apply.sh runs yarn build with
+        # this BASE_PATH and copies docs/ into the host app's public/celestiary/.
+        CELESTIARY_BASE_PATH: ${{ inputs.base-path }}netgl-celestiary/celestiary/
+      run: npm run setup:celestiary
+
+    - name: Build host-netgl-celestiary
+      shell: bash
+      run: npm run build -w @portal/host-netgl-celestiary -- --base=${{ inputs.base-path }}netgl-celestiary/
+
     - name: Assemble dist/
       shell: bash
       run: |
         rm -rf dist
         mkdir -p dist
-        cp -r apps/host-three/dist/.       dist/
-        cp -r apps/host-iframe-demo/dist   dist/iframe
-        cp -r apps/host-worker-demo/dist   dist/worker
-        cp -r apps/host-netgl-demo/dist    dist/netgl
+        cp -r apps/host-three/dist/.              dist/
+        cp -r apps/host-iframe-demo/dist          dist/iframe
+        cp -r apps/host-worker-demo/dist          dist/worker
+        cp -r apps/host-netgl-demo/dist           dist/netgl
+        cp -r apps/host-netgl-celestiary/dist     dist/netgl-celestiary
