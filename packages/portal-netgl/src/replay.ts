@@ -48,6 +48,14 @@ export type NetGLReplayConfig = {
     w: number,
     h: number
   ) => readonly [number, number, number, number] | null
+
+  /**
+   * Diagnostic-only: called with a one-line description of every
+   * viewport, scissor, and SCISSOR_TEST enable/disable call as it
+   * replays. Useful while tracing why a door-fit remap isn't sticking.
+   * Production code should leave this unset.
+   */
+  __debugTraceViewport?: (line: string) => void
 }
 
 // WebGL constants we need at decode time. Hardcoded because we don't always
@@ -147,6 +155,24 @@ export const makeNetGLReplay = (
       const remapped = config.remapScreenViewport(x, y, w, h)
       if (remapped !== null) {
         decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
+      }
+    }
+
+    // Diagnostic: dump every viewport + scissor + scissor-enable call with
+    // context so we can see if something downstream undoes the remap.
+    if (
+      config.__debugTraceViewport &&
+      (call.name === 'viewport' || call.name === 'scissor' || call.name === 'enable' || call.name === 'disable')
+    ) {
+      if (call.name === 'enable' || call.name === 'disable') {
+        const cap = decodedArgs[0] as number
+        // GL_SCISSOR_TEST = 0xC11
+        if (cap === 0xC11) {
+          config.__debugTraceViewport(`${call.name}(SCISSOR_TEST) drawFb=${currentDrawFb ? 'RT' : 'null'}`)
+        }
+      } else {
+        const [x, y, w, h] = decodedArgs as [number, number, number, number]
+        config.__debugTraceViewport(`${call.name}(${x},${y},${w}x${h}) drawFb=${currentDrawFb ? 'RT' : 'null'}`)
       }
     }
 

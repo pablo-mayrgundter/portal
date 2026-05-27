@@ -105,18 +105,21 @@ const gl = renderer.getContext()
 // every screen-target viewport call. RT-targeted viewport calls pass
 // through unchanged so celestiary's offscreen renders stay full-RT-sized.
 let currentDoorRect: { x: number; y: number; w: number; h: number } | null = null
-let remapDiagCount = 0
+let viewportTraceCount = 0
+const VIEWPORT_TRACE_LIMIT = 40
 const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
-  remapScreenViewport: (x, y, w, h) => {
+  remapScreenViewport: (_x, _y, _w, _h) => {
     const r = currentDoorRect
-    if (remapDiagCount < 4) {
-      console.log(
-        `[host] screen viewport call (${x},${y},${w}x${h}) → ` +
-        (r ? `remapped to (${r.x},${r.y},${r.w}x${r.h})` : 'no door rect, passthrough')
-      )
-      remapDiagCount++
-    }
     return r ? [r.x, r.y, r.w, r.h] : null
+  },
+  __debugTraceViewport: (line) => {
+    if (viewportTraceCount < VIEWPORT_TRACE_LIMIT) {
+      console.log(`[host] ${line}`)
+      viewportTraceCount++
+      if (viewportTraceCount === VIEWPORT_TRACE_LIMIT) {
+        console.log('[host] (viewport trace cap reached)')
+      }
+    }
   }
 })
 
