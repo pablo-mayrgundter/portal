@@ -27,17 +27,26 @@
         pointer-events: none;
         max-width: 380px;
       }
-      /* Celestiary lives offscreen — its draw calls are the contract, not
-         its canvas. Calls cross the wire (NetGL) and execute in the host's
-         own GL context. */
+      /* Iframe is full-viewport-sized but transparent. The 1×1 hidden-
+         offscreen pattern (used by host-netgl-demo for its synthetic
+         scene) doesn't work for a real app like celestiary — React
+         components measure their container's offsetWidth/offsetHeight,
+         layout work gets throttled in zero-size frames, and RAF either
+         doesn't run or runs at degraded rates. Giving the iframe a real
+         viewport lets celestiary lay out + render normally; opacity:0
+         keeps it visually invisible so the user only sees the host's
+         canvas + the door-composited celestiary content. pointer-events:
+         none routes clicks/drags to the host canvas underneath. */
       #target-iframe {
         position: fixed;
-        left: -10000px;
-        top: -10000px;
-        width: 1px;
-        height: 1px;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
         pointer-events: none;
         border: 0;
+        z-index: -1;
       }
     </style>
   </head>
