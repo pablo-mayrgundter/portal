@@ -33,18 +33,39 @@ const inIframe = (() => {
 })()
 const portalRequested = new URL(location.href).searchParams.get('portal') === '1'
 
+// Diagnostic relay: posts `[shim] <msg>` to the parent so the host's console
+// (which the user is looking at) shows both sides of the wire. The iframe's
+// own console still logs the same line locally. Cleared once the recorder is
+// proven to be running.
+function diag(msg, extra) {
+  const line = `[celestiary shim] ${msg}`
+  if (extra !== undefined) console.log(line, extra)
+  else console.log(line)
+  try {
+    parent.postMessage({type: 'netgl:debug', from: 'shim', msg, extra}, '*')
+  } catch {}
+}
+
+// Surface any unhandled exception in the iframe to the host console too —
+// iframe errors are easy to miss otherwise.
+window.addEventListener('error', (ev) => {
+  diag(`uncaught error: ${ev.message}`, {filename: ev.filename, lineno: ev.lineno, colno: ev.colno})
+})
+window.addEventListener('unhandledrejection', (ev) => {
+  diag(`unhandled rejection: ${ev.reason?.message ?? String(ev.reason)}`)
+})
+
+diag(`shim loaded. inIframe=${inIframe} portalRequested=${portalRequested}`)
 if (inIframe && portalRequested) {
   installPortalShim()
+} else {
+  diag('shim NOT activating (need inIframe + ?portal=1)')
 }
 
 /** Top-level activation: install the renderer hook + setPose listener. */
 function installPortalShim() {
   const transport = makeTransport(parent)
 
-  // Shadow GL context lives in an OffscreenCanvas — three queries it for
-  // synchronous return values + handle minting. Never displayed. The recorder
-  // forwards each call to it AND posts the call to the host where it's
-  // re-executed against the host's real canvas.
   const shadowCanvas = new OffscreenCanvas(1, 1)
   const shadowOpts = {
     antialias: true,
@@ -54,27 +75,42 @@ function installPortalShim() {
   }
   const shadow = shadowCanvas.getContext('webgl2', shadowOpts)
   if (!shadow) {
-    console.error('[celestiary portal-shim] failed to create WebGL2 shadow context')
+    diag('failed to create WebGL2 shadow context')
     return
   }
+  diag('shadow webgl2 context created')
 
-  const recorder = makeRecorder(shadow, (call) => transport.post(call))
+  let callCount = 0
+  const recorder = makeRecorder(shadow, (call) => {
+    if (callCount === 0) diag(`first GL call recorded: ${call.name}`)
+    callCount++
+    if (callCount % 200 === 0) diag(`recorded ${callCount} calls so far`)
+    transport.post(call)
+  })
 
   let cachedRenderer = null
 
   window.__portalCreateRenderer = (container, backgroundColor, opts) => {
+    diag('__portalCreateRenderer hook called by ThreeUI')
     const {WebGLRenderer} = opts
     // Build a WebGLRenderer with the recorder as its GL context and the shadow
     // OffscreenCanvas as its canvas. Pin both explicitly so three's setSize
     // doesn't fall back to creating its own canvas and resizing only that.
-    const renderer = new WebGLRenderer({
-      canvas: shadowCanvas,
-      context: recorder,
-      antialias: shadowOpts.antialias,
-      stencil: shadowOpts.stencil,
-      depth: shadowOpts.depth,
-      preserveDrawingBuffer: shadowOpts.preserveDrawingBuffer,
-    })
+    let renderer
+    try {
+      renderer = new WebGLRenderer({
+        canvas: shadowCanvas,
+        context: recorder,
+        antialias: shadowOpts.antialias,
+        stencil: shadowOpts.stencil,
+        depth: shadowOpts.depth,
+        preserveDrawingBuffer: shadowOpts.preserveDrawingBuffer,
+      })
+      diag('WebGLRenderer constructed with recorder context')
+    } catch (err) {
+      diag(`WebGLRenderer construction threw: ${err?.message ?? err}`)
+      throw err
+    }
     // Strings work because three accepts 'srgb' / NoToneMapping (=0) directly.
     renderer.outputColorSpace = 'srgb'
     renderer.toneMapping = 0 // NoToneMapping
@@ -87,10 +123,18 @@ function installPortalShim() {
     // RAF callback. This lets the host batch all of one frame's GL calls and
     // drain them atomically at a fixed point in its own render loop.
     const origSAL = renderer.setAnimationLoop.bind(renderer)
+    let frameCount = 0
     renderer.setAnimationLoop = (cb) => {
-      if (cb === null) return origSAL(null)
+      if (cb === null) {
+        diag('setAnimationLoop(null) — celestiary stopped its RAF')
+        return origSAL(null)
+      }
+      diag('setAnimationLoop installed — RAF starting')
       origSAL((time, frame) => {
         cb(time, frame)
+        if (frameCount === 0) diag('first RAF callback completed')
+        frameCount++
+        if (frameCount % 120 === 0) diag(`${frameCount} RAFs, ${callCount} calls`)
         transport.post({type: 'netgl:frame-end'})
       })
     }
@@ -230,7 +274,9 @@ function makeRecorder(shadow, post) {
     }
     if (arg instanceof ArrayBuffer) return {__netgl_arraybuffer: arg}
     if (Array.isArray(arg)) return arg.map(encodeArg)
-    throw new Error(`NetGL recorder: cannot encode arg of type ${arg.constructor?.name}`)
+    const name = arg.constructor?.name ?? typeof arg
+    diag(`encoder gap: cannot encode arg of type ${name}`)
+    throw new Error(`NetGL recorder: cannot encode arg of type ${name}`)
   }
 
   return new Proxy(shadow, {
