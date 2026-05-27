@@ -157,8 +157,17 @@ function installPortalShim() {
     const origRender = renderer.render.bind(renderer)
     let renderCount = 0
     renderer.render = function (scene, camera) {
+      // Capture the caller's render target BEFORE resetState. Three's
+      // resetState() doesn't just clear cached GL state — it also sets
+      // _currentRenderTarget = null (three 0.171, three.module.js:17541).
+      // Without saving + restoring, celestiary's `setRenderTarget(_sceneRT)
+      // ; render(scene, camera)` becomes "render to null" once we hit
+      // resetState inside the patched render — the scene draws onto the
+      // host canvas (where the atm pass then blits an empty RT).
+      const savedTarget = renderer.getRenderTarget()
       renderer.resetState()
-      const toScreen = renderer.getRenderTarget() === null
+      if (savedTarget !== null) renderer.setRenderTarget(savedTarget)
+      const toScreen = savedTarget === null
       if (toScreen) {
         if (!noStencil) {
           const touched = applyStencilTest(scene)
