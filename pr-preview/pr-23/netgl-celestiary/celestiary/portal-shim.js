@@ -96,7 +96,6 @@ function installPortalShim() {
   const recorder = makeRecorder(shadow, (call) => {
     if (callCount === 0) diag(`first GL call recorded: ${call.name}`)
     callCount++
-    if (callCount % 200 === 0) diag(`recorded ${callCount} calls so far`)
     transport.post(call)
   })
 
@@ -134,16 +133,31 @@ function installPortalShim() {
     // Monkey-patch setAnimationLoop so we can post netgl:frame-end after each
     // RAF callback. This lets the host batch all of one frame's GL calls and
     // drain them atomically at a fixed point in its own render loop.
-    // Monkey-patch renderer.render to resetState() first. Three's WebGLState
-    // cache thinks the GL state matches what it last set, but the host's own
-    // renderer mutates the shared GL context between iframe frames. Without
-    // resetState, three skips redundant useProgram / enable / etc., and
-    // subsequent uniform calls target a program that's no longer bound on
-    // the host side — INVALID_OPERATION: location is not from the associated
-    // program. host-netgl-demo's target factory does the same thing.
+    // Monkey-patch renderer.render to do three things every call:
+    //   1. resetState() — three's WebGLState cache thinks GL state matches
+    //      what it last set, but the host's own renderer mutates the shared
+    //      GL context between iframe frames. Without this, three skips
+    //      redundant useProgram, then uniforms target a program that's no
+    //      longer bound on the host's side → INVALID_OPERATION.
+    //      host-netgl-demo's target factory does the same.
+    //   2. apply portal-stencil test (when rendering to the host canvas, i.e.
+    //      render target == null) — celestiary's atmosphere pass is a
+    //      fullscreen quad with no stencil constraints, which would otherwise
+    //      paint over the whole host canvas, hiding worldA. Configure all
+    //      materials in the scene to stencilFunc=EQUAL,ref=1 so they only
+    //      paint inside the door region the host already stencil-masked.
+    //   3. null out scene.background when painting to host canvas — same
+    //      reason; otherwise three issues a clear-color blat over everything.
     const origRender = renderer.render.bind(renderer)
     renderer.render = function (scene, camera) {
       renderer.resetState()
+      if (renderer.getRenderTarget() === null) {
+        applyStencilTest(scene)
+        if (scene && 'background' in scene) {
+          scene.__portalSavedBg = scene.__portalSavedBg ?? scene.background
+          scene.background = null
+        }
+      }
       return origRender(scene, camera)
     }
 
@@ -165,7 +179,6 @@ function installPortalShim() {
         try {
           cb(time, frame)
         } catch (err) {
-          threw = err
           // Log first failure of each shape once; the throw-per-frame loop
           // would otherwise spam the console.
           const key = err?.message ?? String(err)
@@ -178,7 +191,6 @@ function installPortalShim() {
         }
         if (frameCount === 0) diag('first RAF callback completed')
         frameCount++
-        if (frameCount % 120 === 0) diag(`${frameCount} RAFs, ${callCount} calls, ${seenRenderErrors.size} distinct errors`)
       })
     }
 
@@ -405,5 +417,38 @@ function makeRecorder(shadow, post) {
       // invocation. Route to the shadow directly.
       return Reflect.set(target, prop, value, target)
     },
+  })
+}
+
+// three constants — inlined since we don't import three. EqualStencilFunc=514,
+// KeepStencilOp=7680 are the GLenum values three uses as its enum members.
+const EQUAL_STENCIL_FUNC = 514
+const KEEP_STENCIL_OP = 7680
+const PORTAL_STENCIL_REF = 1
+
+/**
+ * Apply portal stencil test to every material in the scene graph: stencilFunc
+ * EQUAL to ref=1 (the value the host's stencil-mask painted inside the door
+ * region), no stencil writes, no op changes on fail/zfail/zpass. Mirrors
+ * `applyPortalStencilTest` in `packages/portal-three/src/index.ts` — kept in
+ * sync manually. Without this celestiary's atmosphere fullscreen quad has no
+ * stencil constraints and paints over the entire host canvas every frame.
+ */
+function applyStencilTest(scene) {
+  if (!scene || !scene.traverse) return
+  scene.traverse((obj) => {
+    const mat = obj.material
+    if (!mat) return
+    const apply = (m) => {
+      m.stencilWrite = true
+      m.stencilFunc = EQUAL_STENCIL_FUNC
+      m.stencilRef = PORTAL_STENCIL_REF
+      m.stencilFail = KEEP_STENCIL_OP
+      m.stencilZFail = KEEP_STENCIL_OP
+      m.stencilZPass = KEEP_STENCIL_OP
+      m.stencilWriteMask = 0
+    }
+    if (Array.isArray(mat)) mat.forEach(apply)
+    else apply(mat)
   })
 }
