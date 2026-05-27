@@ -73,7 +73,20 @@ export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay =
   }
 
   return (call: NetGLCall): void => {
-    const decodedArgs = call.args.map(decodeArg)
+    let decodedArgs: unknown[]
+    try {
+      decodedArgs = call.args.map(decodeArg)
+    } catch (err) {
+      // Re-throw with call name so the cause is visible. The most common
+      // shape is "unknown handle id N" while decoding an arg — that means
+      // a handle-returning call (createTexture, createProgram,
+      // getUniformLocation, etc.) referenced by this call never reached the
+      // receiver. Usually means the sender's frame-batching dropped a
+      // batch that contained the mint; see host main.ts's frame-end
+      // concat logic.
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`NetGL replay (decoding ${call.name}): ${msg}`)
+    }
     const method = (receiver as unknown as Record<string, (...a: unknown[]) => unknown>)[
       call.name
     ]

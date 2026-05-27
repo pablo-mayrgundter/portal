@@ -137,7 +137,15 @@ transport.onMessage((msg) => {
       firstFrameEndLogged = true
       console.log(`[host] first frame-end received (${inFlightFrame.length} calls)`)
     }
-    pendingFrame = inFlightFrame
+    // Concatenate with any unconsumed pending frame instead of overwriting.
+    // If the iframe runs faster than the host's RAF (common during page load
+    // or when JS is busy), multiple frame-ends arrive before we drain. The
+    // earlier batch contains handle creations (createTexture, createProgram,
+    // getUniformLocation) that later frames REFERENCE — dropping it strands
+    // those handles and the receiver throws "unknown handle id N" later when
+    // a fresher frame tries to use them.
+    if (pendingFrame) pendingFrame.push(...inFlightFrame)
+    else pendingFrame = inFlightFrame
     inFlightFrame = []
     return
   }
