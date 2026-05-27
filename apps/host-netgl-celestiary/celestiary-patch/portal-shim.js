@@ -66,7 +66,18 @@ if (inIframe && portalRequested) {
 function installPortalShim() {
   const transport = makeTransport(parent)
 
-  const shadowCanvas = new OffscreenCanvas(1, 1)
+  // Shadow canvas: a detached HTMLCanvasElement (NOT an OffscreenCanvas).
+  // Celestiary's ThreeUI.onResize calls renderer.setSize(w, h) with the
+  // 2-arg form, which defaults updateStyle=true. Three then does
+  // canvas.style.width = ... — OffscreenCanvas has no .style and that
+  // throws "Cannot set properties of undefined". A detached HTMLCanvasElement
+  // has a real .style and is just as invisible (we never appendChild it).
+  // Note: portal-netgl's makeNetGLPortalTarget uses OffscreenCanvas because
+  // IT controls every setSize call (always passes updateStyle=false). Here
+  // we're embedding into someone else's renderer code, so we play safe.
+  const shadowCanvas = document.createElement('canvas')
+  shadowCanvas.width = 1
+  shadowCanvas.height = 1
   const shadowOpts = {
     antialias: true,
     stencil: true,
