@@ -35,9 +35,17 @@ const portalParams = new URL(location.href).searchParams
 const portalRequested = portalParams.get('portal') === '1'
 // `?portal=1&nostencil=1` — skip applying the portal stencil test to scenes
 // being rendered to the host canvas. Useful for isolating "is the atm quad
-// drawing at all" from "is the stencil masking it off". When set, the
-// celestiary content fullscreens over the host worldA (no door clipping).
+// drawing at all" from "is the stencil masking it off".
 const noStencil = portalParams.get('nostencil') === '1'
+// `?pose=on` — also write the host's coupled pose into celestiary's camera
+// on every setPose message. Default off: celestiary uses its own startup
+// camera position (z = SUN_RADIUS_METER * 1e3, looking at origin), which
+// frames the solar system at a sane scale. The host scene is meter-scale
+// (room/door ~5 m); celestiary is astronomy-scale (sun radius ~7e8 m), so
+// the unscaled coupled pose puts the camera inside the sun and you see
+// uniform-color frames. Until we add a per-target scaling layer to the
+// pose coupling, default to ignoring it.
+const applyPoseFlag = portalParams.get('pose') === 'on'
 
 // Diagnostic relay: posts `[shim] <msg>` to the parent so the host's console
 // (which the user is looking at) shows both sides of the wire. The iframe's
@@ -223,9 +231,11 @@ function installPortalShim() {
   // Listen for host-driven setPose. Writes celestiary's camera + (optionally)
   // disables controls so the host owns viewpoint. Celestiary's camera is the
   // global `window.camera`, set by ThreeUI.js when the constructor runs.
+  if (applyPoseFlag) diag('?pose=on — applying host pose to celestiary camera')
+  else diag('?pose default — celestiary uses its own startup camera')
   transport.onMessage((msg) => {
     if (!msg || typeof msg !== 'object') return
-    if (msg.type === 'netgl:setPose') {
+    if (msg.type === 'netgl:setPose' && applyPoseFlag) {
       applyPose(msg, cachedRenderer)
     }
   })
