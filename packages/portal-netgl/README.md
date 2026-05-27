@@ -105,6 +105,41 @@ Pre-1.0. The wire protocol shape is documented and exercised against a
 real GL-heavy app (celestiary) but isn't ABI-stable across patch
 releases. Lock to an exact version in production.
 
+## Publishing (maintainers)
+
+Releases are CI-driven via [npm Trusted Publishing][tp] (OIDC). No
+long-lived `NPM_TOKEN` secret. Cutting a release:
+
+1. Bump `version` in `packages/portal-netgl/package.json`.
+2. Land on `main`.
+3. The `npm-publish` workflow detects the version diff vs `@latest`
+   and publishes, attaching a provenance attestation pointing at the
+   commit + workflow run.
+
+**Bootstrap (one-time, for the very first version)**: npm requires a
+package to exist before you can configure trusted publishing for it,
+so the v0.1.0 publish must come from a maintainer's laptop:
+
+```sh
+cd packages/portal-netgl
+npm run build
+npm publish --access public        # interactive 2FA
+```
+
+Then configure the trusted publisher on npmjs.com:
+[`https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl/access`](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl/access)
+→ Trusted Publishers → Add → GitHub Actions, with:
+
+- Organization or user: `pablo-mayrgundter`
+- Repository: `portal`
+- Workflow filename: `npm-publish.yml`
+- Environment name: *(leave blank, or set to `release` if you want an
+  approval gate)*
+
+From v0.1.1 onward, every release goes through CI.
+
+[tp]: https://docs.npmjs.com/trusted-publishers
+
 ## License
 
 MIT
