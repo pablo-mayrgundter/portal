@@ -1,0 +1,261 @@
+// Celestiary-side shim for running inside a NetGL portal iframe.
+//
+// When loaded as an ES module before celestiary's main bundle, this:
+//   1. Sets `window.__portalCreateRenderer(container, bgColor, {WebGLRenderer})`
+//      so celestiary's ThreeUI.js hook constructs a NetGL-recording renderer
+//      instead of a plain WebGLRenderer. The hook uses celestiary's OWN
+//      WebGLRenderer constructor (passed through `opts`) so the renderer
+//      instance is built with the same three.js version celestiary bundled —
+//      no two-three.js version mismatch.
+//   2. Installs a postMessage transport to `parent` for shipping recorded GL
+//      calls back to the host as `NetGLCall` / `NetGLFrameEnd` messages.
+//   3. Listens for `netgl:setPose` and writes the pose into celestiary's
+//      camera (via `window.camera`, set by ThreeUI.js:74).
+//   4. Wraps `renderer.setAnimationLoop` so a `netgl:frame-end` marker is
+//      posted after each RAF callback completes (so the host can replay an
+//      entire celestiary frame as one atomic batch).
+//   5. Disables celestiary's TrackballControls so host-driven setPose doesn't
+//      fight user input on the iframe side.
+//
+// Activation: only runs when the page is in an iframe (parent !== self) and
+// the URL has `?portal=1`. Standalone celestiary visits are unaffected.
+//
+// Self-contained. No imports, no portal-netgl dep. The NetGL recorder/encoder
+// logic is inlined below — kept in sync with packages/portal-netgl/src/recorder.ts
+// manually. TODO: publish portal-netgl to npm + replace this with an npm dep.
+
+const inIframe = (() => {
+  try {
+    return parent !== self
+  } catch {
+    return true
+  }
+})()
+const portalRequested = new URL(location.href).searchParams.get('portal') === '1'
+
+if (inIframe && portalRequested) {
+  installPortalShim()
+}
+
+/** Top-level activation: install the renderer hook + setPose listener. */
+function installPortalShim() {
+  const transport = makeTransport(parent)
+
+  // Shadow GL context lives in an OffscreenCanvas — three queries it for
+  // synchronous return values + handle minting. Never displayed. The recorder
+  // forwards each call to it AND posts the call to the host where it's
+  // re-executed against the host's real canvas.
+  const shadowCanvas = new OffscreenCanvas(1, 1)
+  const shadowOpts = {
+    antialias: true,
+    stencil: true,
+    depth: true,
+    preserveDrawingBuffer: false,
+  }
+  const shadow = shadowCanvas.getContext('webgl2', shadowOpts)
+  if (!shadow) {
+    console.error('[celestiary portal-shim] failed to create WebGL2 shadow context')
+    return
+  }
+
+  const recorder = makeRecorder(shadow, (call) => transport.post(call))
+
+  let cachedRenderer = null
+
+  window.__portalCreateRenderer = (container, backgroundColor, opts) => {
+    const {WebGLRenderer} = opts
+    // Build a WebGLRenderer with the recorder as its GL context and the shadow
+    // OffscreenCanvas as its canvas. Pin both explicitly so three's setSize
+    // doesn't fall back to creating its own canvas and resizing only that.
+    const renderer = new WebGLRenderer({
+      canvas: shadowCanvas,
+      context: recorder,
+      antialias: shadowOpts.antialias,
+      stencil: shadowOpts.stencil,
+      depth: shadowOpts.depth,
+      preserveDrawingBuffer: shadowOpts.preserveDrawingBuffer,
+    })
+    // Strings work because three accepts 'srgb' / NoToneMapping (=0) directly.
+    renderer.outputColorSpace = 'srgb'
+    renderer.toneMapping = 0 // NoToneMapping
+    // Don't clear the host canvas — host already drew its own scene + stencil
+    // mask in the portal door region. Clearing here would wipe it.
+    renderer.autoClear = false
+    renderer.setClearColor(backgroundColor, 0)
+
+    // Monkey-patch setAnimationLoop so we can post netgl:frame-end after each
+    // RAF callback. This lets the host batch all of one frame's GL calls and
+    // drain them atomically at a fixed point in its own render loop.
+    const origSAL = renderer.setAnimationLoop.bind(renderer)
+    renderer.setAnimationLoop = (cb) => {
+      if (cb === null) return origSAL(null)
+      origSAL((time, frame) => {
+        cb(time, frame)
+        transport.post({type: 'netgl:frame-end'})
+      })
+    }
+
+    cachedRenderer = renderer
+    return renderer
+  }
+
+  // Listen for host-driven setPose. Writes celestiary's camera + (optionally)
+  // disables controls so the host owns viewpoint. Celestiary's camera is the
+  // global `window.camera`, set by ThreeUI.js when the constructor runs.
+  transport.onMessage((msg) => {
+    if (!msg || typeof msg !== 'object') return
+    if (msg.type === 'netgl:setPose') {
+      applyPose(msg, cachedRenderer)
+    }
+  })
+
+  // Announce ready immediately. Anchor + background are fixed for celestiary;
+  // we use a meter-scale door positioned at celestiary's startup-camera
+  // distance (~SUN_RADIUS_METER * 1e3 ≈ 7e11 m), so a 1e11 m door fills the
+  // visible field. Host can override via repositioning if needed.
+  const anchor = {
+    position: [0, 0, 0],
+    normal: [0, 0, -1],
+    up: [0, 1, 0],
+    halfWidth: 5e10,
+    halfHeight: 5e10,
+  }
+  transport.post({
+    type: 'netgl:ready',
+    anchor,
+    background: {r: 0, g: 0, b: 0},
+  })
+}
+
+/** Apply a netgl:setPose to celestiary's camera + suppress TrackballControls. */
+function applyPose(msg, renderer) {
+  const camera = window.camera
+  if (!camera) return
+  const ui = window.c?.ui
+  // Disable controls + animation drift so host owns viewpoint.
+  if (ui?.controls) ui.controls.enabled = false
+  camera.position.set(msg.pose.position[0], msg.pose.position[1], msg.pose.position[2])
+  if (msg.pose.forward) {
+    const t = new (camera.position.constructor)(
+      msg.pose.position[0] + msg.pose.forward[0],
+      msg.pose.position[1] + msg.pose.forward[1],
+      msg.pose.position[2] + msg.pose.forward[2]
+    )
+    camera.lookAt(t)
+  }
+  if (msg.pose.up) camera.up.set(msg.pose.up[0], msg.pose.up[1], msg.pose.up[2])
+  camera.updateMatrixWorld(true)
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
+  // Use the host's projection verbatim so FOV / near / far match host framing.
+  camera.projectionMatrix.fromArray(msg.projection)
+  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
+  if (renderer && msg.viewport) {
+    renderer.setSize(msg.viewport.width, msg.viewport.height, false)
+  }
+}
+
+/** postMessage transport to a target window. Matches NetGLTransport shape. */
+function makeTransport(targetWindow) {
+  const listeners = new Set()
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== targetWindow) return
+    for (const l of listeners) {
+      try {
+        l(ev.data)
+      } catch (err) {
+        console.error('[celestiary portal-shim] listener threw', err)
+      }
+    }
+  })
+  return {
+    post(msg) {
+      targetWindow.postMessage(msg, '*')
+    },
+    onMessage(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// NetGL recorder. Ported from packages/portal-netgl/src/recorder.ts — keep in
+// sync. Two changes from the source: plain JS (no types) and the SHADOW_ONLY +
+// HANDLE_RETURNING sets are inlined verbatim.
+// ---------------------------------------------------------------------------
+
+const SHADOW_ONLY = new Set([
+  'getParameter', 'getError', 'getContextAttributes', 'isContextLost',
+  'getSupportedExtensions', 'getExtension', 'getShaderParameter',
+  'getProgramParameter', 'getActiveUniform', 'getActiveAttrib',
+  'getActiveUniforms', 'getActiveUniformBlockParameter',
+  'getActiveUniformBlockName', 'getShaderInfoLog', 'getProgramInfoLog',
+  'getAttribLocation', 'getUniformBlockIndex', 'getFragDataLocation',
+  'getUniformIndices', 'getUniform', 'isProgram', 'isShader', 'isBuffer',
+  'isTexture', 'isFramebuffer', 'isRenderbuffer', 'isVertexArray',
+  'isSampler', 'isSync', 'isQuery', 'isTransformFeedback',
+  'getBufferParameter', 'getFramebufferAttachmentParameter',
+  'getRenderbufferParameter', 'getSamplerParameter', 'getTexParameter',
+  'getVertexAttrib', 'getVertexAttribOffset', 'getQueryParameter', 'getQuery',
+  'getSyncParameter', 'getInternalformatParameter', 'getIndexedParameter',
+  'getTransformFeedbackVarying', 'checkFramebufferStatus',
+])
+
+const HANDLE_RETURNING = new Set([
+  'createBuffer', 'createTexture', 'createProgram', 'createShader',
+  'createFramebuffer', 'createRenderbuffer', 'createVertexArray',
+  'createSampler', 'createTransformFeedback', 'createQuery',
+  'getUniformLocation', 'fenceSync',
+])
+
+/** Build a Proxy<WebGL2RenderingContext> that records every call. */
+function makeRecorder(shadow, post) {
+  const handleToId = new Map()
+  let nextId = 1
+
+  const encodeArg = (arg) => {
+    if (arg == null) return null
+    const t = typeof arg
+    if (t === 'number' || t === 'string' || t === 'boolean') return arg
+    if (t !== 'object') return null
+    const handleId = handleToId.get(arg)
+    if (handleId !== undefined) return {__netgl_handle: handleId}
+    if (ArrayBuffer.isView(arg)) {
+      return {
+        __netgl_typedarray: arg.constructor.name,
+        buffer: arg.buffer,
+        offset: arg.byteOffset,
+        length: arg.length,
+      }
+    }
+    if (arg instanceof ArrayBuffer) return {__netgl_arraybuffer: arg}
+    if (Array.isArray(arg)) return arg.map(encodeArg)
+    throw new Error(`NetGL recorder: cannot encode arg of type ${arg.constructor?.name}`)
+  }
+
+  return new Proxy(shadow, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop)
+      if (typeof value !== 'function') return value
+      const methodName = typeof prop === 'string' ? prop : String(prop)
+      return function recorded(...args) {
+        const result = value.apply(target, args)
+        if (SHADOW_ONLY.has(methodName)) return result
+        let returnId
+        if (HANDLE_RETURNING.has(methodName) && result != null && typeof result === 'object') {
+          returnId = nextId++
+          handleToId.set(result, returnId)
+        }
+        const encodedArgs = args.map(encodeArg)
+        post({name: methodName, args: encodedArgs, returnId})
+        return result
+      }
+    },
+    set(target, prop, value) {
+      // Native WebGL2 setters brand-check `this` at the C++ level; default
+      // Proxy set passes the proxy as receiver, which fails with Illegal
+      // invocation. Route to the shadow directly.
+      return Reflect.set(target, prop, value, target)
+    },
+  })
+}
