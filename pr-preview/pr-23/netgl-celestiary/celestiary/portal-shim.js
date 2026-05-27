@@ -47,10 +47,9 @@ const noStencil = portalParams.get('nostencil') === '1'
 // pose coupling, default to ignoring it.
 const applyPoseFlag = portalParams.get('pose') === 'on'
 
-// Diagnostic relay: posts `[shim] <msg>` to the parent so the host's console
-// (which the user is looking at) shows both sides of the wire. The iframe's
-// own console still logs the same line locally. Cleared once the recorder is
-// proven to be running.
+// Minimal diagnostic relay: posts `[shim] <msg>` to the parent so the
+// host's console shows both sides of the wire. Only used for activation
+// confirmation + errors; success path is otherwise silent.
 function diag(msg, extra) {
   const line = `[celestiary shim] ${msg}`
   if (extra !== undefined) console.log(line, extra)
@@ -69,11 +68,8 @@ window.addEventListener('unhandledrejection', (ev) => {
   diag(`unhandled rejection: ${ev.reason?.message ?? String(ev.reason)}`)
 })
 
-diag(`shim loaded. inIframe=${inIframe} portalRequested=${portalRequested}`)
 if (inIframe && portalRequested) {
   installPortalShim()
-} else {
-  diag('shim NOT activating (need inIframe + ?portal=1)')
 }
 
 /** Top-level activation: install the renderer hook + setPose listener. */
@@ -103,20 +99,13 @@ function installPortalShim() {
     diag('failed to create WebGL2 shadow context')
     return
   }
-  diag('shadow webgl2 context created')
 
-  let callCount = 0
   const seenRenderErrors = new Set()
-  const recorder = makeRecorder(shadow, (call) => {
-    if (callCount === 0) diag(`first GL call recorded: ${call.name}`)
-    callCount++
-    transport.post(call)
-  })
+  const recorder = makeRecorder(shadow, (call) => transport.post(call))
 
   let cachedRenderer = null
 
   window.__portalCreateRenderer = (container, backgroundColor, opts) => {
-    diag('__portalCreateRenderer hook called by ThreeUI')
     const {WebGLRenderer} = opts
     // Build a WebGLRenderer with the recorder as its GL context and the shadow
     // OffscreenCanvas as its canvas. Pin both explicitly so three's setSize
@@ -131,7 +120,6 @@ function installPortalShim() {
         depth: shadowOpts.depth,
         preserveDrawingBuffer: shadowOpts.preserveDrawingBuffer,
       })
-      diag('WebGLRenderer constructed with recorder context')
     } catch (err) {
       diag(`WebGLRenderer construction threw: ${err?.message ?? err}`)
       throw err
@@ -169,7 +157,6 @@ function installPortalShim() {
     //   3. null out scene.background when painting to host canvas — same
     //      reason; otherwise three issues a clear-color blat over everything.
     const origRender = renderer.render.bind(renderer)
-    let renderCount = 0
     renderer.render = function (scene, camera) {
       const savedTarget = renderer.getRenderTarget()
       renderer.resetState()
@@ -183,17 +170,9 @@ function installPortalShim() {
       renderer.autoClear = !toScreen
 
       if (toScreen) {
-        if (!noStencil) {
-          const touched = applyStencilTest(scene)
-          if (renderCount < 4) diag(`render→screen ${scene?.type ?? scene?.constructor?.name}: stencil applied to ${touched} materials`)
-        } else {
-          if (renderCount < 4) diag(`render→screen ${scene?.type ?? scene?.constructor?.name}: stencil SKIPPED (?nostencil=1)`)
-        }
+        if (!noStencil) applyStencilTest(scene)
         if (scene && 'background' in scene) scene.background = null
-      } else if (renderCount < 4) {
-        diag(`render→RT ${scene?.type ?? scene?.constructor?.name}`)
       }
-      renderCount++
       try {
         return origRender(scene, camera)
       } finally {
@@ -202,20 +181,14 @@ function installPortalShim() {
     }
 
     const origSAL = renderer.setAnimationLoop.bind(renderer)
-    let frameCount = 0
     renderer.setAnimationLoop = (cb) => {
-      if (cb === null) {
-        diag('setAnimationLoop(null) — celestiary stopped its RAF')
-        return origSAL(null)
-      }
-      diag('setAnimationLoop installed — RAF starting')
+      if (cb === null) return origSAL(null)
       origSAL((time, frame) => {
         // Wrap in try/finally so an encoder gap or other exception inside
         // celestiary's renderLoop doesn't prevent us from posting frame-end.
         // Without this, the host accumulates calls forever without draining
         // (no frame-end → no swap to pendingFrame), and keeps re-asking for
         // a render, which keeps re-throwing. Always end the frame.
-        let threw = null
         try {
           cb(time, frame)
         } catch (err) {
@@ -228,9 +201,6 @@ function installPortalShim() {
           }
         } finally {
           transport.post({type: 'netgl:frame-end'})
-        }
-        if (frameCount === 0) diag('first RAF callback completed')
-        frameCount++
       })
     }
 
@@ -238,11 +208,11 @@ function installPortalShim() {
     return renderer
   }
 
-  // Listen for host-driven setPose. Writes celestiary's camera + (optionally)
-  // disables controls so the host owns viewpoint. Celestiary's camera is the
-  // global `window.camera`, set by ThreeUI.js when the constructor runs.
-  if (applyPoseFlag) diag('?pose=on — applying host pose to celestiary camera')
-  else diag('?pose default — celestiary uses its own startup camera')
+  // Listen for host-driven setPose. Writes celestiary's camera (only when
+  // opted in via ?pose=on, since the unscaled coupled pose puts celestiary's
+  // camera inside the sun by default — see CELESTIARY_BASE_PATH commentary
+  // at top). Celestiary's camera is the global `window.camera`, set by
+  // ThreeUI.js when the constructor runs.
   transport.onMessage((msg) => {
     if (!msg || typeof msg !== 'object') return
     if (msg.type === 'netgl:setPose' && applyPoseFlag) {
