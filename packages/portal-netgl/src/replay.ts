@@ -73,6 +73,19 @@ export const makeNetGLReplay = (
   // canvas). Tracked here rather than read from gl.getParameter so we
   // don't trigger a synchronous query per call.
   let currentDrawFb: object | null = null
+  // The sender's intended viewport before any host-side remap. Captured
+  // from every viewport call. We re-issue this on the host after any
+  // bindFramebuffer transition because the sender's WebGLState caches its
+  // own viewport value and skips redundant gl.viewport calls when its
+  // cached value matches the new target's intended viewport — but the
+  // host's *actual* gl.viewport may have been remapped to the door rect
+  // in the meantime, so without re-issuing we'd render the next bound
+  // framebuffer at the wrong viewport. (Concretely: the sender's atm pass
+  // sets viewport to door rect via our remap; then next frame's
+  // setRenderTarget(rt) wants viewport = (0,0,W,H), three's cache says
+  // "same as before" and skips, so the RT render runs at the door-rect
+  // viewport on the host, populating only a tiny region of the RT.)
+  let lastIntendedViewport: readonly [number, number, number, number] | null = null
 
   const decodeArg = (arg: NetGLEncodedValue): unknown => {
     if (arg == null) return null
@@ -135,26 +148,33 @@ export const makeNetGLReplay = (
 
     // Track framebuffer binding so we know when subsequent viewport calls
     // target the host canvas (currentDrawFb === null) vs an offscreen RT.
+    // Note that we update `currentDrawFb` BEFORE applying the original
+    // method below; the post-bind viewport re-issue at the bottom reads
+    // the updated value.
+    let didBindTransition = false
     if (call.name === 'bindFramebuffer') {
       const target = decodedArgs[0] as number
       if (target === GL_FRAMEBUFFER || target === GL_DRAW_FRAMEBUFFER) {
-        currentDrawFb = decodedArgs[1] as object | null
+        const newFb = decodedArgs[1] as object | null
+        if (newFb !== currentDrawFb) didBindTransition = true
+        currentDrawFb = newFb
       }
     }
 
     // Door-fit viewport remap: when the sender targets the host canvas
     // (default FB) and the host has configured a remap, replace the
     // viewport call's args with the host-supplied rect. RT-targeted
-    // viewports pass through unchanged.
-    if (
-      call.name === 'viewport' &&
-      currentDrawFb === null &&
-      config.remapScreenViewport
-    ) {
+    // viewports pass through unchanged. Either way, capture the sender's
+    // INTENDED (pre-remap) viewport so we can re-apply it across bind
+    // transitions.
+    if (call.name === 'viewport') {
       const [x, y, w, h] = decodedArgs as [number, number, number, number]
-      const remapped = config.remapScreenViewport(x, y, w, h)
-      if (remapped !== null) {
-        decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
+      lastIntendedViewport = [x, y, w, h]
+      if (currentDrawFb === null && config.remapScreenViewport) {
+        const remapped = config.remapScreenViewport(x, y, w, h)
+        if (remapped !== null) {
+          decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
+        }
       }
     }
 
@@ -183,6 +203,32 @@ export const makeNetGLReplay = (
       throw new Error(`NetGL replay: receiver has no method '${call.name}'`)
     }
     const result = method.apply(receiver, decodedArgs)
+
+    // After a bindFramebuffer transition, re-issue gl.viewport with the
+    // appropriate rect for the new binding. See the comment on
+    // `lastIntendedViewport` above for why this is needed.
+    if (didBindTransition && lastIntendedViewport) {
+      const [x, y, w, h] = lastIntendedViewport
+      if (currentDrawFb === null && config.remapScreenViewport) {
+        const remapped = config.remapScreenViewport(x, y, w, h)
+        if (remapped !== null) {
+          receiver.viewport(remapped[0], remapped[1], remapped[2], remapped[3])
+        } else {
+          receiver.viewport(x, y, w, h)
+        }
+      } else {
+        receiver.viewport(x, y, w, h)
+      }
+      if (config.__debugTraceViewport) {
+        const r = currentDrawFb === null && config.remapScreenViewport
+          ? config.remapScreenViewport(x, y, w, h) ?? [x, y, w, h]
+          : [x, y, w, h]
+        config.__debugTraceViewport(
+          `post-bind re-issue viewport(${r[0]},${r[1]},${r[2]}x${r[3]}) drawFb=${currentDrawFb ? 'RT' : 'null'}`
+        )
+      }
+    }
+
     if (
       call.returnId !== undefined &&
       result != null &&
