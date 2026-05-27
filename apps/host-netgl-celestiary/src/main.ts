@@ -121,18 +121,38 @@ type NetGLReady = {
   background: { r: number; g: number; b: number }
 }
 
+let firstCallLogged = false
+let totalCalls = 0
+let totalFrames = 0
 transport.onMessage((msg) => {
+  // Diagnostic relay from the iframe's shim — log to host console so the
+  // user sees both sides in one place.
+  const dbg = msg as { type?: string; msg?: string; extra?: unknown }
+  if (dbg?.type === 'netgl:debug') {
+    if (dbg.extra !== undefined) console.log(`[host←shim] ${dbg.msg}`, dbg.extra)
+    else console.log(`[host←shim] ${dbg.msg}`)
+    return
+  }
   if (isNetGLFrameEnd(msg)) {
+    totalFrames += 1
+    if (totalFrames === 1) console.log(`[host] first frame-end received (${inFlightFrame.length} calls)`)
+    if (totalFrames % 120 === 0) console.log(`[host] ${totalFrames} frames, ${totalCalls} calls so far`)
     pendingFrame = inFlightFrame
     inFlightFrame = []
     return
   }
   if (isNetGLCall(msg)) {
+    if (!firstCallLogged) {
+      firstCallLogged = true
+      console.log(`[host] first NetGLCall received: ${msg.name}`)
+    }
+    totalCalls += 1
     inFlightFrame.push(msg)
     return
   }
   const ready = msg as unknown as NetGLReady | null
   if (ready && ready.type === 'netgl:ready') {
+    console.log('[host] netgl:ready received from iframe', ready.anchor)
     iframeAnchor = ready.anchor
     iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
     iframeReady = true
