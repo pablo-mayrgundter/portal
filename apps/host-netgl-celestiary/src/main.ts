@@ -105,8 +105,6 @@ const gl = renderer.getContext()
 // every screen-target viewport call. RT-targeted viewport calls pass
 // through unchanged so celestiary's offscreen renders stay full-RT-sized.
 let currentDoorRect: { x: number; y: number; w: number; h: number } | null = null
-let viewportTraceCount = 0
-const VIEWPORT_TRACE_LIMIT = 40
 const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
   remapScreenViewport: (_ix, _iy, iw, ih) => {
     const r = currentDoorRect
@@ -125,12 +123,9 @@ const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
     let coverW: number
     let coverH: number
     if (iframeAspect > doorAspect) {
-      // iframe is wider per unit height — scale to match door height,
-      // let the width extend horizontally beyond the door.
       coverH = r.h
       coverW = r.h * iframeAspect
     } else {
-      // iframe is taller per unit width — scale to match door width.
       coverW = r.w
       coverH = r.w / iframeAspect
     }
@@ -142,15 +137,6 @@ const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
       Math.ceil(coverW),
       Math.ceil(coverH)
     ]
-  },
-  __debugTraceViewport: (line) => {
-    if (viewportTraceCount < VIEWPORT_TRACE_LIMIT) {
-      console.log(`[host] ${line}`)
-      viewportTraceCount++
-      if (viewportTraceCount === VIEWPORT_TRACE_LIMIT) {
-        console.log('[host] (viewport trace cap reached)')
-      }
-    }
   }
 })
 
@@ -177,22 +163,17 @@ type NetGLReady = {
   background: { r: number; g: number; b: number }
 }
 
-let firstCallLogged = false
-let firstFrameEndLogged = false
 transport.onMessage((msg) => {
-  // Diagnostic relay from the iframe's shim — log to host console so the
-  // user sees both sides in one place.
+  // Errors and lifecycle notices from the iframe's shim are relayed via
+  // postMessage so they show up in the host's console too. Success path
+  // is silent.
   const dbg = msg as { type?: string; msg?: string; extra?: unknown }
   if (dbg?.type === 'netgl:debug') {
-    if (dbg.extra !== undefined) console.log(`[host←shim] ${dbg.msg}`, dbg.extra)
-    else console.log(`[host←shim] ${dbg.msg}`)
+    if (dbg.extra !== undefined) console.warn(`[host←shim] ${dbg.msg}`, dbg.extra)
+    else console.warn(`[host←shim] ${dbg.msg}`)
     return
   }
   if (isNetGLFrameEnd(msg)) {
-    if (!firstFrameEndLogged) {
-      firstFrameEndLogged = true
-      console.log(`[host] first frame-end received (${inFlightFrame.length} calls)`)
-    }
     // Concatenate with any unconsumed pending frame instead of overwriting.
     // If the iframe runs faster than the host's RAF (common during page load
     // or when JS is busy), multiple frame-ends arrive before we drain. The
@@ -206,16 +187,11 @@ transport.onMessage((msg) => {
     return
   }
   if (isNetGLCall(msg)) {
-    if (!firstCallLogged) {
-      firstCallLogged = true
-      console.log(`[host] first NetGLCall received: ${msg.name}`)
-    }
     inFlightFrame.push(msg)
     return
   }
   const ready = msg as unknown as NetGLReady | null
   if (ready && ready.type === 'netgl:ready') {
-    console.log('[host] netgl:ready received from iframe', ready.anchor)
     iframeAnchor = ready.anchor
     iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
     iframeReady = true
@@ -238,7 +214,6 @@ const stencilBg = new THREE.Color()
 const camPos = new THREE.Vector3()
 const camFwd = new THREE.Vector3()
 const camUp = new THREE.Vector3()
-let totalFrameCount = 0
 const frame = (): void => {
   const dt = clock.getDelta()
   const time = clock.elapsedTime
@@ -272,10 +247,6 @@ const frame = (): void => {
       hostCamera,
       { width: cw, height: ch }
     )
-    if (totalFrameCount < 3) {
-      console.log(`[host] frame ${totalFrameCount}: door rect`, currentDoorRect, `canvas ${cw}x${ch}`)
-    }
-    totalFrameCount++
 
     let batch: NetGLCall[] | null = pendingFrame
     if (batch) {
