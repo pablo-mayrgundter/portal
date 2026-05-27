@@ -90,13 +90,6 @@ The v0 GL-coverage milestone landed in this PR. The visuals are
 recognisably celestiary's universe through the door, but several
 portal-architecture pieces are deliberately not solved here:
 
-- **Door-framed compositing.** Currently the door region shows whatever
-  pixels the embedded app rendered at the *same screen position* — so
-  if the door is off-centre, the door shows an off-centre crop of the
-  app's full-viewport render rather than the app's view fitted to the
-  door rect. Proper fix: intercept the replayed `gl.viewport` calls on
-  the host (when the bound framebuffer is the screen) and remap them
-  to the door rectangle. Wants its own PR.
 - **Coordinate-scale coupling.** `couplePoseAcrossPortal` assumes both
   sides of the door use comparable scales. Host scenes here are
   meter-scale (~5 m room); celestiary is astronomy-scale (sun radius
