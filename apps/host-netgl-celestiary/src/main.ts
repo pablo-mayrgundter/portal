@@ -108,9 +108,40 @@ let currentDoorRect: { x: number; y: number; w: number; h: number } | null = nul
 let viewportTraceCount = 0
 const VIEWPORT_TRACE_LIMIT = 40
 const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
-  remapScreenViewport: (_x, _y, _w, _h) => {
+  remapScreenViewport: (_ix, _iy, iw, ih) => {
     const r = currentDoorRect
-    return r ? [r.x, r.y, r.w, r.h] : null
+    if (!r) return null
+    // "Cover" semantics: scale the iframe's intended viewport (preserving
+    // its native aspect ratio) to the smallest rect that fully contains
+    // the door rect. The stencil mask clips the overflow to the door
+    // shape — so the embedded scene's projection is undistorted, and the
+    // door is the cropping mask, not the aspect-ratio source. Same idea
+    // as CSS `object-fit: cover` for an image inside an arbitrary
+    // container. Future-proof for non-rectangular door shapes: the
+    // viewport just needs to be large enough to embed the door's pixel
+    // bbox; the stencil determines the actual visible region.
+    const iframeAspect = iw / ih
+    const doorAspect = r.w / r.h
+    let coverW: number
+    let coverH: number
+    if (iframeAspect > doorAspect) {
+      // iframe is wider per unit height — scale to match door height,
+      // let the width extend horizontally beyond the door.
+      coverH = r.h
+      coverW = r.h * iframeAspect
+    } else {
+      // iframe is taller per unit width — scale to match door width.
+      coverW = r.w
+      coverH = r.w / iframeAspect
+    }
+    const coverX = r.x + (r.w - coverW) / 2
+    const coverY = r.y + (r.h - coverH) / 2
+    return [
+      Math.floor(coverX),
+      Math.floor(coverY),
+      Math.ceil(coverW),
+      Math.ceil(coverH)
+    ]
   },
   __debugTraceViewport: (line) => {
     if (viewportTraceCount < VIEWPORT_TRACE_LIMIT) {
