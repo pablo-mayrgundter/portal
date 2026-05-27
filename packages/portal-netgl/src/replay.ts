@@ -57,6 +57,18 @@ export const makeNetGLReplay = (receiver: WebGL2RenderingContext): NetGLReplay =
     if ('__netgl_arraybuffer' in obj) {
       return obj.__netgl_arraybuffer as ArrayBuffer
     }
+    if ('__netgl_imagedata' in obj) {
+      // ImageData envelope: sender converted an HTMLImageElement /
+      // HTMLCanvasElement / HTMLVideoElement / ImageBitmap / ImageData to
+      // raw pixels via a 2D canvas. Reconstruct an ImageData; texImage2D /
+      // texSubImage2D both accept ImageData as an alternative to the
+      // original DOM source.
+      const width = obj.width as number
+      const height = obj.height as number
+      const buffer = obj.buffer as ArrayBuffer
+      const data = new Uint8ClampedArray(buffer)
+      return new ImageData(data, width, height)
+    }
     throw new Error(`NetGL replay: unknown encoded value shape`)
   }
 

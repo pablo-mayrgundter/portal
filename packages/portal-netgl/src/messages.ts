@@ -15,6 +15,12 @@ export type NetGLEncodedValue =
   | { __netgl_handle: number }
   | { __netgl_typedarray: string; buffer: ArrayBuffer; offset: number; length: number }
   | { __netgl_arraybuffer: ArrayBuffer }
+  // Image source envelope (HTMLImageElement / HTMLCanvasElement /
+  // HTMLVideoElement / ImageBitmap / ImageData → ImageData on the receiver).
+  // Sender converts the DOM source to raw RGBA bytes via a 2D canvas;
+  // receiver wraps the bytes in an ImageData (which texImage2D /
+  // texSubImage2D accept as an alternative to the original DOM source).
+  | { __netgl_imagedata: true; width: number; height: number; buffer: ArrayBuffer }
   | NetGLEncodedValue[]
 
 export type NetGLCall = {

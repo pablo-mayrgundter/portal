@@ -92,6 +92,7 @@ function installPortalShim() {
   diag('shadow webgl2 context created')
 
   let callCount = 0
+  const seenRenderErrors = new Set()
   const recorder = makeRecorder(shadow, (call) => {
     if (callCount === 0) diag(`first GL call recorded: ${call.name}`)
     callCount++
@@ -133,6 +134,19 @@ function installPortalShim() {
     // Monkey-patch setAnimationLoop so we can post netgl:frame-end after each
     // RAF callback. This lets the host batch all of one frame's GL calls and
     // drain them atomically at a fixed point in its own render loop.
+    // Monkey-patch renderer.render to resetState() first. Three's WebGLState
+    // cache thinks the GL state matches what it last set, but the host's own
+    // renderer mutates the shared GL context between iframe frames. Without
+    // resetState, three skips redundant useProgram / enable / etc., and
+    // subsequent uniform calls target a program that's no longer bound on
+    // the host side — INVALID_OPERATION: location is not from the associated
+    // program. host-netgl-demo's target factory does the same thing.
+    const origRender = renderer.render.bind(renderer)
+    renderer.render = function (scene, camera) {
+      renderer.resetState()
+      return origRender(scene, camera)
+    }
+
     const origSAL = renderer.setAnimationLoop.bind(renderer)
     let frameCount = 0
     renderer.setAnimationLoop = (cb) => {
@@ -142,11 +156,29 @@ function installPortalShim() {
       }
       diag('setAnimationLoop installed — RAF starting')
       origSAL((time, frame) => {
-        cb(time, frame)
+        // Wrap in try/finally so an encoder gap or other exception inside
+        // celestiary's renderLoop doesn't prevent us from posting frame-end.
+        // Without this, the host accumulates calls forever without draining
+        // (no frame-end → no swap to pendingFrame), and keeps re-asking for
+        // a render, which keeps re-throwing. Always end the frame.
+        let threw = null
+        try {
+          cb(time, frame)
+        } catch (err) {
+          threw = err
+          // Log first failure of each shape once; the throw-per-frame loop
+          // would otherwise spam the console.
+          const key = err?.message ?? String(err)
+          if (!seenRenderErrors.has(key)) {
+            seenRenderErrors.add(key)
+            diag(`render callback threw: ${key}`)
+          }
+        } finally {
+          transport.post({type: 'netgl:frame-end'})
+        }
         if (frameCount === 0) diag('first RAF callback completed')
         frameCount++
-        if (frameCount % 120 === 0) diag(`${frameCount} RAFs, ${callCount} calls`)
-        transport.post({type: 'netgl:frame-end'})
+        if (frameCount % 120 === 0) diag(`${frameCount} RAFs, ${callCount} calls, ${seenRenderErrors.size} distinct errors`)
       })
     }
 
@@ -268,6 +300,45 @@ function makeRecorder(shadow, post) {
   const handleToId = new Map()
   let nextId = 1
 
+  // Scratch 2D canvas reused across encodes — creating a fresh one per
+  // texImage2D is fine but reusing avoids GC churn for streaming textures.
+  let scratch2d = null
+  const getScratch2d = () => {
+    if (!scratch2d) {
+      const c = document.createElement('canvas')
+      scratch2d = c.getContext('2d', {willReadFrequently: true})
+    }
+    return scratch2d
+  }
+
+  /**
+   * Convert an image-source DOM object (Image / Canvas / Video / ImageBitmap)
+   * to an `{__netgl_imagedata, width, height, buffer}` envelope. The
+   * receiver reconstructs an `ImageData` and passes it to `texImage2D` /
+   * `texSubImage2D` — both accept ImageData as an alternative to the original
+   * source object. Synchronous via 2D canvas; works for any source that's
+   * already loaded (drawImage rejects naked unloaded Image elements).
+   */
+  const encodeImageSource = (src) => {
+    const w = src.naturalWidth ?? src.videoWidth ?? src.width
+    const h = src.naturalHeight ?? src.videoHeight ?? src.height
+    if (!w || !h) {
+      throw new Error(`NetGL recorder: image source has zero dims (${src.constructor.name})`)
+    }
+    const ctx = getScratch2d()
+    ctx.canvas.width = w
+    ctx.canvas.height = h
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(src, 0, 0)
+    const data = ctx.getImageData(0, 0, w, h)
+    return {
+      __netgl_imagedata: true,
+      width: w,
+      height: h,
+      buffer: data.data.buffer,
+    }
+  }
+
   const encodeArg = (arg) => {
     if (arg == null) return null
     const t = typeof arg
@@ -284,6 +355,26 @@ function makeRecorder(shadow, post) {
       }
     }
     if (arg instanceof ArrayBuffer) return {__netgl_arraybuffer: arg}
+    // DOM image sources for gl.texImage2D / gl.texSubImage2D. Convert to
+    // ImageData via a 2D canvas (synchronous) and ship the raw pixels.
+    if (
+      (typeof HTMLImageElement !== 'undefined' && arg instanceof HTMLImageElement) ||
+      (typeof HTMLCanvasElement !== 'undefined' && arg instanceof HTMLCanvasElement) ||
+      (typeof HTMLVideoElement !== 'undefined' && arg instanceof HTMLVideoElement) ||
+      (typeof ImageBitmap !== 'undefined' && arg instanceof ImageBitmap)
+    ) {
+      return encodeImageSource(arg)
+    }
+    // ImageData itself flows through unchanged (well — re-enveloped so the
+    // receiver knows to call new ImageData).
+    if (typeof ImageData !== 'undefined' && arg instanceof ImageData) {
+      return {
+        __netgl_imagedata: true,
+        width: arg.width,
+        height: arg.height,
+        buffer: arg.data.buffer,
+      }
+    }
     if (Array.isArray(arg)) return arg.map(encodeArg)
     const name = arg.constructor?.name ?? typeof arg
     diag(`encoder gap: cannot encode arg of type ${name}`)
