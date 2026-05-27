@@ -50,10 +50,13 @@ export type NetGLReplayConfig = {
   ) => readonly [number, number, number, number] | null
 
   /**
-   * Diagnostic-only: called with a one-line description of every
-   * viewport, scissor, and SCISSOR_TEST enable/disable call as it
-   * replays. Useful while tracing why a door-fit remap isn't sticking.
-   * Production code should leave this unset.
+   * @internal — debug-only hook with no API stability guarantee.
+   *
+   * Called with a one-line description of every viewport, scissor, and
+   * SCISSOR_TEST enable/disable call as it replays. Useful while tracing
+   * why a door-fit remap isn't sticking, but the exact line format,
+   * what calls trigger it, and even whether it exists at all can change
+   * across releases. Production code should leave this unset.
    */
   __debugTraceViewport?: (line: string) => void
 }
@@ -151,6 +154,13 @@ export const makeNetGLReplay = (
     // Note that we update `currentDrawFb` BEFORE applying the original
     // method below; the post-bind viewport re-issue at the bottom reads
     // the updated value.
+    //
+    // Identity comparison (`!==`) is correct here: the sender's recorder
+    // and our replay agree on FBO identity through the netglID interning
+    // — `bindFramebuffer(target, fbo)` ships the FBO as a __netgl_handle
+    // ref, decodeArg resolves it back to the same WebGLFramebuffer
+    // instance held in `idToHandle`. So the same FBO at two different
+    // bind sites compares equal.
     let didBindTransition = false
     if (call.name === 'bindFramebuffer') {
       const target = decodedArgs[0] as number
@@ -209,22 +219,20 @@ export const makeNetGLReplay = (
     // `lastIntendedViewport` above for why this is needed.
     if (didBindTransition && lastIntendedViewport) {
       const [x, y, w, h] = lastIntendedViewport
-      if (currentDrawFb === null && config.remapScreenViewport) {
-        const remapped = config.remapScreenViewport(x, y, w, h)
-        if (remapped !== null) {
-          receiver.viewport(remapped[0], remapped[1], remapped[2], remapped[3])
-        } else {
-          receiver.viewport(x, y, w, h)
-        }
-      } else {
-        receiver.viewport(x, y, w, h)
-      }
+      // Compute the rect once (the remap callback may have side effects /
+      // be non-trivial work like projecting the door corners through the
+      // host camera) so we don't call it twice for the same transition.
+      const remapped = currentDrawFb === null && config.remapScreenViewport
+        ? config.remapScreenViewport(x, y, w, h)
+        : null
+      const rx = remapped ? remapped[0] : x
+      const ry = remapped ? remapped[1] : y
+      const rw = remapped ? remapped[2] : w
+      const rh = remapped ? remapped[3] : h
+      receiver.viewport(rx, ry, rw, rh)
       if (config.__debugTraceViewport) {
-        const r = currentDrawFb === null && config.remapScreenViewport
-          ? config.remapScreenViewport(x, y, w, h) ?? [x, y, w, h]
-          : [x, y, w, h]
         config.__debugTraceViewport(
-          `post-bind re-issue viewport(${r[0]},${r[1]},${r[2]}x${r[3]}) drawFb=${currentDrawFb ? 'RT' : 'null'}`
+          `post-bind re-issue viewport(${rx},${ry},${rw}x${rh}) drawFb=${currentDrawFb ? 'RT' : 'null'}`
         )
       }
     }

@@ -68,7 +68,10 @@ export type NetGLPortalTargetConfig = {
   /**
    * Where to post NetGL messages. Defaults to `parent` (the iframe-in-host
    * case). Set explicitly when the target is hosted in a worker or a
-   * different window topology.
+   * different window topology. Note: in a top-level window (no iframe
+   * parent), `parent === self`, so the default sends messages to the
+   * same window — fine for testing the protocol round-trip locally, but
+   * obviously not what you want in production.
    */
   outputTarget?: Window
   /**
@@ -149,8 +152,24 @@ export const makeNetGLPortalTarget = (
   // Shadow context: a 1×1 OffscreenCanvas. Three queries this for sync return
   // values + handle minting; the calls also ship over the transport to the
   // host where they execute against the real canvas.
+  //
+  // Project the (richer) THREE.WebGLRendererParameters down to just the
+  // fields gl.getContext() accepts as WebGL context attributes. Anything
+  // else (powerPreference, failIfMajorPerformanceCaveat, etc., or
+  // three-specific knobs) is ignored at the context-creation layer and
+  // gets applied later by three's own renderer setup.
+  const shadowAttrs: WebGLContextAttributes = {
+    alpha: rendererParams.alpha,
+    depth: rendererParams.depth,
+    stencil: rendererParams.stencil,
+    antialias: rendererParams.antialias,
+    preserveDrawingBuffer: rendererParams.preserveDrawingBuffer,
+    premultipliedAlpha: rendererParams.premultipliedAlpha,
+    powerPreference: rendererParams.powerPreference,
+    failIfMajorPerformanceCaveat: rendererParams.failIfMajorPerformanceCaveat
+  }
   const shadowCanvas = new OffscreenCanvas(1, 1)
-  const shadow = shadowCanvas.getContext('webgl2', rendererParams) as WebGL2RenderingContext | null
+  const shadow = shadowCanvas.getContext('webgl2', shadowAttrs) as WebGL2RenderingContext | null
   if (!shadow) throw new Error('makeNetGLPortalTarget: failed to create WebGL2 shadow context')
 
   const transport: NetGLTransport =

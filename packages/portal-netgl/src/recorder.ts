@@ -97,12 +97,22 @@ export const makeNetGLRecorder = (
 
   // Scratch 2D canvas reused across encodes to avoid GC churn when an app
   // uploads many textures per frame. Lazily created on first image-source
-  // encode so worker contexts (no document) don't pay the cost up front.
+  // encode — worker realms have no `document` AND can't see
+  // HTMLImageElement / HTMLCanvasElement / HTMLVideoElement anyway (they
+  // can only be passed an ImageBitmap, which has its own no-canvas
+  // encoding path via createImageBitmap → ArrayBuffer). The throw below
+  // surfaces the unsupported case loudly rather than silently producing
+  // a broken texture.
   let scratch2d: CanvasRenderingContext2D | null = null
   const getScratch2d = (): CanvasRenderingContext2D => {
     if (!scratch2d) {
       if (typeof document === 'undefined') {
-        throw new Error('NetGL recorder: image-source encoding needs a document (no scratch canvas in this realm)')
+        throw new Error(
+          'NetGL recorder: image-source encoding needs a document. ' +
+          'Worker hosts should convert image sources to ImageBitmap ' +
+          'before passing to gl.texImage2D (and we can extend the encoder ' +
+          'to take ImageBitmap directly with no 2D-canvas detour).'
+        )
       }
       const c = document.createElement('canvas')
       const ctx = c.getContext('2d', { willReadFrequently: true })
