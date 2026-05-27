@@ -31,7 +31,13 @@ const inIframe = (() => {
     return true
   }
 })()
-const portalRequested = new URL(location.href).searchParams.get('portal') === '1'
+const portalParams = new URL(location.href).searchParams
+const portalRequested = portalParams.get('portal') === '1'
+// `?portal=1&nostencil=1` — skip applying the portal stencil test to scenes
+// being rendered to the host canvas. Useful for isolating "is the atm quad
+// drawing at all" from "is the stencil masking it off". When set, the
+// celestiary content fullscreens over the host worldA (no door clipping).
+const noStencil = portalParams.get('nostencil') === '1'
 
 // Diagnostic relay: posts `[shim] <msg>` to the parent so the host's console
 // (which the user is looking at) shows both sides of the wire. The iframe's
@@ -149,15 +155,22 @@ function installPortalShim() {
     //   3. null out scene.background when painting to host canvas — same
     //      reason; otherwise three issues a clear-color blat over everything.
     const origRender = renderer.render.bind(renderer)
+    let renderCount = 0
     renderer.render = function (scene, camera) {
       renderer.resetState()
-      if (renderer.getRenderTarget() === null) {
-        applyStencilTest(scene)
-        if (scene && 'background' in scene) {
-          scene.__portalSavedBg = scene.__portalSavedBg ?? scene.background
-          scene.background = null
+      const toScreen = renderer.getRenderTarget() === null
+      if (toScreen) {
+        if (!noStencil) {
+          const touched = applyStencilTest(scene)
+          if (renderCount < 4) diag(`render→screen ${scene?.type ?? scene?.constructor?.name}: stencil applied to ${touched} materials`)
+        } else {
+          if (renderCount < 4) diag(`render→screen ${scene?.type ?? scene?.constructor?.name}: stencil SKIPPED (?nostencil=1)`)
         }
+        if (scene && 'background' in scene) scene.background = null
+      } else if (renderCount < 4) {
+        diag(`render→RT ${scene?.type ?? scene?.constructor?.name}`)
       }
+      renderCount++
       return origRender(scene, camera)
     }
 
@@ -435,7 +448,8 @@ const PORTAL_STENCIL_REF = 1
  * stencil constraints and paints over the entire host canvas every frame.
  */
 function applyStencilTest(scene) {
-  if (!scene || !scene.traverse) return
+  if (!scene || !scene.traverse) return 0
+  let count = 0
   scene.traverse((obj) => {
     const mat = obj.material
     if (!mat) return
@@ -447,8 +461,11 @@ function applyStencilTest(scene) {
       m.stencilZFail = KEEP_STENCIL_OP
       m.stencilZPass = KEEP_STENCIL_OP
       m.stencilWriteMask = 0
+      m.needsUpdate = true
+      count++
     }
     if (Array.isArray(mat)) mat.forEach(apply)
     else apply(mat)
   })
+  return count
 }
