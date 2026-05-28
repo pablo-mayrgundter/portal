@@ -118,12 +118,16 @@ long-lived `NPM_TOKEN` secret. Cutting a release:
 
 **Bootstrap (one-time, for the very first version)**: npm requires a
 package to exist before you can configure trusted publishing for it,
-so the v0.1.0 publish must come from a maintainer's laptop:
+so the v0.1.0 publish must come from a maintainer's laptop. Run the
+following from the **repo root** — the `-w` flag targets the workspace
+package by name regardless of cwd, so there's no risk of accidentally
+publishing the root `portal-monorepo` (which is private + name-clashes
+with an existing `portal` on npm anyway):
 
 ```sh
-cd packages/portal-netgl
-npm run build
-npm publish --access public        # interactive 2FA
+npm install                         # populate workspace symlinks
+npm run build -w @pablo-mayrgundter/portal-netgl
+npm run publish:portal-netgl        # interactive 2FA
 ```
 
 Then configure the trusted publisher on npmjs.com:
