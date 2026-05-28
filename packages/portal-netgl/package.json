@@ -47,7 +47,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
-    "prepublishOnly": "npm run build",
+    "prepare": "npm run build",
     "publish:public": "npm publish --access public"
   },
   "publishConfig": {
