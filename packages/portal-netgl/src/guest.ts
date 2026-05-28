@@ -172,10 +172,26 @@ export const makeNetGLPortalGuest = (
   // `setSize(w, h)` defaults `updateStyle=true` and writes
   // `canvas.style.width` — OffscreenCanvas has no `.style` and that throws.
   // We never appendChild, so the canvas is invisible regardless.
+  //
+  // Project rendererParams down to just the fields `getContext('webgl2', ...)`
+  // accepts as WebGL context attributes. Anything else (powerPreference,
+  // failIfMajorPerformanceCaveat, etc.) is silently ignored at the context-
+  // creation layer; we pass the full set to the renderer constructor below
+  // where they DO apply. Same pattern as `makeNetGLPortalTarget`.
+  const shadowAttrs: WebGLContextAttributes = {
+    alpha: rendererParams.alpha,
+    depth: rendererParams.depth,
+    stencil: rendererParams.stencil,
+    antialias: rendererParams.antialias,
+    preserveDrawingBuffer: rendererParams.preserveDrawingBuffer,
+    premultipliedAlpha: rendererParams.premultipliedAlpha,
+    powerPreference: rendererParams.powerPreference,
+    failIfMajorPerformanceCaveat: rendererParams.failIfMajorPerformanceCaveat
+  }
   const shadowCanvas = document.createElement('canvas')
   shadowCanvas.width = 1
   shadowCanvas.height = 1
-  const shadow = shadowCanvas.getContext('webgl2', rendererParams) as WebGL2RenderingContext | null
+  const shadow = shadowCanvas.getContext('webgl2', shadowAttrs) as WebGL2RenderingContext | null
   if (!shadow) {
     throw new Error('makeNetGLPortalGuest: failed to create WebGL2 shadow context')
   }
