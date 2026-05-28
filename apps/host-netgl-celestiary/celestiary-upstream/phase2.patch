@@ -1,0 +1,118 @@
+diff --git a/js/ThreeUI.js b/js/ThreeUI.js
+index 4f5f5f1..b5acf1f 100644
+--- a/js/ThreeUI.js
++++ b/js/ThreeUI.js
+@@ -13,6 +13,7 @@ import {
+   WebGLRenderer,
+   WebGLRenderTarget,
+ } from 'three'
++import {makeNetGLPortalGuest} from '@pablo-mayrgundter/portal-netgl'
+ import {newAtmospherePass} from './scene/atmos/Atmosphere'
+ import {precomputeTransmittance, precomputeInScatter} from './scene/atmos/AtmospherePrecompute'
+ import {TrackballControls} from 'three/examples/jsm/controls/TrackballControls.js'
+@@ -24,6 +25,20 @@ import {named} from './utils.js'
+ import {asymptoticZoomDist, dynamicNear} from './zoom.js'
+ 
+ 
++// Portal anchor: where the portal door sits in celestiary's coordinate
++// space when this page is embedded as a NetGL portal target. Centred at
++// the sun (origin), normal facing -z. Half-extents are roughly the
++// inner-solar-system scale so a host portal frames the planets cleanly;
++// this is the only celestiary-specific value the portal mode needs.
++const PORTAL_ANCHOR = {
++  position: [0, 0, 0],
++  normal: [0, 0, -1],
++  up: [0, 1, 0],
++  halfWidth: 5e10,
++  halfHeight: 5e10,
++}
++
++
+ /** */
+ export default class ThreeUi {
+   /** */
+@@ -177,10 +192,12 @@ export default class ThreeUi {
+ 
+   /** @returns {WebGLRenderer} */
+   initRenderer(container, backgroundColor) {
+-    const canvas = document.createElement('canvas')
+-    const ctx = canvas.getContext('webgl2')
+-    container.appendChild(canvas)
+-    const renderer = new WebGLRenderer({canvas: canvas, context: ctx, antialias: true})
++    // Portal mode: when this page is embedded inside a NetGL portal host
++    // (an iframe with `?portal=1`), route every GL call to the host's
++    // canvas via `makeNetGLPortalGuest` instead of painting a local one.
++    // Otherwise fall through to the standard local-renderer setup.
++    const renderer = this._maybeNetGLPortalRenderer(backgroundColor) ||
++      this._initLocalRenderer(container)
+     // No idea about this.. just like the way it looks.
+     // renderer.toneMapping = AgXToneMapping
+     // renderer.toneMapping = ACESFilmicToneMapping
+@@ -208,6 +225,55 @@ export default class ThreeUi {
+   }
+ 
+ 
++  /**
++   * Local-canvas WebGLRenderer: append a fresh canvas to `container` and
++   * construct a renderer around its webgl2 context. The default path —
++   * runs when celestiary is loaded as a standalone page.
++   *
++   * @returns {WebGLRenderer}
++   */
++  _initLocalRenderer(container) {
++    const canvas = document.createElement('canvas')
++    const ctx = canvas.getContext('webgl2')
++    container.appendChild(canvas)
++    return new WebGLRenderer({canvas: canvas, context: ctx, antialias: true})
++  }
++
++
++  /**
++   * Portal-mode WebGLRenderer: when celestiary is loaded inside a NetGL
++   * portal host (an iframe with `?portal=1`), construct a recorder-backed
++   * renderer whose every GL call ships over postMessage to the host. The
++   * host replays the call stream against its own WebGL2 canvas, with the
++   * portal door's pixel rect as the viewport. No local canvas painted.
++   *
++   * Returns null when not in portal mode — caller falls back to
++   * `_initLocalRenderer`.
++   *
++   * @returns {?WebGLRenderer}
++   */
++  _maybeNetGLPortalRenderer(backgroundColor) {
++    const inIframe = (() => {
++      try {return parent !== self} catch {return true}
++    })()
++    const portalMode = inIframe &&
++      new URLSearchParams(location.search).get('portal') === '1'
++    if (!portalMode) {
++      return null
++    }
++    const r = (backgroundColor >> 16) & 0xff
++    const g = (backgroundColor >> 8) & 0xff
++    const b = backgroundColor & 0xff
++    const {renderer} = makeNetGLPortalGuest({
++      WebGLRenderer,
++      anchor: PORTAL_ANCHOR,
++      background: {r: r / 255, g: g / 255, b: b / 255},
++      rendererParams: {antialias: true, stencil: true, depth: true},
++    })
++    return renderer
++  }
++
++
+   /** */
+   initControls(camera) {
+     const controls = new TrackballControls(camera, this.threeContainer)
+diff --git a/package.json b/package.json
+index 9a160b0..4b2f833 100644
+--- a/package.json
++++ b/package.json
+@@ -34,6 +34,7 @@
+     "@pablo-mayrgundter/fullscreen.js": "1.1.0",
+     "@pablo-mayrgundter/measure.js": "2.0.1",
+     "@pablo-mayrgundter/parser.js": "1.0.1",
++    "@pablo-mayrgundter/portal-netgl": "^0.1.0",
+     "@pablo-mayrgundter/yaot2": "2.0.1",
+     "@react-three/drei": "9.120.4",
+     "@react-three/fiber": "8.17.10",
