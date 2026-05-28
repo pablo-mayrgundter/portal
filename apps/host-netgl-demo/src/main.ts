@@ -40,7 +40,7 @@ import {
   isNetGLFrameEnd,
   makeNetGLReplay,
   type NetGLCall
-} from '@portal/portal-netgl'
+} from '@pablo-mayrgundter/portal-netgl'
 
 attachNavDrawer('netgl')
 

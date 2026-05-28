@@ -1,0 +1,101 @@
+name: Publish @pablo-mayrgundter/portal-netgl to npm
+
+# Push-on-green: when a commit lands on main with all tests + checks
+# passing, publish `@pablo-mayrgundter/portal-netgl` to npm under @latest
+# — but only if the version in package.json differs from what's already
+# on the registry. That way:
+#   - bumping `version` in package.json + merging to main = a release
+#   - other commits on main are skipped (no version bump → no publish)
+#   - no manual `npm publish` ceremony
+#
+# Authentication: npm Trusted Publishing (OIDC). No NPM_TOKEN secret
+# needed. Requires:
+#   - `id-token: write` permission (this workflow grants it)
+#   - npm CLI >= 11.5.1 (we upgrade explicitly)
+#   - A trusted-publisher entry on npmjs.com pointing at this repo +
+#     workflow + branch. See repo README for setup.
+#
+# Bootstrap caveat: npm requires the package to exist before you can
+# configure trusted publishing for it. The very first publish of a new
+# package must therefore be a manual `npm publish` from a maintainer's
+# laptop (the version will already be 0.1.0 in package.json). After
+# that, configure the trusted publisher on npmjs.com and bump version
+# for each subsequent release.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # OIDC: lets the runner mint a short-lived token npm can verify against
+  # the trusted-publisher configuration. No long-lived NPM_TOKEN involved.
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing requires npm >= 11.5.1; npm 10 (default with
+      # Node 22) doesn't speak the OIDC handshake. Pin to the npm 11
+      # major instead of @latest so a future major bump doesn't surprise
+      # this workflow right at publish time — bump explicitly when
+      # validated.
+      - name: Upgrade npm to a trusted-publishing-aware version
+        run: npm install -g 'npm@^11.5.1'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run check
+
+      - name: Test
+        run: npm test
+
+      - name: Build portal-netgl
+        run: npm run build -w @pablo-mayrgundter/portal-netgl
+
+      - name: Compare local vs published version
+        id: version-check
+        working-directory: packages/portal-netgl
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @pablo-mayrgundter/portal-netgl version 2>/dev/null || echo "none")
+          echo "local=$LOCAL"     >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL" = "$PUBLISHED" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Local version $LOCAL matches @latest on npm — nothing to publish."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Local $LOCAL differs from published $PUBLISHED — will publish."
+          fi
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.skip == 'false'
+        working-directory: packages/portal-netgl
+        # No NODE_AUTH_TOKEN. setup-node@v4 sets one to an empty string
+        # which can confuse npm's OIDC detection; clearing it forces npm
+        # to fall through to the OIDC code path (which mints a token from
+        # the ambient $ACTIONS_ID_TOKEN_REQUEST_URL etc.).
+        env:
+          NODE_AUTH_TOKEN: ''
+        # `npm publish` auto-detects OIDC when id-token is granted and
+        # auto-attaches provenance attestations. --provenance is therefore
+        # implicit but we pass it explicitly so the intent is visible to
+        # anyone reading the workflow.
+        run: npm publish --provenance --tag latest
