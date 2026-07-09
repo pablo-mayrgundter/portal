@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal - NetGL demo (host)</title>
+    <style>
+      html, body, #app {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #080b13;
+      }
+      .label {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        color: #d8e7ff;
+        font-family: Inter, system-ui, sans-serif;
+        font-size: 13px;
+        line-height: 1.4;
+        background: rgba(4, 9, 18, 0.65);
+        border: 1px solid rgba(216, 231, 255, 0.2);
+        border-radius: 8px;
+        padding: 8px 10px;
+        pointer-events: none;
+        max-width: 360px;
+      }
+      /* Iframe is logically present (it owns worldB and the NetGLRenderer
+         that drives the host canvas's GL context) but visually offscreen.
+         No bitmap shipping back — the iframe's draw calls cross the wire
+         and execute in the host's GL context directly. */
+      #target-iframe {
+        position: fixed;
+        left: -10000px;
+        top: -10000px;
+        width: 1px;
+        height: 1px;
+        pointer-events: none;
+        border: 0;
+      }
+    </style>
+    <script type="module" crossorigin src="/portal/pr-preview/pr-25/netgl/assets/main-BU2xoRy-.js"></script>
+    <link rel="modulepreload" crossorigin href="/portal/pr-preview/pr-25/netgl/assets/three-helpers-WAzysoi4.js">
+  </head>
+  <body>
+    <div id="app"></div>
+    <iframe id="target-iframe" src="target.html"></iframe>
+    <div class="label">
+      WASD + drag mouse. The portal shows worldB rendered by an iframe —
+      but the iframe's draw calls themselves cross the wire (command-stream
+      NetGL) and execute in the host canvas's GL context. Composition is
+      native: stencil + depth in one context, no bitmap round-trip.
+    </div>
+  </body>
+</html>

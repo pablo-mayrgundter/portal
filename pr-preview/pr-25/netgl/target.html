@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal - NetGL demo (target)</title>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a0a14; color: #f7d6e0; font-family: system-ui, sans-serif; }
+      .info { padding: 16px; max-width: 480px; }
+    </style>
+    <script type="module" crossorigin src="/portal/pr-preview/pr-25/netgl/assets/target-CM6VELuz.js"></script>
+    <link rel="modulepreload" crossorigin href="/portal/pr-preview/pr-25/netgl/assets/three-helpers-WAzysoi4.js">
+  </head>
+  <body>
+    <div class="info">
+      <h2>NetGL portal target</h2>
+      <p>
+        This page owns worldB and runs its draw calls through a
+        <code>NetGLRenderer</code>. Each GL call ships back to the host
+        over <code>postMessage</code>; the host replays them into its own
+        canvas's GL context so the composition happens natively in one
+        context. Open the host page (<a href="index.html">index.html</a>) to see
+        the portal.
+      </p>
+    </div>
+  </body>
+</html>
