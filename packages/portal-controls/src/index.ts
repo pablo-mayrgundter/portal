@@ -45,9 +45,11 @@ export const attachBasicFlyControls = (
   let pitch = 0
   const keys = new Set<string>()
 
+  // Pitch is clamped once per frame in `update`, so the drag callback just
+  // accumulates the raw delta.
   attachLookControls(dom, (dx, dy) => {
     yaw -= dx * lookSensitivity
-    pitch = clampPitch(pitch - dy * lookSensitivity)
+    pitch -= dy * lookSensitivity
   })
 
   window.addEventListener('keydown', (e) => keys.add(e.code))
@@ -174,15 +176,30 @@ const clampPitch = (value: number) =>
 // integration are identical. Narrow desktop browser mobile simulation is treated
 // as mobile to make GUI button testing possible without a touch device.
 const attachMobileWasdPad = (keys: Set<string>) => {
-  const isTouch = typeof window !== 'undefined'
-    && (('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0)
-  const isNarrowViewport = typeof window !== 'undefined' && window.innerWidth < 500
-  const isMobile = isTouch || isNarrowViewport
-  if (!isMobile) return
+  if (typeof window === 'undefined') return
 
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0
+  const isEligible = () => isTouch || window.innerWidth < 500
+
+  // Mount once the viewport qualifies. When it doesn't yet (e.g. a wide desktop
+  // window that gets narrowed for mobile simulation), wait for a resize instead
+  // of deciding permanently at attach time.
+  if (isEligible()) {
+    mountWasdPad(keys)
+    return
+  }
+  const onResize = () => {
+    if (!isEligible()) return
+    window.removeEventListener('resize', onResize)
+    mountWasdPad(keys)
+  }
+  window.addEventListener('resize', onResize)
+}
+
+const mountWasdPad = (keys: Set<string>) => {
   const pad = document.createElement('div')
   pad.className = 'wasd-pad'
-  pad.setAttribute('aria-label', 'Movement controls')
+  pad.setAttribute('aria-label', 'Movement and look controls')
   pad.innerHTML = `
     <button type="button" data-key="KeyQ" class="wasd-btn wasd-yaw-left" aria-label="Yaw left">↶</button>
     <button type="button" data-key="KeyW" class="wasd-btn wasd-forward" aria-label="Forward">↑</button>
