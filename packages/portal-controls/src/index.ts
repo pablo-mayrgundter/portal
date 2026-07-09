@@ -25,11 +25,13 @@ export type FlyControlsOptions = {
   moveSpeed?: number
   /** Radians of yaw/pitch per pixel of pointer drag. Default: 0.0025. */
   lookSensitivity?: number
+  /** Radians of yaw/pitch per second when a look key/button is held. Default: 1.5. */
+  lookKeySpeed?: number
 }
 
-// Keyboard WASD + drag-to-look, with an on-screen WASD pad auto-mounted on
-// touch devices. Drag-look uses Pointer Events so it works with both mouse and
-// touch from the same code path.
+// Keyboard movement/look + drag-to-look, with on-screen controls auto-mounted
+// on touch or narrow viewports. Drag-look uses Pointer Events so it works with
+// both mouse and touch from the same code path.
 export const attachBasicFlyControls = (
   camera: THREE.PerspectiveCamera,
   dom: HTMLElement,
@@ -37,15 +39,17 @@ export const attachBasicFlyControls = (
 ): FlyControls => {
   const moveSpeed = opts.moveSpeed ?? 4
   const lookSensitivity = opts.lookSensitivity ?? 0.0025
+  const lookKeySpeed = opts.lookKeySpeed ?? 1.5
 
   let yaw = 0
   let pitch = 0
   const keys = new Set<string>()
 
+  // Pitch is clamped once per frame in `update`, so the drag callback just
+  // accumulates the raw delta.
   attachLookControls(dom, (dx, dy) => {
     yaw -= dx * lookSensitivity
     pitch -= dy * lookSensitivity
-    pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch))
   })
 
   window.addEventListener('keydown', (e) => keys.add(e.code))
@@ -58,6 +62,12 @@ export const attachBasicFlyControls = (
   const right = new THREE.Vector3()
 
   const update = (dt: number) => {
+    if (keys.has('KeyQ')) yaw += lookKeySpeed * dt
+    if (keys.has('KeyE')) yaw -= lookKeySpeed * dt
+    if (keys.has('KeyR')) pitch -= lookKeySpeed * dt
+    if (keys.has('KeyF')) pitch += lookKeySpeed * dt
+    pitch = clampPitch(pitch)
+
     camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'))
 
     forward.set(0, 0, -1).applyQuaternion(camera.quaternion)
@@ -158,21 +168,47 @@ const attachLookControls = (
   })
 }
 
-// On-screen WASD pad for touch devices. Each button maps to the same KeyboardEvent
-// `code` the keyboard listener uses, so the movement integration is identical.
-const attachMobileWasdPad = (keys: Set<string>) => {
-  const isTouch = typeof window !== 'undefined'
-    && (('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0)
-  if (!isTouch) return
+const clampPitch = (value: number) =>
+  Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, value))
 
+// On-screen controls for mobile/touch-sized viewports. Each button maps to the
+// same KeyboardEvent `code` the keyboard listener uses, so button and keyboard
+// integration are identical. Narrow desktop browser mobile simulation is treated
+// as mobile to make GUI button testing possible without a touch device.
+const attachMobileWasdPad = (keys: Set<string>) => {
+  if (typeof window === 'undefined') return
+
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0
+  const isEligible = () => isTouch || window.innerWidth < 500
+
+  // Mount once the viewport qualifies. When it doesn't yet (e.g. a wide desktop
+  // window that gets narrowed for mobile simulation), wait for a resize instead
+  // of deciding permanently at attach time.
+  if (isEligible()) {
+    mountWasdPad(keys)
+    return
+  }
+  const onResize = () => {
+    if (!isEligible()) return
+    window.removeEventListener('resize', onResize)
+    mountWasdPad(keys)
+  }
+  window.addEventListener('resize', onResize)
+}
+
+const mountWasdPad = (keys: Set<string>) => {
   const pad = document.createElement('div')
   pad.className = 'wasd-pad'
-  pad.setAttribute('aria-label', 'Movement controls')
+  pad.setAttribute('aria-label', 'Movement and look controls')
   pad.innerHTML = `
-    <button type="button" data-key="KeyW" class="wasd-btn wasd-up" aria-label="Forward">↑</button>
+    <button type="button" data-key="KeyQ" class="wasd-btn wasd-yaw-left" aria-label="Yaw left">↶</button>
+    <button type="button" data-key="KeyW" class="wasd-btn wasd-forward" aria-label="Forward">↑</button>
+    <button type="button" data-key="KeyE" class="wasd-btn wasd-yaw-right" aria-label="Yaw right">↷</button>
+    <button type="button" data-key="KeyR" class="wasd-btn wasd-pitch-down" aria-label="Pitch down">⇣</button>
     <button type="button" data-key="KeyA" class="wasd-btn wasd-left" aria-label="Left">←</button>
-    <button type="button" data-key="KeyS" class="wasd-btn wasd-down" aria-label="Back">↓</button>
+    <button type="button" data-key="KeyS" class="wasd-btn wasd-back" aria-label="Back">↓</button>
     <button type="button" data-key="KeyD" class="wasd-btn wasd-right" aria-label="Right">→</button>
+    <button type="button" data-key="KeyF" class="wasd-btn wasd-pitch-up" aria-label="Pitch up">⇡</button>
   `
 
   const style = document.createElement('style')
@@ -181,11 +217,11 @@ const attachMobileWasdPad = (keys: Set<string>) => {
       position: fixed;
       left: 16px;
       bottom: 16px;
-      width: 168px;
+      width: min(360px, calc(100vw - 32px));
       height: 168px;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      grid-template-rows: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: repeat(2, 1fr);
       gap: 6px;
       z-index: 10;
       touch-action: none;
@@ -208,10 +244,14 @@ const attachMobileWasdPad = (keys: Set<string>) => {
       background: rgba(93, 169, 255, 0.45);
       border-color: rgba(216, 231, 255, 0.6);
     }
-    .wasd-up    { grid-column: 2; grid-row: 1; }
-    .wasd-left  { grid-column: 1; grid-row: 2; }
-    .wasd-down  { grid-column: 2; grid-row: 2; }
-    .wasd-right { grid-column: 3; grid-row: 2; }
+    .wasd-yaw-left   { grid-column: 1; grid-row: 1; }
+    .wasd-forward    { grid-column: 2; grid-row: 1; }
+    .wasd-yaw-right  { grid-column: 3; grid-row: 1; }
+    .wasd-pitch-down { grid-column: 4; grid-row: 1; }
+    .wasd-left       { grid-column: 1; grid-row: 2; }
+    .wasd-back       { grid-column: 2; grid-row: 2; }
+    .wasd-right      { grid-column: 3; grid-row: 2; }
+    .wasd-pitch-up   { grid-column: 4; grid-row: 2; }
   `
 
   document.head.appendChild(style)
