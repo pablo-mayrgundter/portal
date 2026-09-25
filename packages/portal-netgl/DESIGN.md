@@ -203,6 +203,14 @@ into an offscreen target and composite later (celestiary does).
 - **Stale re-runs skip uploads.** When no new guest frame arrived, the
   host re-runs the last one; it now skips creations and uploads, or a
   slow guest streaming tiles re-uploads every tile every host frame.
+- **A frame that deletes an object is never re-run.** Cesium's first
+  frame creates, uses and deletes a scratch framebuffer. Re-running that
+  frame bound the deleted FBO (which fails), so the textures meant for it
+  were attached to Cesium's still-bound scene framebuffer instead, which
+  stayed incomplete for the rest of the session: a black door, depending
+  on whether the host happened to draw before the guest's second frame.
+  Transient objects make a frame unrepeatable; the host now skips the
+  re-run and shows no guest content for that one host frame.
 
 ## Celestiary × Cesium: the plan
 

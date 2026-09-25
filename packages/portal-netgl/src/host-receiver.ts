@@ -19,6 +19,17 @@
 //     guest streaming map tiles would otherwise have every one re-uploaded
 //     on every host frame). Trade-off: a frame that rewrites a resource
 //     between two of its own draws re-runs with the final contents.
+//   - A frame that DELETES any GL object is never re-run. Its transient
+//     objects are gone by the end of the frame, so a re-run's bind of one
+//     fails — and every call after it that was meant for that object
+//     (framebufferTexture2D, texParameteri, vertexAttribPointer, draws)
+//     lands on whatever object is still bound instead, permanently
+//     corrupting it. Cesium creates, uses and deletes a scratch framebuffer
+//     in its first frame; re-running that frame reattached its textures to
+//     Cesium's main scene framebuffer, which then stayed incomplete (a
+//     black door) for the rest of the session. Skipping the re-run costs
+//     one host frame without guest content, and only when the guest is
+//     slower than the host.
 //   - A replay error is reported once per distinct message and the drain
 //     continues with the next call, so one unsupported call can't kill
 //     the host's render loop.
@@ -76,7 +87,8 @@ export type NetGLHostReceiver = {
   readonly hasFrame: boolean
   /**
    * Replay the pending guest frame(s), or re-run the last one if none is
-   * pending. Returns true if anything was replayed.
+   * pending and the last one is safe to re-run (see the buffering rules
+   * above). Returns true if anything was replayed.
    */
   drain(): boolean
   /** The underlying replay (for its `invalidate()` or direct use). */
@@ -94,6 +106,8 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
   let inFlight: NetGLCall[] = []
   let pending: NetGLCall[] | null = null
   let last: NetGLCall[] | null = null
+  // Whether `last` may be re-run: false if it deleted any GL object.
+  let lastRerunnable = false
 
   let unsubscribe: (() => void) | null = config.transport.onMessage((msg) => {
     if (isNetGLCall(msg)) {
@@ -145,10 +159,11 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
         const batch = pending
         pending = null
         last = batch
+        lastRerunnable = !batch.some((c) => c.name.startsWith('delete'))
         run(batch, false)
         return true
       }
-      if (last) {
+      if (last && lastRerunnable) {
         run(last, true)
         return true
       }

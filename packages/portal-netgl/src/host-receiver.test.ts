@@ -72,6 +72,32 @@ describe('makeNetGLHostReceiver', () => {
     expect(calls).toEqual(['bindBuffer'])
   })
 
+  it('never re-runs a frame that deleted an object', () => {
+    // The Cesium black-door bug: frame 1 creates, uses and deletes a
+    // scratch framebuffer. A re-run would bind the deleted FBO (which
+    // fails) and attach textures to whatever FBO is still bound.
+    const { gl, calls } = makeMockGl()
+    const { transport, deliver } = makeTransport()
+    const host = makeNetGLHostReceiver({ gl, transport })
+    deliver({ name: 'createFramebuffer', args: [], returnId: 1 })
+    deliver({ name: 'bindFramebuffer', args: [0x8D40, { __netgl_handle: 1 }] })
+    deliver({ name: 'framebufferTexture2D', args: [0x8D40, 0x8CE0, 0x0DE1, null, 0] })
+    deliver({ name: 'deleteFramebuffer', args: [{ __netgl_handle: 1 }] })
+    deliver(END)
+    expect(host.drain()).toBe(true)
+    calls.length = 0
+    expect(host.drain()).toBe(false)
+    expect(calls).toEqual([])
+
+    // The next frame without deletes is re-runnable again.
+    deliver({ name: 'drawArrays', args: [4, 0, 3] })
+    deliver(END)
+    host.drain()
+    calls.length = 0
+    expect(host.drain()).toBe(true)
+    expect(calls).toEqual(['drawArrays'])
+  })
+
   it('reports a replay error once and keeps draining', () => {
     const { gl, calls } = makeMockGl()
     const { transport, deliver } = makeTransport()
