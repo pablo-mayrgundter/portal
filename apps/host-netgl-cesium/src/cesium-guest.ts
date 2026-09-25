@@ -45,10 +45,6 @@ const onTick = (tick: CesiumTick): void => {
     const frustum = camera.frustum as CesiumNS.PerspectiveFrustum
     const aspect = w.canvas.clientWidth / Math.max(1, w.canvas.clientHeight)
     frustum.fov = aspect > 1 ? 2 * Math.atan(Math.tan(v.fovy / 2) * aspect) : v.fovy
-  } else {
-    // Door mode: slow orbit above 20°N.
-    const lon = -60 + tick.time * 6
-    camera.setView({ destination: Cesium.Cartesian3.fromDegrees(lon, 20, 1.6e7) })
   }
   try {
     w.resize()

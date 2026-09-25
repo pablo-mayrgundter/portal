@@ -22,7 +22,8 @@ export {
   makeNetGLGuestContext,
   type NetGLGuestContext,
   type NetGLGuestContextConfig,
-  type NetGLReadyMessage
+  type NetGLReadyMessage,
+  type NetGLReadyAckMessage
 } from './guest-context'
 export {
   makeNetGLHostReceiver,

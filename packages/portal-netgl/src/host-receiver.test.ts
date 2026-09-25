@@ -112,6 +112,20 @@ describe('makeNetGLHostReceiver', () => {
     expect(errors).toHaveLength(1)
   })
 
+  it('acks every ready announcement but surfaces only the first', () => {
+    const { gl } = makeMockGl()
+    const { transport, deliver } = makeTransport()
+    const posted: unknown[] = []
+    transport.post = (msg) => { posted.push(msg) }
+    let readies = 0
+    makeNetGLHostReceiver({ gl, transport, onReady: () => { readies += 1 } })
+    const ready = { type: 'netgl:ready', anchor: { position: [0, 0, 0] }, background: { r: 0, g: 0, b: 0 } }
+    deliver(ready)
+    deliver(ready)
+    expect(readies).toBe(1)
+    expect(posted).toEqual([{ type: 'netgl:ready-ack' }, { type: 'netgl:ready-ack' }])
+  })
+
   it('surfaces the ready handshake and other control messages', () => {
     const { gl } = makeMockGl()
     const { transport, deliver } = makeTransport()

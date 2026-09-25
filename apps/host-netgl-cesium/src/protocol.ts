@@ -11,8 +11,9 @@ export type CesiumTick = {
   seq: number
   time: number
   /**
-   * Earth mode: the host camera expressed in Cesium's frame (ECEF, metres).
-   * Absent in door mode, where the guest flies its own camera.
+   * The host camera expressed in Cesium's frame (ECEF, metres): carried
+   * through the door onto a window in space (door mode), or re-expressed
+   * relative to the host's Earth (earth mode).
    */
   view?: {
     position: [number, number, number]

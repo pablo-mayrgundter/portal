@@ -31,6 +31,17 @@ const portalB: PortalAnchor = {
 }
 
 describe('couplePoseAcrossPortal', () => {
+  it('scales the viewer offset by config.scale, leaving directions alone', () => {
+    const coupled = couplePoseAcrossPortal(
+      { position: [0.5, 1.6, -3.0], forward: [0, 0, -1] },
+      { source: portalA, target: portalB, scale: 1000 }
+    )
+    // Offset from portalA is (0.5, 0, 0.5); mirrored (-0.5, 0, -0.5) in the
+    // shared basis, scaled x1000, relative to portalB.
+    close(coupled.position, [500, 1.6, 500])
+    close(coupled.forward!, [0, 0, -1])
+  })
+
   it('maps a point in front of source to behind target (mirror semantics)', () => {
     const coupled = couplePoseAcrossPortal(
       { position: [0, 1.6, -3.4] },

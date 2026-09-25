@@ -16,7 +16,9 @@ own GL context, where depth and stencil composition is native.
 ## Modes
 
 - **`?mode=door`** (default) — the globe through a portal door in the
-  three.js room, like the celestiary demo.
+  three.js room, like the celestiary demo. The door is a window: your
+  camera is carried through it onto a window in space above the Americas,
+  scaled 4,000 km per metre, so walking past the door gives real parallax.
 - **`?mode=earth`** — the globe composited *in place* of an Earth in a
   three.js space scene with stars, sun, and a moon. The moon occludes the
   Earth when in front and is hidden by it when behind; Cesium's

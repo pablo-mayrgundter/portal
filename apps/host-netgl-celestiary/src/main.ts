@@ -8,33 +8,21 @@
 // hook that celestiary's ThreeUI.js picks up so its WebGLRenderer's GL
 // calls are recorded + shipped over the wire to this page.
 //
-// Pose handoff is sent but coordinate spaces don't match between this
-// scene's meter-scale room and celestiary's astronomy-scale (sun radius ≈
-// 7e8 m) universe — the goal of v0 is GL-coverage testing (do celestiary's
-// textures, shaders, RT switching, etc., all replay successfully?) rather
-// than visually-coherent portal traversal.
+// The host camera's pose crosses the door scaled up to astronomy scale (the
+// door is a 1e11 m window in celestiary's world, see the shim's anchor), so
+// the door behaves as a window: walk past it and celestiary's sky slides
+// behind the door frame the way the scene through a real window would.
 
 import * as THREE from 'three'
+import { couplePoseAcrossPortal, type Mat4, type PortalPose } from '@portal/portal-core'
 import {
-  couplePoseAcrossPortal,
-  type Mat4,
-  type PortalAnchor,
-  type PortalPose
-} from '@portal/portal-core'
-import { windowTransport } from '@portal/portal-iframe'
-import {
+  PORTAL_STENCIL_REF,
   makeLocalEndpoint,
   makePortalPlane,
-  makePortalStencilMask,
-  portalScreenRect
+  makePortalStencilMask
 } from '@portal/portal-three'
 import { attachBasicFlyControls, attachNavDrawer } from '@portal/portal-controls'
-import {
-  isNetGLCall,
-  isNetGLFrameEnd,
-  makeNetGLReplay,
-  type NetGLCall
-} from '@pablo-mayrgundter/portal-netgl'
+import { makeNetGLHostReceiver, windowTransport } from '@pablo-mayrgundter/portal-netgl'
 
 attachNavDrawer('netgl-celestiary')
 
@@ -96,107 +84,42 @@ const stencilMask = makePortalStencilMask()
 
 // NetGL receiver: replay celestiary's GL calls against the host canvas's
 // WebGL2 context.
-const gl = renderer.getContext()
-// Door-fit viewport remap: the iframe's atm pass renders its fullscreen
-// quad at full canvas viewport; we want those pixels to land inside the
-// door rect instead so the embedded scene reads as "fit to door" rather
-// than "screen-positional crop". `currentDoorRect` is recomputed each
-// host frame (right before drain); remapScreenViewport returns it for
-// every screen-target viewport call. RT-targeted viewport calls pass
-// through unchanged so celestiary's offscreen renders stay full-RT-sized.
-let currentDoorRect: { x: number; y: number; w: number; h: number } | null = null
-const netglReplay = makeNetGLReplay(gl as WebGL2RenderingContext, {
-  remapScreenViewport: (_ix, _iy, iw, ih) => {
-    const r = currentDoorRect
-    if (!r) return null
-    // "Cover" semantics: scale the iframe's intended viewport (preserving
-    // its native aspect ratio) to the smallest rect that fully contains
-    // the door rect. The stencil mask clips the overflow to the door
-    // shape — so the embedded scene's projection is undistorted, and the
-    // door is the cropping mask, not the aspect-ratio source. Same idea
-    // as CSS `object-fit: cover` for an image inside an arbitrary
-    // container. Future-proof for non-rectangular door shapes: the
-    // viewport just needs to be large enough to embed the door's pixel
-    // bbox; the stencil determines the actual visible region.
-    const iframeAspect = iw / ih
-    const doorAspect = r.w / r.h
-    let coverW: number
-    let coverH: number
-    if (iframeAspect > doorAspect) {
-      coverH = r.h
-      coverW = r.h * iframeAspect
-    } else {
-      coverW = r.w
-      coverH = r.w / iframeAspect
-    }
-    const coverX = r.x + (r.w - coverW) / 2
-    const coverY = r.y + (r.h - coverH) / 2
-    return [
-      Math.floor(coverX),
-      Math.floor(coverY),
-      Math.ceil(coverW),
-      Math.ceil(coverH)
-    ]
-  }
-})
-
-let iframeReady = false
-let iframeAnchor: PortalAnchor | null = null
-const iframeBg = new THREE.Color('#000000')
-
-const transport = windowTransport({
-  output: iframe.contentWindow!,
-  inputFilter: iframe.contentWindow
-})
-
-// Buffer GL calls per frame (same pattern as host-netgl-demo). Drain the
-// latest complete batch atomically inside our render loop, after stencil
-// mask + clearDepth. The lastFrame cache keeps the door from flashing on
-// frames where celestiary is mid-RAF when we drain.
-let inFlightFrame: NetGLCall[] = []
-let pendingFrame: NetGLCall[] | null = null
-let lastFrame: NetGLCall[] | null = null
-
-type NetGLReady = {
-  type: 'netgl:ready'
-  anchor: PortalAnchor
-  background: { r: number; g: number; b: number }
-}
-
-transport.onMessage((msg) => {
-  // Errors and lifecycle notices from the iframe's shim are relayed via
-  // postMessage so they show up in the host's console too. Success path
-  // is silent.
-  const dbg = msg as { type?: string; msg?: string; extra?: unknown }
-  if (dbg?.type === 'netgl:debug') {
+//
+// The door is a window: celestiary renders the host camera's own view
+// (carried through the door, see the setPose below) at full screen, and the
+// stencil mask shows only what falls inside the door. So the guest's screen
+// maps 1:1 onto the host canvas, scaled only for any drawing-buffer size
+// difference between the iframe and this page. (It used to be cover-fit
+// into the door's screen rect, with celestiary flying its own camera: a
+// picture in a frame, whose content slid the wrong way as you walked past
+// the door.)
+let guestScreen: { w: number; h: number } | null = null
+const transport = windowTransport({ output: iframe.contentWindow!, inputFilter: iframe.contentWindow })
+const receiver = makeNetGLHostReceiver({
+  gl: renderer.getContext() as WebGL2RenderingContext,
+  transport,
+  replay: {
+    remapScreenViewport: (x, y, w, h) => {
+      // Full-canvas viewports tell us the guest's drawing-buffer size.
+      if (x === 0 && y === 0) guestScreen = { w, h }
+      if (!guestScreen) return null
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2())
+      const sx = size.x / guestScreen.w
+      const sy = size.y / guestScreen.h
+      return [Math.round(x * sx), Math.round(y * sy), Math.round(w * sx), Math.round(h * sy)]
+    },
+    screen: { stencil: { ref: PORTAL_STENCIL_REF }, clear: 'depth-only' }
+  },
+  onControl: (msg) => {
+    // Errors and lifecycle notices from the iframe's shim are relayed via
+    // postMessage so they show up in the host's console too.
+    const dbg = msg as { type?: string; msg?: string; extra?: unknown }
+    if (dbg?.type !== 'netgl:debug') return
     if (dbg.extra !== undefined) console.warn(`[host←shim] ${dbg.msg}`, dbg.extra)
     else console.warn(`[host←shim] ${dbg.msg}`)
-    return
-  }
-  if (isNetGLFrameEnd(msg)) {
-    // Concatenate with any unconsumed pending frame instead of overwriting.
-    // If the iframe runs faster than the host's RAF (common during page load
-    // or when JS is busy), multiple frame-ends arrive before we drain. The
-    // earlier batch contains handle creations (createTexture, createProgram,
-    // getUniformLocation) that later frames REFERENCE — dropping it strands
-    // those handles and the receiver throws "unknown handle id N" later when
-    // a fresher frame tries to use them.
-    if (pendingFrame) pendingFrame.push(...inFlightFrame)
-    else pendingFrame = inFlightFrame
-    inFlightFrame = []
-    return
-  }
-  if (isNetGLCall(msg)) {
-    inFlightFrame.push(msg)
-    return
-  }
-  const ready = msg as unknown as NetGLReady | null
-  if (ready && ready.type === 'netgl:ready') {
-    iframeAnchor = ready.anchor
-    iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
-    iframeReady = true
   }
 })
+const iframeBg = new THREE.Color('#000000')
 
 const controls = attachBasicFlyControls(hostCamera, renderer.domElement)
 
@@ -228,38 +151,23 @@ const frame = (): void => {
   renderer.clear(true, true, true)
   hostLocalEndpoint.renderAsSource(renderer, hostCamera)
 
-  if (iframeReady && iframeAnchor) {
+  const ready = receiver.ready
+  if (ready) {
+    iframeBg.setRGB(ready.background.r, ready.background.g, ready.background.b)
     stencilBg.copy(iframeBg)
     stencilMask.update(hostAnchorMesh, hostCamera, stencilBg)
     renderer.render(stencilMask.scene, stencilMask.camera)
     renderer.clearDepth()
+    receiver.drain()
+    renderer.resetState()
 
-    // Compute the door's pixel rect on the host canvas (camera-projected
-    // bounding box of the anchor mesh). The NetGL replay reads this via
-    // `remapScreenViewport` so the iframe's fullscreen screen-target
-    // viewport calls land inside the door instead of overdrawing the
-    // whole canvas.
-    const pixelRatio = renderer.getPixelRatio()
-    const cw = Math.floor(window.innerWidth * pixelRatio)
-    const ch = Math.floor(window.innerHeight * pixelRatio)
-    currentDoorRect = portalScreenRect(
-      hostAnchorMesh,
-      hostCamera,
-      { width: cw, height: ch }
-    )
-
-    let batch: NetGLCall[] | null = pendingFrame
-    if (batch) {
-      pendingFrame = null
-      lastFrame = batch
-    } else {
-      batch = lastFrame
-    }
-    if (batch) {
-      for (let i = 0; i < batch.length; i += 1) netglReplay(batch[i])
-      renderer.resetState()
-    }
-
+    // Carry the host camera through the door. `scale` makes the door the
+    // size of celestiary's announced window (its anchor's halfWidth), so a
+    // step here is proportionally far there and the parallax is right.
+    const source = hostLocalEndpoint.getAnchor()
+    const scale = ready.anchor.halfWidth && source.halfWidth
+      ? ready.anchor.halfWidth / source.halfWidth
+      : 1
     hostCamera.getWorldPosition(camPos)
     camFwd.set(0, 0, -1).applyQuaternion(hostCamera.quaternion)
     camUp.set(0, 1, 0).applyQuaternion(hostCamera.quaternion)
@@ -269,20 +177,26 @@ const frame = (): void => {
         forward: [camFwd.x, camFwd.y, camFwd.z],
         up: [camUp.x, camUp.y, camUp.z]
       },
-      { source: hostLocalEndpoint.getAnchor(), target: iframeAnchor }
+      {
+        source,
+        // portal-netgl's anchor uses readonly tuples; portal-core's doesn't.
+        target: {
+          position: [...ready.anchor.position],
+          normal: [...ready.anchor.normal],
+          up: [...ready.anchor.up]
+        },
+        scale
+      }
     )
 
-    const projection: Mat4 = Array.from(hostCamera.projectionMatrix.elements)
-    const width = Math.max(1, cw)
-    const height = Math.max(1, ch)
-
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2())
     transport.post({
       type: 'netgl:setPose',
       pose: coupled as PortalPose,
-      projection,
-      viewport: { width, height },
+      projection: Array.from(hostCamera.projectionMatrix.elements) as Mat4,
+      viewport: { width: Math.max(1, size.x), height: Math.max(1, size.y) },
       time
-    } as unknown as Parameters<typeof transport.post>[0])
+    })
   }
 
   requestAnimationFrame(frame)

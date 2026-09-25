@@ -38,7 +38,7 @@
 // own framework's state cache (three: `renderer.resetState()`).
 
 import { isNetGLCall, isNetGLFrameEnd, type NetGLCall } from './messages'
-import type { NetGLReadyMessage } from './guest-context'
+import type { NetGLReadyAckMessage, NetGLReadyMessage } from './guest-context'
 import type { NetGLTransport } from './renderer'
 import { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
 
@@ -122,8 +122,14 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     }
     const typed = msg as { type?: unknown }
     if (typed.type === 'netgl:ready') {
-      ready = msg as NetGLReadyMessage
-      config.onReady?.(ready)
+      // Always ack (the guest re-announces until it hears one), but only
+      // surface the first announcement.
+      const ack: NetGLReadyAckMessage = { type: 'netgl:ready-ack' }
+      config.transport.post(ack)
+      if (!ready) {
+        ready = msg as NetGLReadyMessage
+        config.onReady?.(ready)
+      }
       return
     }
     config.onControl?.(msg)

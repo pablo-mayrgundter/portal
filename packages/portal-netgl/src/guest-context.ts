@@ -23,7 +23,13 @@ import { makeNetGLRecorderSession } from './recorder'
 import type { NetGLTransport } from './renderer'
 import { windowTransport } from './window-transport'
 
-/** Outbound handshake: guest announces its anchor + background. */
+/**
+ * Outbound handshake: guest announces its anchor + background. Re-sent every
+ * READY_RESEND_MS until the host answers with `netgl:ready-ack` — the guest
+ * iframe's script can run before the host page has attached its listener,
+ * and a single missed announcement would leave the host drawing no door at
+ * all while guest frames stream in unused.
+ */
 export type NetGLReadyMessage = {
   type: 'netgl:ready'
   anchor: PortalAnchor
@@ -64,6 +70,11 @@ export type NetGLGuestContext = {
   announce(anchor: PortalAnchor, background?: ColorRGB): void
 }
 
+/** Host → guest: the `netgl:ready` handshake arrived. */
+export type NetGLReadyAckMessage = { type: 'netgl:ready-ack' }
+
+const READY_RESEND_MS = 500
+
 export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): NetGLGuestContext => {
   const {
     canvas = defaultShadowCanvas(),
@@ -94,6 +105,12 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
     announce(anchor, background = { r: 0, g: 0, b: 0 }) {
       const ready: NetGLReadyMessage = { type: 'netgl:ready', anchor, background }
       transport.post(ready)
+      const timer = setInterval(() => transport.post(ready), READY_RESEND_MS)
+      const unsubscribe = transport.onMessage((msg) => {
+        if ((msg as { type?: unknown }).type !== 'netgl:ready-ack') return
+        clearInterval(timer)
+        unsubscribe()
+      })
     }
   }
 }

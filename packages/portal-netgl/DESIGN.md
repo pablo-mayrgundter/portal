@@ -159,9 +159,15 @@ into an offscreen target and composite later (celestiary does).
 ## Composition modes
 
 - **Door** (host-netgl-demo, -celestiary, -cesium `?mode=door`): a
-  rectangular stencil mask in the host scene, the guest's full-canvas
-  viewport cover-fit to the door's pixel rect, the guest flying its own
-  camera (or a coupled one, scale permitting).
+  rectangular stencil mask in the host scene, and the guest rendering the
+  host camera carried through the door (`couplePoseAcrossPortal`, with
+  `scale` when the two worlds differ in scale) at the host's field of
+  view, full screen. The door is then a window: walk to its left and look
+  back, and the guest's scene slides out past the door's left edge.
+  An earlier version cover-fit a guest flying its own camera into the
+  door's screen rect instead — a picture in a frame, whose content slid
+  the wrong way as you walked past. Cover-fit (below) is only right for a
+  guest that can't take a camera.
 - **In place** (host-netgl-cesium `?mode=earth`): the guest renders the
   same view as the host, camera-coupled, and a shape stencil marks where
   its pixels belong. For a Cesium Earth: the host draws its scene without
@@ -203,6 +209,12 @@ into an offscreen target and composite later (celestiary does).
 - **Stale re-runs skip uploads.** When no new guest frame arrived, the
   host re-runs the last one; it now skips creations and uploads, or a
   slow guest streaming tiles re-uploads every tile every host frame.
+- **The ready handshake is re-sent until acked.** A guest iframe's script
+  can run before the host page attaches its message listener. A single
+  `netgl:ready` then goes nowhere, and the host never draws the door
+  while guest frames stream in unused — which is why the celestiary demo
+  sometimes showed nothing at all. `announce()` now repeats every 500 ms
+  until the host receiver answers `netgl:ready-ack`.
 - **A frame that deletes an object is never re-run.** Cesium's first
   frame creates, uses and deletes a scratch framebuffer. Re-running that
   frame bound the deleted FBO (which fails), so the textures meant for it
@@ -421,12 +433,6 @@ unchanged.
   `getExtension` (`WEBGL_multi_draw`, `OVR_multiview2`, ...) bypass the
   recorder. Wrap extension objects in their own Proxy when a guest needs
   one.
-
-- **Coordinate-scale coupling.** `couplePoseAcrossPortal` assumes both
-  sides use comparable scales. Embedding celestiary (sun radius ~7×10⁸ m)
-  in a meter-scale host puts the embedded camera inside the sun on the
-  default coupling. Real fix: per-target affine scaling at the coupling
-  layer.
 
 - **Encoder coverage long-tail.** `HTMLImageElement` /
   `HTMLCanvasElement` / `HTMLVideoElement` / `ImageBitmap` all flow

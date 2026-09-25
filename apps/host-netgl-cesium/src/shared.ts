@@ -12,6 +12,23 @@ import type { CesiumError, CesiumRendered, CesiumTick } from './protocol'
 
 const TICK_RESEND_MS = 1000
 
+/**
+ * Viewport remap for a guest that renders the host's own view (camera-
+ * coupled, same projection): its screen maps 1:1 onto the host canvas.
+ * Guest and host canvases have the same CSS size but may differ in pixel
+ * density, so scale by the ratio of drawing-buffer sizes.
+ */
+export const fillRemap = (getShared: () => HostShared) =>
+  (x: number, y: number, w: number, h: number): [number, number, number, number] | null => {
+    const s = getShared()
+    const g = s.guestSize
+    if (!g) return null
+    const c = s.canvasSize()
+    const sx = c.width / g.width
+    const sy = c.height / g.height
+    return [Math.round(x * sx), Math.round(y * sy), Math.round(w * sx), Math.round(h * sy)]
+  }
+
 export type HostShared = {
   renderer: THREE.WebGLRenderer
   receiver: NetGLHostReceiver
