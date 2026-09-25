@@ -25,7 +25,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { PORTAL_STENCIL_REF } from '@portal/portal-three'
-import { makeHostShared } from './shared'
+import { fillRemap, makeHostShared } from './shared'
 
 // Host units: 1 unit = 1000 km.
 const METRES_PER_UNIT = 1e6
@@ -49,17 +49,7 @@ export const runEarthMode = (opts: {
   const shared = makeHostShared({
     ...opts,
     replay: (getShared) => ({
-      // Guest and host canvases are the same CSS size but may differ in
-      // pixel density; stretch the guest's screen viewport to ours.
-      remapScreenViewport: (x, y, w, h) => {
-        const s = getShared()
-        const g = s.guestSize
-        if (!g) return null
-        const c = s.canvasSize()
-        const sx = c.width / g.width
-        const sy = c.height / g.height
-        return [Math.round(x * sx), Math.round(y * sy), Math.round(w * sx), Math.round(h * sy)]
-      },
+      remapScreenViewport: fillRemap(getShared),
       screen: {
         stencil: { ref: PORTAL_STENCIL_REF },
         blend: 'premultiplied-over',

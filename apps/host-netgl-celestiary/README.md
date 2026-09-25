@@ -47,6 +47,16 @@ custom-shader atmosphere post-process, full state-cache reset between
 frames) all crosses the wire and composes through the door's stencil
 mask, with the host's worldA preserved everywhere outside.
 
+The door is a window, not a picture. The host carries its camera through
+the door with `couplePoseAcrossPortal({ …, scale })`, where `scale` is the
+ratio of celestiary's announced window (1e11 m wide, 4e11 m from the Sun;
+see `anchor` in `portal-shim.js`) to the 2.6 m door, about 3.8e10. The
+shim drives celestiary's camera from that pose at render time, converted
+into its CameraPlatform's frame, and takes the host's field of view but
+keeps celestiary's own near/far. Walk to the left of the door and look back
+through it, and celestiary's sky slides out past the door's left edge.
+`?pose=off` on the iframe URL lets celestiary fly its own camera instead.
+
 ## Adoption findings (general for NetGL embedding)
 
 These came out of bringing celestiary up and are likely true for any
@@ -90,14 +100,6 @@ The v0 GL-coverage milestone landed in this PR. The visuals are
 recognisably celestiary's universe through the door, but several
 portal-architecture pieces are deliberately not solved here:
 
-- **Coordinate-scale coupling.** `couplePoseAcrossPortal` assumes both
-  sides of the door use comparable scales. Host scenes here are
-  meter-scale (~5 m room); celestiary is astronomy-scale (sun radius
-  ~7×10⁸ m). The unscaled coupled pose teleports celestiary's camera
-  into the sun and gives a uniform-coloured frame. The shim defaults
-  to *not* applying the host's pose for that reason (use
-  `?pose=on` to opt in for debugging). Real fix: a per-target scaling
-  layer in the coupling math.
 - **Encoder coverage beyond `HTMLImageElement`.** `HTMLCanvasElement`,
   `HTMLVideoElement`, `ImageBitmap` all go through the same ImageData
   path and are theoretically handled, but only `HTMLImageElement` has

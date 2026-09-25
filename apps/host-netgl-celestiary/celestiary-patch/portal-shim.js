@@ -9,8 +9,9 @@
 //      no two-three.js version mismatch.
 //   2. Installs a postMessage transport to `parent` for shipping recorded GL
 //      calls back to the host as `NetGLCall` / `NetGLFrameEnd` messages.
-//   3. Listens for `netgl:setPose` and writes the pose into celestiary's
-//      camera (via `window.camera`, set by ThreeUI.js:74).
+//   3. Listens for `netgl:setPose` and drives celestiary's camera from it
+//      (via `window.camera`, set by ThreeUI.js:74), so the door behaves as
+//      a window onto celestiary rather than a picture of it.
 //   4. Wraps `renderer.setAnimationLoop` so a `netgl:frame-end` marker is
 //      posted after each RAF callback completes (so the host can replay an
 //      entire celestiary frame as one atomic batch).
@@ -37,15 +38,14 @@ const portalRequested = portalParams.get('portal') === '1'
 // being rendered to the host canvas. Useful for isolating "is the atm quad
 // drawing at all" from "is the stencil masking it off".
 const noStencil = portalParams.get('nostencil') === '1'
-// `?pose=on` — also write the host's coupled pose into celestiary's camera
-// on every setPose message. Default off: celestiary uses its own startup
-// camera position (z = SUN_RADIUS_METER * 1e3, looking at origin), which
-// frames the solar system at a sane scale. The host scene is meter-scale
-// (room/door ~5 m); celestiary is astronomy-scale (sun radius ~7e8 m), so
-// the unscaled coupled pose puts the camera inside the sun and you see
-// uniform-color frames. Until we add a per-target scaling layer to the
-// pose coupling, default to ignoring it.
-const applyPoseFlag = portalParams.get('pose') === 'on'
+// `?pose=off` — ignore the host's coupled pose and let celestiary fly its
+// own camera (the door then shows a fixed picture, with no parallax). By
+// default the host's camera drives celestiary's: the host scales the
+// coupling by (our anchor's halfWidth / its door's halfWidth), so its
+// metre-scale door opens onto an astronomy-scale window (see `anchor`).
+const applyPoseFlag = portalParams.get('pose') !== 'off'
+// Latest host pose, applied at render time (see renderer.render patch).
+let latestPose = null
 
 // Minimal diagnostic relay: posts `[shim] <msg>` to the parent so the
 // host's console shows both sides of the wire. Only used for activation
@@ -103,8 +103,6 @@ function installPortalShim() {
   const seenRenderErrors = new Set()
   const recorder = makeRecorder(shadow, (call) => transport.post(call))
 
-  let cachedRenderer = null
-
   window.__portalCreateRenderer = (container, backgroundColor, opts) => {
     const {WebGLRenderer} = opts
     // Build a WebGLRenderer with the recorder as its GL context and the shadow
@@ -158,6 +156,10 @@ function installPortalShim() {
     //      reason; otherwise three issues a clear-color blat over everything.
     const origRender = renderer.render.bind(renderer)
     renderer.render = function (scene, camera) {
+      // Apply the host's pose at render time, not on message arrival:
+      // celestiary's frame (controls, tweens, asymptotic zoom, dynamic near
+      // plane) rewrites the camera every frame before rendering.
+      if (latestPose && camera === window.camera) applyPose(latestPose, camera)
       const savedTarget = renderer.getRenderTarget()
       renderer.resetState()
       if (savedTarget !== null) renderer.setRenderTarget(savedTarget)
@@ -205,7 +207,6 @@ function installPortalShim() {
       })
     }
 
-    cachedRenderer = renderer
     return renderer
   }
 
@@ -217,52 +218,70 @@ function installPortalShim() {
   transport.onMessage((msg) => {
     if (!msg || typeof msg !== 'object') return
     if (msg.type === 'netgl:setPose' && applyPoseFlag) {
-      applyPose(msg, cachedRenderer)
+      latestPose = msg
+      // Host owns the viewpoint now.
+      const ui = window.c?.ui
+      if (ui?.controls) ui.controls.enabled = false
     }
   })
 
-  // Announce ready immediately. Anchor + background are fixed for celestiary;
-  // we use a meter-scale door positioned at celestiary's startup-camera
-  // distance (~SUN_RADIUS_METER * 1e3 ≈ 7e11 m), so a 1e11 m door fills the
-  // visible field. Host can override via repositioning if needed.
+  // Announce ready immediately. The window celestiary is seen through: 1e11 m
+  // wide, 4e11 m from the Sun, facing it. With the host's 2.6 m door that's
+  // a scale of ~3.8e10, which puts a viewer standing 5.5 m from the door
+  // about 6e11 m from the Sun — celestiary's own startup framing — and
+  // keeps the Sun well behind the window plane, so it parallaxes like the
+  // rest of the scene instead of sitting on the glass.
   const anchor = {
-    position: [0, 0, 0],
+    position: [0, 0, 4e11],
     normal: [0, 0, -1],
     up: [0, 1, 0],
     halfWidth: 5e10,
     halfHeight: 5e10,
   }
-  transport.post({
-    type: 'netgl:ready',
-    anchor,
-    background: {r: 0, g: 0, b: 0},
+  // Re-announce until the host acks: this script can run before the host
+  // page has attached its message listener, and a single missed
+  // announcement leaves the host with no door to draw. Any setPose also
+  // proves the host heard us (it only sends them once ready).
+  const ready = {type: 'netgl:ready', anchor, background: {r: 0, g: 0, b: 0}}
+  transport.post(ready)
+  const readyTimer = setInterval(() => transport.post(ready), 500)
+  const stopAnnouncing = transport.onMessage((msg) => {
+    if (msg?.type !== 'netgl:ready-ack' && msg?.type !== 'netgl:setPose') return
+    clearInterval(readyTimer)
+    stopAnnouncing()
   })
 }
 
-/** Apply a netgl:setPose to celestiary's camera + suppress TrackballControls. */
-function applyPose(msg, renderer) {
-  const camera = window.camera
-  if (!camera) return
-  const ui = window.c?.ui
-  // Disable controls + animation drift so host owns viewpoint.
-  if (ui?.controls) ui.controls.enabled = false
-  camera.position.set(msg.pose.position[0], msg.pose.position[1], msg.pose.position[2])
-  if (msg.pose.forward) {
-    const t = new (camera.position.constructor)(
-      msg.pose.position[0] + msg.pose.forward[0],
-      msg.pose.position[1] + msg.pose.forward[1],
-      msg.pose.position[2] + msg.pose.forward[2]
-    )
-    camera.lookAt(t)
+/**
+ * Drive celestiary's camera from a netgl:setPose. The pose is in world
+ * coordinates, but celestiary's camera is parented to a moving
+ * CameraPlatform, so convert to the platform's frame before writing.
+ *
+ * Only the host's field of view is taken from its projection: its near/far
+ * are metre-scale (0.02–200 m) and would clip the whole solar system, so
+ * celestiary keeps its own (it adapts `near` to altitude every frame).
+ */
+function applyPose(msg, camera) {
+  const {position: p, forward: f, up: u} = msg.pose
+  if (!f || !u) return
+  const Vec3 = camera.position.constructor
+  const Mat4 = camera.matrix.constructor
+  const eye = new Vec3(p[0], p[1], p[2])
+  const target = new Vec3(p[0] + f[0], p[1] + f[1], p[2] + f[2])
+  const world = new Mat4().lookAt(eye, target, new Vec3(u[0], u[1], u[2])).setPosition(eye)
+  const parent = camera.parent
+  if (parent) {
+    parent.updateMatrixWorld(true)
+    world.premultiply(new Mat4().copy(parent.matrixWorld).invert())
   }
-  if (msg.pose.up) camera.up.set(msg.pose.up[0], msg.pose.up[1], msg.pose.up[2])
+  world.decompose(camera.position, camera.quaternion, camera.scale)
+  camera.up.set(u[0], u[1], u[2])
   camera.updateMatrixWorld(true)
-  camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
-  // Use the host's projection verbatim so FOV / near / far match host framing.
-  camera.projectionMatrix.fromArray(msg.projection)
-  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
-  if (renderer && msg.viewport) {
-    renderer.setSize(msg.viewport.width, msg.viewport.height, false)
+  // projection[5] = 1 / tan(fovy / 2).
+  const fovy = 2 * Math.atan(1 / msg.projection[5]) * 180 / Math.PI
+  if (Math.abs(camera.fov - fovy) > 1e-6) {
+    camera.fov = fovy
+    camera.updateProjectionMatrix()
   }
 }
 

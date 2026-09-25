@@ -136,6 +136,14 @@ export type PortalMessage =
 export type CoupledPoseConfig = {
   source: PortalAnchor
   target: PortalAnchor
+  /**
+   * Target-world units per source-world unit. Default 1. Lets a metre-scale
+   * door open onto a world at another scale — e.g. a 2.6 m door as a
+   * 10,000 km window onto a globe — while keeping the parallax a real window
+   * has: the viewer's offset from the source door is carried across the
+   * portal and multiplied by `scale`; directions are unchanged.
+   */
+  scale?: number
 }
 
 type Basis = {
@@ -183,7 +191,7 @@ export const couplePoseAcrossPortal = (pose: PortalPose, config: CoupledPoseConf
 
   const relative = sub(pose.position, config.source.position)
   const positionInSource = project(relative, sourceBasis)
-  const positionMapped = mirrorAcrossPortal(positionInSource)
+  const positionMapped = scale(mirrorAcrossPortal(positionInSource), config.scale ?? 1)
 
   const result: PortalPose = {
     position: add(config.target.position, unproject(positionMapped, targetBasis))
