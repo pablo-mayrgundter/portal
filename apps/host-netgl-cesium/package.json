@@ -1,0 +1,27 @@
+{
+  "name": "@portal/host-netgl-cesium",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "copy-cesium": "node ./scripts/copy-cesium.mjs",
+    "predev": "npm run copy-cesium",
+    "dev": "vite",
+    "prebuild": "npm run copy-cesium",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@portal/portal-controls": "0.1.0",
+    "@portal/portal-core": "0.1.0",
+    "@portal/portal-three": "0.1.0",
+    "@pablo-mayrgundter/portal-netgl": "0.1.0",
+    "cesium": "1.145.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.184.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.7"
+  }
+}

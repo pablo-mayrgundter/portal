@@ -7,7 +7,7 @@
 // /<key>/ siblings. Drawer URLs are relative so they work under any base
 // (e.g. /portal/, /portal/pr-preview/pr-19/).
 
-export type NavDemoKey = 'three' | 'iframe' | 'worker' | 'netgl' | 'netgl-celestiary'
+export type NavDemoKey = 'three' | 'iframe' | 'worker' | 'netgl' | 'netgl-celestiary' | 'netgl-cesium'
 
 type DemoEntry = {
   key: NavDemoKey
@@ -40,6 +40,11 @@ const DEMOS: readonly DemoEntry[] = [
     key: 'netgl-celestiary',
     label: 'NetGL + celestiary',
     description: 'NetGL carrying celestiary (textured planets, custom shaders, RT post-processing).'
+  },
+  {
+    key: 'netgl-cesium',
+    label: 'NetGL + Cesium',
+    description: 'A Cesium globe composited into a three.js host: through a door, or in place of an Earth sphere.'
   }
 ] as const
 

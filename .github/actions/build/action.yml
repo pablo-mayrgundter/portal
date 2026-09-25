@@ -1,5 +1,5 @@
 name: Build portal demos
-description: Build the demo apps with the given base path and assemble a single dist/ tree. host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary live at /iframe/, /worker/, /netgl/, /netgl-celestiary/ siblings.
+description: Build the demo apps with the given base path and assemble a single dist/ tree. host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary / host-netgl-cesium live at /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/ siblings.
 
 inputs:
   base-path:
@@ -42,6 +42,11 @@ runs:
       shell: bash
       run: npm run build -w @portal/host-netgl-celestiary -- --base=${{ inputs.base-path }}netgl-celestiary/
 
+    - name: Build host-netgl-cesium
+      shell: bash
+      # prebuild copies Cesium's static bundle into public/cesium/.
+      run: npm run build -w @portal/host-netgl-cesium -- --base=${{ inputs.base-path }}netgl-cesium/
+
     - name: Assemble dist/
       shell: bash
       run: |
@@ -52,3 +57,4 @@ runs:
         cp -r apps/host-worker-demo/dist          dist/worker
         cp -r apps/host-netgl-demo/dist           dist/netgl
         cp -r apps/host-netgl-celestiary/dist     dist/netgl-celestiary
+        cp -r apps/host-netgl-cesium/dist         dist/netgl-cesium

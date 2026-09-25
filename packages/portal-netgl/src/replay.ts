@@ -5,6 +5,7 @@
 // etc. on this side of the wire.
 
 import type { NetGLCall, NetGLEncodedValue } from './messages'
+import { makeScreenPolicyState, type NetGLScreenPolicy } from './screen-policy'
 
 type TypedArrayCtor = new (
   buffer: ArrayBuffer,
@@ -24,7 +25,16 @@ const TYPED_ARRAY_CTORS: Record<string, TypedArrayCtor> = {
   Float64Array
 }
 
-export type NetGLReplay = (call: NetGLCall) => void
+export type NetGLReplay = ((call: NetGLCall) => void) & {
+  /**
+   * Tell the replay the host has touched the shared GL context since the
+   * last replayed call (its own render, stencil-mask paint, clearDepth).
+   * The replay forgets which screen-policy overrides it believes are
+   * applied and re-applies them before the next draw. Call before
+   * draining each batch. Cheap; no GL calls.
+   */
+  invalidate(): void
+}
 
 export type NetGLReplayConfig = {
   /**
@@ -50,6 +60,30 @@ export type NetGLReplayConfig = {
   ) => readonly [number, number, number, number] | null
 
   /**
+   * Compositing overrides for draws that target the host's default
+   * framebuffer: portal stencil, premultiplied blend, clear filtering.
+   * Moves the "don't paint outside the door / don't wipe the host" rules
+   * out of each framework's guest shim and into the host. See
+   * `screen-policy.ts`. Default: no overrides.
+   */
+  screen?: NetGLScreenPolicy
+
+  /**
+   * Redirect the guest's default framebuffer to a host framebuffer. When
+   * set, every `bindFramebuffer(target, null)` the guest issues binds this
+   * instead (resolved per call, so it can follow a resizing render
+   * target), and `BACK` in drawBuffers / readBuffer becomes
+   * `COLOR_ATTACHMENT0`. Everything else still treats those draws as
+   * "screen" draws: viewport remap and screen policy apply.
+   *
+   * For hosts that render their scene into an offscreen target and
+   * composite it later — celestiary renders into an RT and then runs an
+   * atmosphere pass to the canvas — the guest must land in that RT, next
+   * to the host's depth and stencil, not on the canvas.
+   */
+  screenFramebuffer?: () => WebGLFramebuffer | null
+
+  /**
    * @internal — debug-only hook with no API stability guarantee.
    *
    * Called with a one-line description of every viewport, scissor, and
@@ -66,6 +100,27 @@ export type NetGLReplayConfig = {
 // uniform). Values are from the GL spec, identical across WebGL1/WebGL2.
 const GL_FRAMEBUFFER = 0x8D40
 const GL_DRAW_FRAMEBUFFER = 0x8CA9
+const GL_SCISSOR_TEST = 0x0C11
+const GL_DEPTH_BUFFER_BIT = 0x0100
+const GL_DEPTH = 0x1801
+const GL_DEPTH_STENCIL = 0x84F9
+const GL_BACK = 0x0405
+const GL_COLOR_ATTACHMENT0 = 0x8CE0
+
+type Rect = readonly [number, number, number, number]
+
+const DRAW_CALLS = new Set<string>([
+  'drawArrays',
+  'drawElements',
+  'drawArraysInstanced',
+  'drawElementsInstanced',
+  'drawRangeElements',
+  'clear',
+  'clearBufferfv',
+  'clearBufferiv',
+  'clearBufferuiv',
+  'clearBufferfi'
+])
 
 export const makeNetGLReplay = (
   receiver: WebGL2RenderingContext,
@@ -88,7 +143,42 @@ export const makeNetGLReplay = (
   // setRenderTarget(rt) wants viewport = (0,0,W,H), three's cache says
   // "same as before" and skips, so the RT render runs at the door-rect
   // viewport on the host, populating only a tiny region of the RT.)
-  let lastIntendedViewport: readonly [number, number, number, number] | null = null
+  let lastIntendedViewport: Rect | null = null
+  // The viewport actually applied to the receiver right now (post-remap),
+  // or null if unknown. Used to map scissor rects through the same
+  // transform as the viewport, and to confine screen depth clears.
+  let appliedViewport: Rect | null = null
+  // Scissor, same idea: the sender's intended box, and whether the sender
+  // has SCISSOR_TEST enabled.
+  let lastIntendedScissor: Rect | null = null
+  let scissorTestEnabled = false
+
+  const policy = config.screen ? makeScreenPolicyState(receiver, config.screen) : null
+  const depthOnlyClears = config.screen?.clear === 'depth-only'
+
+  // Map a rect in the sender's intended-viewport space into the applied
+  // (remapped) viewport. Identity when no remap is in effect.
+  const mapRectToApplied = (r: Rect): Rect => {
+    const iv = lastIntendedViewport
+    const av = appliedViewport
+    if (currentDrawFb !== null || !iv || !av || iv[2] === 0 || iv[3] === 0) return r
+    if (iv[0] === av[0] && iv[1] === av[1] && iv[2] === av[2] && iv[3] === av[3]) return r
+    const sx = av[2] / iv[2]
+    const sy = av[3] / iv[3]
+    const x0 = av[0] + (r[0] - iv[0]) * sx
+    const y0 = av[1] + (r[1] - iv[1]) * sy
+    const x1 = av[0] + (r[0] + r[2] - iv[0]) * sx
+    const y1 = av[1] + (r[1] + r[3] - iv[1]) * sy
+    const fx0 = Math.floor(x0)
+    const fy0 = Math.floor(y0)
+    return [fx0, fy0, Math.ceil(x1) - fx0, Math.ceil(y1) - fy0]
+  }
+
+  const reissueScissor = (): void => {
+    if (!lastIntendedScissor) return
+    const [x, y, w, h] = mapRectToApplied(lastIntendedScissor)
+    receiver.scissor(x, y, w, h)
+  }
 
   const decodeArg = (arg: NetGLEncodedValue): unknown => {
     if (arg == null) return null
@@ -118,6 +208,9 @@ export const makeNetGLReplay = (
     if ('__netgl_arraybuffer' in obj) {
       return obj.__netgl_arraybuffer as ArrayBuffer
     }
+    if ('__netgl_imagebitmap' in obj) {
+      return obj.__netgl_imagebitmap as ImageBitmap
+    }
     if ('__netgl_imagedata' in obj) {
       // ImageData envelope: sender converted an HTMLImageElement /
       // HTMLCanvasElement / HTMLVideoElement / ImageBitmap / ImageData to
@@ -133,7 +226,49 @@ export const makeNetGLReplay = (
     throw new Error(`NetGL replay: unknown encoded value shape`)
   }
 
-  return (call: NetGLCall): void => {
+  // Screen clears under the 'depth-only' policy. Returns true if the call
+  // was fully handled (dropped, or executed here) and must not run again.
+  const filterScreenClear = (name: string, args: unknown[]): boolean => {
+    if (name === 'clear') {
+      const mask = (args[0] as number) & GL_DEPTH_BUFFER_BIT
+      if (mask === 0) return true
+      policy?.beforeDraw(true)
+      clearConfined(() => receiver.clear(mask))
+      return true
+    }
+    if (name === 'clearBufferfv' && args[0] === GL_DEPTH) {
+      policy?.beforeDraw(true)
+      clearConfined(() => receiver.clearBufferfv(GL_DEPTH, args[1] as number, args[2] as Float32List))
+      return true
+    }
+    if (name === 'clearBufferfi' && args[0] === GL_DEPTH_STENCIL) {
+      const depth = args[2] as number
+      policy?.beforeDraw(true)
+      clearConfined(() => receiver.clearBufferfv(GL_DEPTH, 0, [depth]))
+      return true
+    }
+    // Colour / stencil clearBuffer* on the screen: dropped.
+    if (name.startsWith('clearBuffer')) return true
+    // Not a clear: a draw call, which the caller executes.
+    return false
+  }
+
+  // Run a clear with the scissor confined to the applied viewport, unless
+  // the sender already has its own (remapped) scissor in effect.
+  const clearConfined = (doClear: () => void): void => {
+    if (scissorTestEnabled || !appliedViewport) {
+      doClear()
+      return
+    }
+    const [x, y, w, h] = appliedViewport
+    receiver.enable(GL_SCISSOR_TEST)
+    receiver.scissor(x, y, w, h)
+    doClear()
+    receiver.disable(GL_SCISSOR_TEST)
+    reissueScissor()
+  }
+
+  const replay = (call: NetGLCall): void => {
     let decodedArgs: unknown[]
     try {
       decodedArgs = call.args.map(decodeArg)
@@ -169,6 +304,17 @@ export const makeNetGLReplay = (
         if (newFb !== currentDrawFb) didBindTransition = true
         currentDrawFb = newFb
       }
+      if (decodedArgs[1] === null && config.screenFramebuffer) {
+        decodedArgs = [target, config.screenFramebuffer()]
+      }
+    } else if (config.screenFramebuffer) {
+      // BACK names the default framebuffer's colour buffer; on the host's
+      // stand-in FBO that's attachment 0.
+      if (call.name === 'drawBuffers') {
+        decodedArgs = [(decodedArgs[0] as number[]).map((b) => (b === GL_BACK ? GL_COLOR_ATTACHMENT0 : b))]
+      } else if (call.name === 'readBuffer' && decodedArgs[0] === GL_BACK) {
+        decodedArgs = [GL_COLOR_ATTACHMENT0]
+      }
     }
 
     // Door-fit viewport remap: when the sender targets the host canvas
@@ -186,6 +332,24 @@ export const makeNetGLReplay = (
           decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
         }
       }
+      appliedViewport = decodedArgs as unknown as Rect
+    } else if (call.name === 'scissor') {
+      // Scissor boxes are in the same pixel space as the viewport, so a
+      // screen scissor has to follow the viewport remap or it clips the
+      // guest's draws to where they WOULD have landed on its own canvas.
+      const r = decodedArgs as unknown as Rect
+      lastIntendedScissor = [r[0], r[1], r[2], r[3]]
+      decodedArgs = [...mapRectToApplied(lastIntendedScissor)]
+    } else if ((call.name === 'enable' || call.name === 'disable') && decodedArgs[0] === GL_SCISSOR_TEST) {
+      scissorTestEnabled = call.name === 'enable'
+    }
+
+    if (policy && policy.intercept(call.name, decodedArgs)) return
+
+    if (DRAW_CALLS.has(call.name)) {
+      const toScreen = currentDrawFb === null
+      if (toScreen && depthOnlyClears && filterScreenClear(call.name, decodedArgs)) return
+      policy?.beforeDraw(toScreen)
     }
 
     // Diagnostic: dump every viewport + scissor + scissor-enable call with
@@ -214,6 +378,11 @@ export const makeNetGLReplay = (
     }
     const result = method.apply(receiver, decodedArgs)
 
+    // A remapped screen viewport moves the scissor mapping with it.
+    if (call.name === 'viewport' && currentDrawFb === null && config.remapScreenViewport) {
+      reissueScissor()
+    }
+
     // After a bindFramebuffer transition, re-issue gl.viewport with the
     // appropriate rect for the new binding. See the comment on
     // `lastIntendedViewport` above for why this is needed.
@@ -230,6 +399,8 @@ export const makeNetGLReplay = (
       const rw = remapped ? remapped[2] : w
       const rh = remapped ? remapped[3] : h
       receiver.viewport(rx, ry, rw, rh)
+      appliedViewport = [rx, ry, rw, rh]
+      reissueScissor()
       if (config.__debugTraceViewport) {
         config.__debugTraceViewport(
           `post-bind re-issue viewport(${rx},${ry},${rw}x${rh}) drawFb=${currentDrawFb ? 'RT' : 'null'}`
@@ -245,4 +416,10 @@ export const makeNetGLReplay = (
       idToHandle.set(call.returnId, result)
     }
   }
+
+  return Object.assign(replay, {
+    invalidate() {
+      policy?.invalidate()
+    }
+  })
 }

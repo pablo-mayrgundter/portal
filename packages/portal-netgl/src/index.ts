@@ -10,8 +10,32 @@ export {
   type NetGLPortalGuestHandle,
   type NetGLSetPoseMessage
 } from './guest'
-export { makeNetGLRecorder } from './recorder'
+export {
+  makeNetGLRecorder,
+  makeNetGLRecorderSession,
+  type NetGLRecorderSession
+} from './recorder'
 export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
+export type { NetGLScreenPolicy } from './screen-policy'
+export { captureCheckpoint, makeBindingTracker, type BindingTracker } from './checkpoint'
+export {
+  makeNetGLGuestContext,
+  type NetGLGuestContext,
+  type NetGLGuestContextConfig,
+  type NetGLReadyMessage
+} from './guest-context'
+export {
+  makeNetGLHostReceiver,
+  type NetGLHostReceiver,
+  type NetGLHostReceiverConfig
+} from './host-receiver'
+export {
+  makeNetGLCesiumGuest,
+  type NetGLCesiumGuest,
+  type NetGLCesiumGuestConfig,
+  type CesiumContextOptions,
+  type CesiumSceneLike
+} from './frameworks/cesium'
 export {
   createNetGLRenderer,
   attachNetGLReceiver,

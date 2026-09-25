@@ -4,8 +4,13 @@ Command-stream WebGL portals: route a three.js renderer's GL calls over a
 `postMessage` transport so an iframe's draws compose into the host canvas
 without a bitmap round-trip.
 
-Two adoption modes:
+Adoption modes:
 
+- **A Cesium app** (see [Cesium guest](#makenetglcesiumguest--cesium-guest)):
+  pass `guest.contextOptions` to your Viewer and call `guest.attach(scene)`.
+- **Any other WebGL2 framework**: `makeNetGLGuestContext` gives you a
+  recorder context to hand the framework and an `endFrame()` to call after
+  each frame. That's the whole shim.
 - **Embedded app authors own their own renderer** (e.g. integrating
   celestiary, bldrs, an existing three.js app into a portal): use
   `makeNetGLPortalGuest`. The factory builds a recorder-wrapped
@@ -84,13 +89,63 @@ const target = makeNetGLPortalTarget({
 target.start()
 ```
 
+## `makeNetGLCesiumGuest` — Cesium guest
+
+```js
+import { makeNetGLCesiumGuest } from '@pablo-mayrgundter/portal-netgl'
+
+const guest = makeNetGLCesiumGuest({
+  onMessage: (msg) => { /* host → guest control, e.g. camera ticks */ }
+})
+const viewer = new Cesium.Viewer('cesiumContainer', {
+  contextOptions: guest.contextOptions,
+  // ...your usual options
+})
+guest.attach(viewer.scene)
+```
+
+Cesium calls `contextOptions.getWebGLStub` instead of `canvas.getContext`;
+the shim returns a NetGL recorder whose shadow lives on Cesium's own
+canvas, and posts a frame-end after every `scene.postRender`. Cesium is
+not a dependency — the shim is typed structurally. Worked example:
+`apps/host-netgl-cesium/`.
+
+## `makeNetGLHostReceiver` — host side
+
+```js
+import { makeNetGLHostReceiver, windowTransport } from '@pablo-mayrgundter/portal-netgl'
+
+const receiver = makeNetGLHostReceiver({
+  gl: renderer.getContext(),
+  transport: windowTransport({ output: iframe.contentWindow, inputFilter: iframe.contentWindow }),
+  replay: {
+    remapScreenViewport: (x, y, w, h) => doorRect,   // where guest screen draws land
+    screen: { stencil: { ref: 1 }, clear: 'depth-only' }
+  }
+})
+
+// In your frame, after drawing your scene and the portal stencil mask:
+renderer.clearDepth()
+receiver.drain()
+renderer.resetState()   // your framework's state cache is stale now
+```
+
+The `screen` policy keeps the guest's screen draws inside the stencil mask
+and stops it clearing your canvas, without the guest knowing it's
+embedded. Options: `stencil`, `clear: 'depth-only'`, `blend:
+'premultiplied-over'`; plus `screenFramebuffer` to land the guest in one of
+your render targets instead of the canvas. See DESIGN.md.
+
 ## Protocol
 
 NetGL is two streams over a single transport:
 
 - **Calls** (sender → receiver): `NetGLCall { name, args, returnId? }`
   for every GL call, plus `NetGLFrameEnd { type: 'netgl:frame-end' }`
-  markers after each frame.
+  markers after each frame. Guests built on `makeNetGLGuestContext`
+  follow each frame-end with a state checkpoint — ordinary calls that
+  restore the guest's GL state — so framework state caches survive the
+  host sharing the context.
 - **Control** (host ↔ guest): `netgl:ready` handshake announcing the
   guest's anchor + background; `netgl:setPose` from the host with the
   coupled camera state.
