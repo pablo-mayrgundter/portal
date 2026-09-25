@@ -63,8 +63,13 @@ jobs:
       - name: Typecheck
         run: npm run check
 
+      # The GL tests run on headless-gl, which needs an X display (and
+      # Mesa's software rasteriser) even offscreen.
+      - name: Install a virtual display for headless-gl
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0
+
       - name: Test
-        run: npm test
+        run: xvfb-run -a npm test
 
       - name: Build portal-netgl
         run: npm run build -w @pablo-mayrgundter/portal-netgl
