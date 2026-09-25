@@ -247,11 +247,12 @@ Celestiary as the host (f1′ = three.js host), Cesium as the guest
    Cesium's clock the simulation time so its lighting matches
    celestiary's sun.
 4. **Same page, not an iframe.** Cesium has no reason to be in an iframe
-   here. An in-process transport (post = synchronous replay into
-   celestiary's context, no structured clone) plus a synchronous render
-   call gives zero lag and no message overhead. Needs: an in-process
-   transport that clones typed arrays at record time (frameworks reuse
-   scratch buffers; postMessage's clone was doing this implicitly).
+   here. `makeNetGLImmediateLink` (0.2.0) is that in-process transport:
+   `link.frame(() => widget.render())` replays each call into the host
+   context as it is recorded — no clone, no latency — and clones + queues
+   whatever the guest records between frames (its checkpoint, async
+   uploads), flushing it at the start of the next frame. Built for
+   celestiary's Cesium Earth layer (celestiary/web CESIUM.md).
 
 ## Layers
 
