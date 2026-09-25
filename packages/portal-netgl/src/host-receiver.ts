@@ -13,9 +13,12 @@
 //   - Frames that complete before the host drains are CONCATENATED, never
 //     dropped: an earlier frame may create handles a later one references.
 //   - If no new frame has completed, the last frame is replayed again so
-//     the door isn't empty for a host frame. Calls that mint handles are
-//     skipped on that re-run — the handles already exist, and re-minting
-//     would orphan (leak) the first GPU object.
+//     the door isn't empty for a host frame. That re-run skips calls that
+//     mint handles (they exist; re-minting would orphan the first GPU
+//     object) and calls that upload data (it's already resident; a slow
+//     guest streaming map tiles would otherwise have every one re-uploaded
+//     on every host frame). Trade-off: a frame that rewrites a resource
+//     between two of its own draws re-runs with the final contents.
 //   - A replay error is reported once per distinct message and the drain
 //     continues with the next call, so one unsupported call can't kill
 //     the host's render loop.
@@ -27,6 +30,29 @@ import { isNetGLCall, isNetGLFrameEnd, type NetGLCall } from './messages'
 import type { NetGLReadyMessage } from './guest-context'
 import type { NetGLTransport } from './renderer'
 import { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
+
+// Skipped when re-running a stale frame: the data is already resident.
+const UPLOADS = new Set<string>([
+  'bufferData',
+  'bufferSubData',
+  'texImage2D',
+  'texSubImage2D',
+  'texImage3D',
+  'texSubImage3D',
+  'compressedTexImage2D',
+  'compressedTexSubImage2D',
+  'compressedTexImage3D',
+  'compressedTexSubImage3D',
+  'texStorage2D',
+  'texStorage3D',
+  'renderbufferStorage',
+  'renderbufferStorageMultisample',
+  'generateMipmap',
+  'shaderSource',
+  'compileShader',
+  'attachShader',
+  'linkProgram'
+])
 
 export type NetGLHostReceiverConfig = {
   /** The host's GL context — where guest frames replay. */
@@ -93,7 +119,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     replay.invalidate()
     for (let i = 0; i < batch.length; i += 1) {
       const call = batch[i]
-      if (stale && call.returnId !== undefined) continue
+      if (stale && (call.returnId !== undefined || UPLOADS.has(call.name))) continue
       try {
         replay(call)
       } catch (err) {

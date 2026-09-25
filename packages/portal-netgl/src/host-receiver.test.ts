@@ -58,12 +58,13 @@ describe('makeNetGLHostReceiver', () => {
     expect(calls).toEqual(['createTexture', 'bindTexture'])
   })
 
-  it('re-runs the last frame without re-minting handles', () => {
+  it('re-runs the last frame without re-minting handles or re-uploading', () => {
     const { gl, calls } = makeMockGl()
     const { transport, deliver } = makeTransport()
     const host = makeNetGLHostReceiver({ gl, transport })
     deliver({ name: 'createBuffer', args: [], returnId: 1 })
     deliver({ name: 'bindBuffer', args: [0x8892, { __netgl_handle: 1 }] })
+    deliver({ name: 'bufferData', args: [0x8892, 16, 0x88E4] })
     deliver(END)
     host.drain()
     calls.length = 0
