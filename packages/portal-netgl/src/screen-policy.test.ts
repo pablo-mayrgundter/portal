@@ -121,6 +121,22 @@ describe('screen policy — call sequences', () => {
     expect(calls).toEqual([{ name: 'clear', args: [COLOR | DEPTH | STENCIL] }])
   })
 
+  it('redirects the default framebuffer to the host FBO when configured', () => {
+    const { gl, calls } = makeMockGl()
+    const hostFbo = { __host: 'rt' } as unknown as WebGLFramebuffer
+    const replay = makeNetGLReplay(gl, {
+      screenFramebuffer: () => hostFbo,
+      screen: { clear: 'depth-only' }
+    })
+    replay(call('bindFramebuffer', GL_FRAMEBUFFER, null))
+    replay(call('drawBuffers', [0x0405]))
+    replay(call('clear', COLOR | DEPTH))
+    expect(calls.find((c) => c.name === 'bindFramebuffer')?.args).toEqual([GL_FRAMEBUFFER, hostFbo])
+    expect(calls.find((c) => c.name === 'drawBuffers')?.args).toEqual([[0x8CE0]])
+    // Still a "screen" target for the policy: colour clear dropped.
+    expect(calls.find((c) => c.name === 'clear')?.args).toEqual([DEPTH])
+  })
+
   it('maps screen scissor boxes through the viewport remap', () => {
     const { gl, calls } = makeMockGl()
     const replay = makeNetGLReplay(gl, { remapScreenViewport: () => [100, 100, 50, 50] })

@@ -69,6 +69,21 @@ export type NetGLReplayConfig = {
   screen?: NetGLScreenPolicy
 
   /**
+   * Redirect the guest's default framebuffer to a host framebuffer. When
+   * set, every `bindFramebuffer(target, null)` the guest issues binds this
+   * instead (resolved per call, so it can follow a resizing render
+   * target), and `BACK` in drawBuffers / readBuffer becomes
+   * `COLOR_ATTACHMENT0`. Everything else still treats those draws as
+   * "screen" draws: viewport remap and screen policy apply.
+   *
+   * For hosts that render their scene into an offscreen target and
+   * composite it later — celestiary renders into an RT and then runs an
+   * atmosphere pass to the canvas — the guest must land in that RT, next
+   * to the host's depth and stencil, not on the canvas.
+   */
+  screenFramebuffer?: () => WebGLFramebuffer | null
+
+  /**
    * @internal — debug-only hook with no API stability guarantee.
    *
    * Called with a one-line description of every viewport, scissor, and
@@ -89,6 +104,8 @@ const GL_SCISSOR_TEST = 0x0C11
 const GL_DEPTH_BUFFER_BIT = 0x0100
 const GL_DEPTH = 0x1801
 const GL_DEPTH_STENCIL = 0x84F9
+const GL_BACK = 0x0405
+const GL_COLOR_ATTACHMENT0 = 0x8CE0
 
 type Rect = readonly [number, number, number, number]
 
@@ -286,6 +303,17 @@ export const makeNetGLReplay = (
         const newFb = decodedArgs[1] as object | null
         if (newFb !== currentDrawFb) didBindTransition = true
         currentDrawFb = newFb
+      }
+      if (decodedArgs[1] === null && config.screenFramebuffer) {
+        decodedArgs = [target, config.screenFramebuffer()]
+      }
+    } else if (config.screenFramebuffer) {
+      // BACK names the default framebuffer's colour buffer; on the host's
+      // stand-in FBO that's attachment 0.
+      if (call.name === 'drawBuffers') {
+        decodedArgs = [(decodedArgs[0] as number[]).map((b) => (b === GL_BACK ? GL_COLOR_ATTACHMENT0 : b))]
+      } else if (call.name === 'readBuffer' && decodedArgs[0] === GL_BACK) {
+        decodedArgs = [GL_COLOR_ATTACHMENT0]
       }
     }
 

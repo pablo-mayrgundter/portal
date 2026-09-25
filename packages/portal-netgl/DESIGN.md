@@ -37,6 +37,202 @@ The bet is: **GL-call volume is the right granularity for portal
 composition**. A frame of three.js draw calls is ~100-500 calls;
 postMessage's structured-clone throughput handles that easily.
 
+## Toward 1.0: NetGL as a shim protocol (f → f′)
+
+The direction: NetGL 1.0 is a small WebGL2-level protocol plus a thin
+**shim per framework** that lets any two WebGL frameworks composite scenes
+into one GL context on one GPU. Scene A lives in framework f1, scene B in
+f2; f1′ and f2′ are the shimmed versions that can portal between them.
+
+What makes that tractable is that the wire is WebGL2 itself, not any
+framework's scene graph. The recorder, the replay, and the handle
+interning know nothing about three.js — `three-spike.test.ts` and the
+Cesium demo run through identical code. What IS framework-specific is
+small, and the goal of the 1.0 work is to push everything else out of the
+shim and into the protocol.
+
+**A guest shim (f′ as the embedded side) needs exactly two hooks:**
+
+1. **Context injection** — get the framework to render with the recorder
+   Proxy instead of a context it creates itself.
+2. **Frame boundaries** — call `endFrame()` after each frame the framework
+   renders.
+
+Optionally, app-level camera coupling (the framework's camera API is
+where a host pose gets applied), which lives in the app, not the shim.
+
+**A host (f′ as the embedding side) needs:** a point in its frame to paint
+a stencil mask and drain the guest's frame (`makeNetGLHostReceiver`), and
+a way to reset its own framework's GL-state cache afterwards (three:
+`renderer.resetState()`).
+
+| Framework | Context injection | Frame boundary | Status |
+|---|---|---|---|
+| three.js | `new WebGLRenderer({ context })` | wrap `setAnimationLoop` / `render` | guest + host, shipped |
+| Cesium | `contextOptions.getWebGLStub(canvas, attrs)` | `scene.postRender` | guest, shipped (`frameworks/cesium.ts`) |
+| Babylon.js | `new Engine(gl, …)` accepts a context | `scene.onAfterRenderObservable` | untried |
+| luma.gl / deck.gl | `WebGLDevice.attach(gl)` | `onAfterRender` | untried |
+| regl | `createREGL({ gl })` | after `regl.frame` callback | untried |
+| MapLibre GL | none public — override `canvas.getContext` on the instance before construction | `map.on('render')` | untried |
+
+The per-instance `canvas.getContext` override is the universal fallback
+for frameworks with no injection point.
+
+**What moved out of the shim into the protocol.** The three.js guest
+(`makeNetGLPortalGuest`) carries four framework-specific workarounds.
+Two of them are now protocol features any guest gets for free:
+
+- `renderer.resetState()` before every render → **state checkpoint**
+  (below): the guest emits its own GL state at each frame boundary, so
+  the framework's state cache stays valid whatever the host did in
+  between.
+- per-material stencil props, `scene.background = null`, `autoClear`
+  toggling → **screen policy** (below): the host overrides stencil,
+  blending, and clears for guest draws that target its canvas.
+
+The Cesium shim is ~40 lines because of this: context injection via
+`getWebGLStub`, `endFrame()` on `postRender`, done.
+
+**"Same GPU."** The composite happens in the host's context, so it is
+one GPU. The guest's shadow context runs on it too, and currently
+executes every call, draws included: 2× GPU work for the guest's scene.
+The shadow does need the draws when the framework reads pixels back
+(Cesium picking and `pickPosition`-based camera collision); a
+`shadowDraws: false` mode for guests that never read back is an easy
+perf win.
+
+## State checkpoint
+
+`checkpoint.ts`. Every framework caches GL state client-side and skips
+calls whose value matches the cache. When a guest's calls replay into a
+context the host's renderer mutated in between, the skipped calls leave
+the guest drawing with the host's program, VAO, textures, blend state.
+
+The shadow context has executed every guest call, so its state IS the
+guest's intended state. At each frame boundary (after `netgl:frame-end`,
+and once at startup) the recorder emits ordinary NetGLCalls that
+re-establish it on the receiver: object bindings (framebuffers, VAO,
+program, generic + indexed buffers, textures and samplers per unit),
+tracked from the call stream; scalar state (caps, blend, depth, stencil,
+colour mask, pixel-store, generic vertex attribs, viewport, scissor),
+queried from the shadow. Every replayed batch starts from the guest's
+own state. It is context virtualisation — what browsers do to multiplex
+many WebGL contexts onto one driver context — at the protocol layer.
+
+`checkpoint.test.ts` pins the contract: a three.js guest that does NOT
+reset its state cache renders byte-equal to a pristine control after the
+host renders its own textured scene and scribbles over the shared
+context; the same sequence without the checkpoint does not.
+
+Not captured: per-FBO state (drawBuffers / readBuffer), per-VAO attribute
+state beyond the default VAO's element binding, indexed transform-
+feedback bindings, queries in flight.
+
+## Screen policy
+
+`screen-policy.ts`, via `makeNetGLReplay(gl, { screen })`. Overrides
+applied host-side to guest draws that target the default framebuffer:
+
+- `stencil: { ref }` — every screen draw tests stencil EQUAL `ref` and
+  writes no stencil. Render-target passes keep the guest's own stencil.
+- `clear: 'depth-only'` — screen colour and stencil clears are dropped
+  (the host painted the door background and owns the mask); depth clears
+  are confined to the guest's remapped viewport.
+- `blend: 'premultiplied-over'` — screen draws blend `ONE,
+  ONE_MINUS_SRC_ALPHA`, for guests whose final pass writes over a
+  transparent background (Cesium's atmosphere glow over the host's
+  stars).
+
+Mechanics: while a policy is active, the guest's setters for the
+overridden state are tracked but not executed; right before each draw or
+clear, GL is reconciled to what that draw needs — the override for
+screen draws, the guest's intended state for RT draws.
+`replay.invalidate()` (called by the host receiver before each drain)
+drops the replay's belief about what's applied, since the host touched
+the context.
+
+Related replay options: screen **scissor** boxes now follow the viewport
+remap (they're in the same pixel space); `screenFramebuffer` redirects
+the guest's default framebuffer to a host FBO, for hosts that render
+into an offscreen target and composite later (celestiary does).
+
+## Composition modes
+
+- **Door** (host-netgl-demo, -celestiary, -cesium `?mode=door`): a
+  rectangular stencil mask in the host scene, the guest's full-canvas
+  viewport cover-fit to the door's pixel rect, the guest flying its own
+  camera (or a coupled one, scale permitting).
+- **In place** (host-netgl-cesium `?mode=earth`): the guest renders the
+  same view as the host, camera-coupled, and a shape stencil marks where
+  its pixels belong. For a Cesium Earth: the host draws its scene without
+  the Earth, then an invisible WGS84 ellipsoid (2.5% oversize for the
+  atmosphere shell, double-sided so it still covers the screen from
+  inside the shell) writes stencil where it passes the depth test — so
+  host geometry in front of the Earth keeps its pixels and geometry
+  behind it doesn't. Depth composition works both ways without the two
+  sides sharing a depth convention.
+
+## Findings from Cesium integration
+
+- **`getWebGLStub` is the injection point.** It's in Cesium's public
+  `ContextOptions` typedef ("A function to create a WebGL stub for
+  testing") and is called instead of `canvas.getContext`. Create the
+  shadow on the canvas Cesium passes in: Cesium reads
+  `gl.drawingBufferWidth` and `gl.canvas` for sizing.
+- **The canvas needs CSS size.** Cesium's `widgets.css` normally
+  supplies `canvas { width: 100%; height: 100% }`; without it the canvas
+  stays 300×150 and the host upscales a blurry, stretched globe.
+- **Extensions must be enabled on the receiver.** `getExtension` used to
+  be shadow-only; a three.js host happened to enable the extensions a
+  three.js guest needed. It now ships.
+- **Readback stays on the shadow.** Client-memory `readPixels` /
+  `getBufferSubData` / `clientWaitSync` are answered by the shadow (which
+  has the guest's pixels) and not shipped — shipping stalled the host
+  GPU for results nobody read.
+- **ImageBitmap crosses by structured clone.** Cesium uploads imagery as
+  ImageBitmaps. WebGL ignores `UNPACK_FLIP_Y` / premultiply for bitmaps
+  but honours them for ImageData, so the old bitmap → ImageData
+  conversion would have changed upload semantics.
+- **Render on demand, with flow control.** Cesium's own loop is off; the
+  guest renders one frame per host tick. A same-origin iframe shares the
+  host's main thread, so unanswered ticks must not queue: at most one is
+  in flight. With "pose-ahead" (the tick for frame N+1 sent at the end of
+  frame N) the guest's frame normally matches the pose the host draws
+  with — 0 frames of lag at 60 fps, which matters for in-place
+  composition, where a lagging globe visibly slides against its stencil.
+- **Stale re-runs skip uploads.** When no new guest frame arrived, the
+  host re-runs the last one; it now skips creations and uploads, or a
+  slow guest streaming tiles re-uploads every tile every host frame.
+
+## Celestiary × Cesium: the plan
+
+Celestiary as the host (f1′ = three.js host), Cesium as the guest
+(f2′ = the Cesium shim), Earth composited in place:
+
+1. **Guest.** Unchanged from `apps/host-netgl-cesium/src/cesium-guest.ts`:
+   a CesiumWidget with `makeNetGLCesiumGuest`, transparent background,
+   sun/moon/skybox off, inputs off, rendering on `cesium:tick`.
+2. **Host hook in celestiary's `ThreeUI` render.** Celestiary renders its
+   scene into `_sceneRT`, then composites an atmosphere pass to the
+   canvas. The Cesium drain belongs between the two, inside `_sceneRT`,
+   where celestiary's depth is: after `render(scene)`, render the Earth's
+   stencil shell into `_sceneRT` (the RT needs a stencil attachment),
+   clear depth, drain with `screenFramebuffer` returning `_sceneRT`'s
+   framebuffer, `resetState()`, then the atmosphere pass. Hide
+   celestiary's Earth surface mesh (and its own atmosphere shell, or
+   Cesium's) once Cesium frames flow.
+3. **Camera coupling.** Celestiary is already in metres, so scale is 1;
+   the body frame is the Earth planet group (axial tilt + spin). Map
+   body frame → ECEF exactly as `earth.ts`'s `cesiumView` does, and send
+   Cesium's clock the simulation time so its lighting matches
+   celestiary's sun.
+4. **Same page, not an iframe.** Cesium has no reason to be in an iframe
+   here. An in-process transport (post = synchronous replay into
+   celestiary's context, no structured clone) plus a synchronous render
+   call gives zero lag and no message overhead. Needs: an in-process
+   transport that clones typed arrays at record time (frameworks reuse
+   scratch buffers; postMessage's clone was doing this implicitly).
+
 ## Layers
 
 ```
@@ -81,7 +277,17 @@ embedded renders from interleaving on the shared GL context.
 
 ## Adoption surfaces
 
-Three shapes, from most-integrated to least:
+Framework-agnostic building blocks (new, and what 1.0 shims build on):
+
+- **`makeNetGLGuestContext({ canvas?, transport? })`** — shadow context,
+  recorder, `endFrame()` (frame-end + checkpoint), `announce()`.
+- **`makeNetGLCesiumGuest()`** — the Cesium shim: `contextOptions` to pass
+  to the Viewer / CesiumWidget, `attach(scene)`.
+- **`makeNetGLHostReceiver({ gl, transport, replay })`** — host-side frame
+  buffering + `drain()`, with the replay's viewport remap and screen
+  policy.
+
+The three.js-specific shapes, from most-integrated to least:
 
 1. **`makeNetGLPortalTarget({ scene, anchor, ... })`** (in
    `packages/portal-netgl/src/target.ts`). The host-netgl-demo pattern. The
@@ -191,6 +397,23 @@ unchanged.
 
 ## Open problems (the next PR)
 
+- **three.js guest onto the generic core.** `makeNetGLPortalGuest` and
+  the celestiary shim still do their own `resetState` / stencil /
+  autoClear handling. Porting them onto `makeNetGLGuestContext` + a host
+  screen policy would delete most of `guest.ts` and make the celestiary
+  shim a few lines.
+
+- **Guest lag.** Pose-ahead + one-tick-in-flight gives 0 frames at full
+  speed, but a guest slower than the host drops to "latest frame" and
+  in-place composition slides. Sync options: the same-origin synchronous
+  path (above), or tagging frames with their pose and having the host
+  draw its stencil shell for the guest's pose rather than its own.
+
+- **Extension-object methods.** Calls on objects returned by
+  `getExtension` (`WEBGL_multi_draw`, `OVR_multiview2`, ...) bypass the
+  recorder. Wrap extension objects in their own Proxy when a guest needs
+  one.
+
 - **Coordinate-scale coupling.** `couplePoseAcrossPortal` assumes both
   sides use comparable scales. Embedding celestiary (sun radius ~7×10⁸ m)
   in a meter-scale host puts the embedded camera inside the sun on the
@@ -220,10 +443,10 @@ unchanged.
   resync) would catch this earlier.
 
 - **Single source of truth for the embedded recorder.** The celestiary
-  shim inlines a copy of the recorder's encoder + handle table because
-  it has to bundle into celestiary's three.js version. Publishing
-  `@portal/portal-netgl` to npm with a bundler-agnostic build collapses
-  this to a single import.
+  shim inlines a copy of the recorder's encoder + handle table. The
+  package is on npm now (`@pablo-mayrgundter/portal-netgl`); the phase-2
+  upstream patch in `apps/host-netgl-celestiary/celestiary-upstream/`
+  replaces the copy with an import.
 
 - **Permission model.** Anything coming over the NetGL wire is executed
   against the host's GL context. A malicious sender can hose the host
@@ -241,6 +464,15 @@ unchanged.
   three-WebGLRenderer wrapping a recorder.
 - `packages/portal-netgl/src/target.ts` — `makeNetGLPortalTarget`:
   full-cake adoption factory (scene + anchor → live portal target).
+- `packages/portal-netgl/src/checkpoint.ts` — state checkpoint +
+  binding tracker.
+- `packages/portal-netgl/src/screen-policy.ts` — host-side stencil /
+  blend / clear overrides for screen draws.
+- `packages/portal-netgl/src/guest-context.ts` — framework-agnostic guest
+  core.
+- `packages/portal-netgl/src/host-receiver.ts` — host frame buffering +
+  drain.
+- `packages/portal-netgl/src/frameworks/cesium.ts` — Cesium shim.
 - `packages/portal-netgl/src/messages.ts` — wire types
   (`NetGLCall`, `NetGLFrameEnd`, `NetGLWireMessage`).
 - `packages/portal-netgl/src/proxy.ts` — original in-process proxy
@@ -251,3 +483,5 @@ unchanged.
   using `makeNetGLPortalTarget`).
 - `apps/host-netgl-celestiary/` — external-app embedding example with
   shim + celestiary submodule patches.
+- `apps/host-netgl-cesium/` — Cesium guest in a three.js host: door mode
+  and Earth-in-place mode.

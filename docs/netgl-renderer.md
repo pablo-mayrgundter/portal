@@ -1,6 +1,26 @@
-# `NetGLRenderer` — design notes
+# `NetGLRenderer` — design notes (v0–v1 spikes)
 
-Status:
+> **This is the original spike design, kept for history.** The current
+> architecture, the adoption surfaces, and the road to 1.0 live in
+> [`packages/portal-netgl/DESIGN.md`](../packages/portal-netgl/DESIGN.md).
+> Where the two disagree, DESIGN.md wins. Notable drift since this was
+> written:
+>
+> - The iframe integration shipped as `apps/host-netgl-demo` (a portal-aware
+>   three.js guest) and `apps/host-netgl-celestiary` (an unmodified app,
+>   shimmed), not as a change to `host-iframe-demo`.
+> - Frame sync is a `netgl:frame-end` marker from the guest plus a
+>   host-side buffered drain. There is no `frameBegin` op and no
+>   readback / return-framebuffer mode: composition into the host's
+>   context is the only mode.
+> - Framework state-cache drift is handled by a per-frame **state
+>   checkpoint** from the guest, and compositing rules (stencil clip,
+>   clears) by a host-side **screen policy** — so a framework shim only
+>   has to inject the context and mark frame ends. `apps/host-netgl-cesium`
+>   is the first non-three.js guest (Cesium).
+> - The spike test is `three-spike.test.ts`, not `replay.spike.test.ts`.
+
+Status of the spikes described below:
 
 - **v0 (in-process Proxy) passing** — `packages/portal-netgl/src/three-spike.test.ts`.
   `THREE.WebGLRenderer` driving a `Proxy<WebGL2RenderingContext>` that
@@ -32,10 +52,7 @@ Status:
   back. Two THREE.WebGLRenderers, one shared GL context, native
   depth/stencil/blending across the wire boundary.
 
-The remaining major work is integration into `apps/host-iframe-demo` so
-the iframe-portal's destination talks NetGL over `windowTransport`
-instead of frame-RPC, retiring the depth-pack codepath for three↔three
-pairs.
+(Since done — see the note at the top.)
 
 ## Goal
 
@@ -315,7 +332,7 @@ All four spikes assert byte-equal pixels against a direct control render —
 the protocol carries enough state that the two contexts diverge by 0
 across every transport boundary we've put it through.
 
-Next milestone: integration into `apps/host-iframe-demo`. The iframe's
+Next milestone (since done, as `apps/host-netgl-demo`). The iframe's
 destination renderer becomes a `createNetGLRenderer` pointed at
 `windowTransport({ output: parent })`; the host attaches a NetGL receiver
 to its own canvas's GL context, behind the existing portal stencil mask.
