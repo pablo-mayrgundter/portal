@@ -1,6 +1,6 @@
 {
   "name": "@pablo-mayrgundter/portal-netgl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Command-stream WebGL portals: route a three.js renderer's GL calls over a postMessage transport so an iframe's draws compose into the host canvas without a bitmap round-trip.",
   "type": "module",
   "main": "./dist/index.js",

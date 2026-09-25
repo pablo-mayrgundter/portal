@@ -136,6 +136,31 @@ embedded. Options: `stencil`, `clear: 'depth-only'`, `blend:
 'premultiplied-over'`; plus `screenFramebuffer` to land the guest in one of
 your render targets instead of the canvas. See DESIGN.md.
 
+## `makeNetGLImmediateLink` — same page, no iframe
+
+When the guest framework runs in the host's own page (a Cesium globe inside
+a three.js app), skip postMessage entirely. Hand the guest the link's
+transport, and run each guest frame synchronously at the point in your
+frame where its pixels belong:
+
+```js
+import { makeNetGLImmediateLink, makeNetGLCesiumGuest } from '@pablo-mayrgundter/portal-netgl'
+
+const link = makeNetGLImmediateLink({ gl: renderer.getContext(), replay: { screen: {...} } })
+const guest = makeNetGLCesiumGuest({ transport: link.transport })
+const widget = new Cesium.CesiumWidget(el, { contextOptions: guest.contextOptions, useDefaultRenderLoop: false })
+guest.attach(widget.scene)
+
+// In your render loop:
+link.frame(() => widget.render())   // Cesium's GL calls replay into your context as they happen
+renderer.resetState()
+```
+
+Calls made inside `frame()` execute immediately; calls the guest makes
+between frames (its state checkpoint, async resource uploads) are cloned,
+queued and flushed at the start of the next `frame()`. No frame of latency,
+no structured-clone of every call.
+
 ## Protocol
 
 NetGL is two streams over a single transport:

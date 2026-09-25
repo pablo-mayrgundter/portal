@@ -26,6 +26,11 @@ export {
   type NetGLReadyAckMessage
 } from './guest-context'
 export {
+  makeNetGLImmediateLink,
+  type NetGLImmediateLink,
+  type NetGLImmediateLinkConfig
+} from './immediate-link'
+export {
   makeNetGLHostReceiver,
   type NetGLHostReceiver,
   type NetGLHostReceiverConfig
