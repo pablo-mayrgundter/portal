@@ -1,7 +1,7 @@
 {
   "name": "@pablo-mayrgundter/portal-netgl",
   "version": "0.2.0",
-  "description": "Command-stream WebGL portals: route a three.js renderer's GL calls over a postMessage transport so an iframe's draws compose into the host canvas without a bitmap round-trip.",
+  "description": "NetGL: link WebGL renderers at the GL layer. Record a guest renderer's WebGL2 calls (three.js, Cesium) and replay them into a host's context, same page or over postMessage, composited through a stencil with no bitmap round-trip.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,6 +28,8 @@
     "iframe",
     "three.js",
     "postmessage",
+    "cesium",
+    "netgl",
     "compositing"
   ],
   "peerDependencies": {
