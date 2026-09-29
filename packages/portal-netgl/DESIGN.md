@@ -266,6 +266,8 @@ celestiary's own bodies, on the same page, with `makeNetGLImmediateLink`.
 Most of the work was not the transport. It was agreeing, between two
 renderers that each think they own the frame, on depth, alpha, colour,
 camera and time. The lessons generalise to any in-place guest.
+[`docs/portal-layers.md`](../../docs/portal-layers.md) designs a shim
+library around them.
 
 ### What held up
 
