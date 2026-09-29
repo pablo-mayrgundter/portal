@@ -226,6 +226,10 @@ into an offscreen target and composite later (celestiary does).
 
 ## Celestiary × Cesium: the plan
 
+*Shipped.* Celestiary's Earth, Moon and Mars layers (celestiary/web
+#77–#85; its `CESIUM.md` is the app-side record) follow this plan, and
+the lessons are in the next section.
+
 Celestiary as the host (f1′ = three.js host), Cesium as the guest
 (f2′ = the Cesium shim), Earth composited in place:
 
@@ -253,6 +257,132 @@ Celestiary as the host (f1′ = three.js host), Cesium as the guest
    whatever the guest records between frames (its checkpoint, async
    uploads), flushing it at the start of the next frame. Built for
    celestiary's Cesium Earth layer (celestiary/web CESIUM.md).
+
+## Lessons from celestiary's Cesium layers
+
+These are from the first production host. Celestiary's Cesium layers
+(celestiary/web #77–#85) put Cesium's Earth, Moon and Mars in place of
+celestiary's own bodies, on the same page, with `makeNetGLImmediateLink`.
+Most of the work was not the transport. It was agreeing, between two
+renderers that each think they own the frame, on depth, alpha, colour,
+camera and time. The lessons generalise to any in-place guest.
+
+### What held up
+
+- **Same page beats an iframe for in-place composition.**
+  `link.frame(() => widget.render())` renders the guest synchronously,
+  inside the host's frame, from the host's camera. There's zero lag, so
+  the guest never slides against its stencil. The iframe path's
+  pose-ahead flow control is only needed across a thread boundary.
+- **The stencil decides visibility; depth doesn't have to agree.**
+  Cesium uses log depth over several frusta, and celestiary uses one
+  24-bit frustum spanning a galaxy. The host draws a body-shaped shell
+  into stencil, depth-tested against its own scene, and the guest's
+  screen draws are clipped to it. Occlusion works both ways (Phobos in
+  front of Mars, the Moon behind the Earth) with no shared depth
+  convention.
+- **`screenFramebuffer` into the host's offscreen target.** Celestiary
+  renders into `_sceneRT` and composites a post-pass (atmosphere) from
+  it. The guest's default framebuffer maps onto that target, which
+  needs a depth-*stencil* attachment. Compositing straight to the screen
+  would have skipped the host's post-processing.
+- **One widget, one link per body, drawn far to near.** Several guests
+  (the Earth and the Moon on screen together) each get their own shadow
+  context and link. The host clears stencil between them and draws them
+  far to near, because a guest's own pixels carry no depth the next one
+  can test against.
+
+### What the host had to add around the guest's frame
+
+- **The guest clears the host's depth.** Cesium's frame clears the whole
+  depth buffer. That's legal under the `depth-only` clear policy, which
+  confines clears to the remapped viewport, and in place the viewport is
+  the whole screen. Celestiary saves its depth before the guest frames
+  (a depth blit to a twin depth-stencil target) and restores it after
+  each one.
+- **The guest leaves no usable depth for later passes.** Post-passes that
+  read depth need it: the atmosphere's ray end and ground-vs-sky test,
+  and labels depth-tested over the haze. So after the guest frames the
+  host writes a proxy: each body's sphere, depth-only and depth-tested.
+  A proxy exactly at the surface then ties with anything placed on it.
+  Body labels had to sit at 1.1 radii toward the eye, not 1, or they
+  z-fought the sphere.
+- **`renderer.resetState()` after the guest unbinds the host's target.**
+  Rebind `_sceneRT` before drawing anything else into it (as in the
+  three.js-guest finding above, from the host's side).
+- **Alpha must be coverage.** A `premultiplied-over` screen policy is
+  only right if the guest's final alpha means coverage. Cesium's OIT
+  composite sets alpha to 1 on every non-background pixel. The faint
+  upper sky (alpha ≈ 0.01) then went opaque and blacked out the host's
+  stars. The fix is guest-side: `orderIndependentTranslucency: false`.
+  Audit a guest's post-process passes for this before trusting its
+  alpha.
+
+### Coupling two renderers
+
+- **Set the guest's camera directly.** Cesium's `camera.setView`
+  round-trips direction and up through heading, pitch and roll. Near
+  pitch −90° (looking at a body's centre) that turned the camera ~5°,
+  and the guest's Moon sat 65 px off the stencil. Setting position,
+  direction, up and right directly put both centres on the same pixel.
+  Do the frame conversion in JS doubles, and check handedness with a
+  known point.
+- **Sphere vs ellipsoid.** The host's bodies are spheres and the guest's
+  are ellipsoids. Keep the camera on the same ray from the body's centre,
+  at the same height over each shape. Matching latitude, longitude and
+  altitude instead was ~16 km off on the Earth and Mars.
+- **Guest defaults assume the guest owns the scene.**
+  - Cesium's far plane (5e8 m) clipped the Earth beyond ~80 radii.
+  - Its tile optimisations (`foveatedScreenSpaceError`,
+    `cullRequestsWhileMoving`) wait for a still camera. The host's
+    bodies turn under its camera, so that never came.
+  - `Ellipsoid.default` is a library global, so it's set per body
+    before each render.
+  - The sun, moon, skybox and inputs are off: everything but the body
+    is the host's job.
+- **Light and colour must match, or the seam shows.** Cesium's light
+  follows the host's Sun direction, so the terminators agree. That
+  wasn't enough. Cesium decodes imagery to linear, lights it and
+  sRGB-encodes the result, while celestiary lights the stored sRGB
+  values and tone-maps them straight to screen. The guest's night side
+  and terminator came out lifted and its day side dimmed.
+  - Found only by comparing both renders of the same view at quarter
+    phase. Mars had been compared near full, where the two pipelines
+    nearly agree.
+  - Fixed with a guest shader that lights in the host's space and
+    pre-compensates Cesium's encode. Mars then matched to 0.99×.
+  - Separately, ion's copy of the Moon mosaic is stored at 0.82× the
+    brightness of NASA Trek's; measure it rather than assume.
+- **Same source data on both sides.** A swap between the host's and the
+  guest's rendering of a body only goes unnoticed if both draw the same
+  imagery. Celestiary's Mars and Moon textures were rebuilt from the
+  mosaics Cesium serves (Viking MDIM2.1, LRO WAC), then gain-matched.
+
+### Loading and handover
+
+- **Guests load data from their render loop.** Cesium requests tiles
+  for the view it renders, so there's nothing to prefetch. The layer
+  loads when a body is targeted, not when it comes into range. In range,
+  it first renders *unseen* (no stencil, so nothing reaches the screen)
+  until its tiles report loaded. That costs the shadow draw plus the
+  replay per frame.
+- **Crossfade, don't pop.** The host redraws its own surface over the
+  guest's frame for a second, fading out, and fades its atmosphere pass
+  against the guest's sky. A hard swap was visible even with matched
+  textures.
+
+### Testing
+
+- Headless Chromium on SwiftShader reproduced every compositing bug
+  above.
+  - An ion token restricted by Referer works from Playwright if ion
+    requests are fetched from Node (`route.fetch` with the Referer
+    header) and fulfilled with CORS headers.
+  - SwiftShader flips `gl_PointCoord` in point shaders that `discard` or
+    sample a depth texture. Use depth state instead.
+- Pixel statistics caught what eyeballing didn't: the median ratio of
+  host and guest renders over the lit disc, and brightness profiles
+  across the terminator.
 
 ## Layers
 
@@ -462,6 +592,24 @@ unchanged.
   package is on npm now (`@pablo-mayrgundter/portal-netgl`); the phase-2
   upstream patch in `apps/host-netgl-celestiary/celestiary-upstream/`
   replaces the copy with an import.
+
+- **Guest depth vs host depth (in place).** A full-screen guest's depth
+  clear wipes the host's depth, and its draws leave none the host can
+  use. Celestiary saves and restores depth around each guest frame and
+  writes proxy spheres (above). A screen policy that gives guest screen
+  draws their own depth attachment would make that a library feature.
+
+- **No-draw shadow.** The shadow context executes every guest draw as
+  well as the replay: 2× GPU for a globe. Cesium needs the shadow's
+  pixels only for readback (picking, camera collision). A shadow mode
+  that skips draws when no readback is pending would halve the cost,
+  and it matters most for guests warming up unseen.
+
+- **Colour contract.** Host and guest must agree on colour space and
+  tone mapping, and today each guest shader has to be taught the host's.
+  A declared contract, applied by the screen policy, would put it in
+  one place: linear or display-referred, tone-mapped or not, and the
+  exposure.
 
 - **Permission model.** Anything coming over the NetGL wire is executed
   against the host's GL context. A malicious sender can hose the host
