@@ -116,14 +116,14 @@ const hostTrashes = (receiver: WebGL2RenderingContext): void => {
   g.bindVertexArray(null)
 }
 
-const runGuest = (withCheckpoint: boolean): Uint8Array => {
+const runGuest = (withCheckpoint: boolean, scalarState: 'tracked' | 'queried' = 'tracked'): Uint8Array => {
   const shadow = makeCtx()
   const receiver = makeCtx()
   let out: NetGLCall[] = []
   // structuredClone at post time, like postMessage does: three reuses
   // scratch typed arrays for uniforms, so a buffered live reference would
   // replay the last value written, not the value at call time.
-  const session = makeNetGLRecorderSession(shadow, (c) => out.push(structuredClone(c)))
+  const session = makeNetGLRecorderSession(shadow, (c) => out.push(structuredClone(c)), { scalarState })
   const replay = makeNetGLReplay(receiver)
   const flush = (): void => {
     for (const c of out) replay(c)
@@ -162,13 +162,16 @@ describe('NetGL state checkpoint', () => {
     initDom()
   })
 
-  it('a cache-holding guest renders byte-equal after the host trashes shared state', () => {
-    const control = renderControl()
-    const actual = runGuest(true)
-    let diff = 0
-    for (let i = 0; i < control.length; i += 1) if (control[i] !== actual[i]) diff += 1
-    expect(diff).toBe(0)
-  })
+  it.each(['tracked', 'queried'] as const)(
+    'a cache-holding guest renders byte-equal after the host trashes shared state (%s scalar state)',
+    (scalarState) => {
+      const control = renderControl()
+      const actual = runGuest(true, scalarState)
+      let diff = 0
+      for (let i = 0; i < control.length; i += 1) if (control[i] !== actual[i]) diff += 1
+      expect(diff).toBe(0)
+    }
+  )
 
   it('without the checkpoint the same sequence renders wrong (the test bites)', () => {
     const control = renderControl()

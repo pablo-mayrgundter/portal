@@ -56,12 +56,23 @@ export type NetGLGuestContextConfig = {
    * framework's state cache every frame (the three.js guest does).
    */
   checkpoints?: boolean
+  /**
+   * Where the checkpoint's scalar state comes from (see
+   * `NetGLRecorderSessionOptions`). Default `'tracked'`: no synchronous
+   * calls on the shadow per frame. Pass `'queried'` if you set GL state on
+   * `shadow` directly.
+   */
+  scalarState?: 'tracked' | 'queried'
 }
 
 export type NetGLGuestContext = {
   /** Recorder Proxy — the context the framework should render with. */
   gl: WebGL2RenderingContext
-  /** The underlying shadow context. Don't render with it directly. */
+  /**
+   * The underlying shadow context. Don't render with it directly. Reading
+   * from it is fine; a state call on it (enable, blendFunc, viewport, ...)
+   * isn't seen by the tracked checkpoint (`scalarState`).
+   */
   shadow: WebGL2RenderingContext
   transport: NetGLTransport
   /** Mark the end of a frame: posts frame-end, then a checkpoint. */
@@ -87,7 +98,11 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
   const shadow = (canvas as HTMLCanvasElement).getContext('webgl2', contextAttributes) as WebGL2RenderingContext | null
   if (!shadow) throw new Error('makeNetGLGuestContext: failed to create WebGL2 shadow context')
 
-  const session = makeNetGLRecorderSession(shadow, (call: NetGLCall) => transport.post(call))
+  // No checkpoints: nothing to track for ('queried' makes no calls until a
+  // checkpoint is taken, and none is).
+  const session = makeNetGLRecorderSession(shadow, (call: NetGLCall) => transport.post(call), {
+    scalarState: checkpoints ? config.scalarState : 'queried'
+  })
 
   // Initial checkpoint: pins the receiver to GL defaults before the
   // framework's first calls, so batch 1 doesn't inherit host state either.

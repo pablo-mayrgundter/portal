@@ -63,6 +63,12 @@ export type NetGLCesiumGuestConfig = {
   background?: ColorRGB
   /** Inbound control messages from the host (e.g. `netgl:setPose`). */
   onMessage?: (msg: unknown) => void
+  /**
+   * Where the checkpoint's scalar state comes from. Default `'tracked'`
+   * (no synchronous calls on the shadow per frame); `'queried'` if the app
+   * sets GL state on `core.shadow` directly. See `makeNetGLGuestContext`.
+   */
+  scalarState?: 'tracked' | 'queried'
 }
 
 export type NetGLCesiumGuest = {
@@ -106,7 +112,12 @@ export const makeNetGLCesiumGuest = (config: NetGLCesiumGuestConfig = {}): NetGL
     webgl,
     getWebGLStub: (canvas, webglOptions) => {
       if (core) throw new Error('makeNetGLCesiumGuest: contextOptions reused for a second Cesium context')
-      core = makeNetGLGuestContext({ canvas, contextAttributes: webglOptions, transport })
+      core = makeNetGLGuestContext({
+        canvas,
+        contextAttributes: webglOptions,
+        transport,
+        scalarState: config.scalarState
+      })
       return core.gl
     }
   }

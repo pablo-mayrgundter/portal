@@ -112,21 +112,70 @@ The shadow context has executed every guest call, so its state IS the
 guest's intended state. At each frame boundary (after `netgl:frame-end`,
 and once at startup) the recorder emits ordinary NetGLCalls that
 re-establish it on the receiver: object bindings (framebuffers, VAO,
-program, generic + indexed buffers, textures and samplers per unit),
-tracked from the call stream; scalar state (caps, blend, depth, stencil,
-colour mask, pixel-store, generic vertex attribs, viewport, scissor),
-queried from the shadow. Every replayed batch starts from the guest's
-own state. It is context virtualisation — what browsers do to multiplex
-many WebGL contexts onto one driver context — at the protocol layer.
+program, generic + indexed buffers, textures and samplers per unit) and
+scalar state (caps, blend, depth, stencil, colour mask, clear values,
+hints, pixel-store, generic vertex attribs, viewport, scissor). Every
+replayed batch starts from the guest's own state. It is context
+virtualisation — what browsers do to multiplex many WebGL contexts onto
+one driver context — at the protocol layer.
+
+**Both kinds are tracked from the call stream, not queried.**
+`BindingTracker` follows the bind and delete calls; `ScalarStateTracker`
+(`makeScalarStateTracker`) follows the state setters, after one seed from
+the shadow when the recorder session is made (and again on
+`webglcontextrestored`). So the checkpoint makes no synchronous calls on
+the shadow.
+
+Why: until 0.3.0 the scalar half was read back with `getParameter` /
+`isEnabled` / `getVertexAttrib` at every frame end, 79 calls per guest
+frame (53 + 10 + 16, with 16 attribs). Each is a round trip to the GPU
+process that waits for the shadow's queued commands, the guest's whole
+frame, first. In celestiary's Cesium layers (celestiary/web#189, #194)
+they were all of the shadow contexts' synchronous calls, 79 to 237 a
+frame (Cesium makes none in a settled frame): on SwiftShader ~40 of a
+Cesium frame's ~45 ms, and on an Apple M2 (ANGLE Metal) a large share of
+`cesium.replay`'s 7–20 ms CPU.
+
+What the tracker relies on:
+
+- **Every state change goes through the recorder.** A setter called on
+  the shadow directly, or through an extension object (which bypasses the
+  recorder, e.g. `OES_draw_buffers_indexed`'s per-buffer blend), isn't
+  seen. Such a guest passes `scalarState: 'queried'`
+  (`makeNetGLGuestContext`, `makeNetGLCesiumGuest`,
+  `makeNetGLRecorderSession`), which keeps the query path, or calls
+  `reseed()`.
+- **Values are stored as the queries answer them**: WebIDL's conversions
+  (GLboolean → boolean, GLint / GLuint → int32 / uint32) and GL's float32
+  storage are applied on observe, so the tracked checkpoint emits the
+  query checkpoint's calls and args for in-range values. Values GL clamps
+  (depthRange, clearDepth, sampleCoverage, the stencil ref, viewport over
+  `MAX_VIEWPORT_DIMS`) are kept as passed: the receiver clamps them as the
+  shadow did.
+- **Rejected calls change nothing.** The tracker skips the ones whose rule
+  is a value check (negative rect sizes, depthRange near > far, lineWidth
+  ≤ 0, WebGL's constant-colour / constant-alpha pairing, pixel-store
+  values, attrib index and array length). It doesn't validate enums: an
+  invalid one would be tracked though the shadow ignored it. Frameworks
+  don't issue them.
 
 `checkpoint.test.ts` pins the contract: a three.js guest that does NOT
 reset its state cache renders byte-equal to a pristine control after the
 host renders its own textured scene and scribbles over the shared
-context; the same sequence without the checkpoint does not.
+context, with tracked and with queried scalar state; the same sequence
+without the checkpoint does not. `checkpoint-state.test.ts` drives state
+calls through the recorder and checks the tracked checkpoint against the
+query checkpoint call for call, with zero queries on the shadow.
+headless-gl can't check two things against the query path, so they're
+checked against the expected calls: integer vertex attribs (its
+`getVertexAttrib` answers floats) and MIN / MAX blend equations with the
+derivative hint (its WebGL2 keeps WebGL1's validation).
 
 Not captured: per-FBO state (drawBuffers / readBuffer), per-VAO attribute
 state beyond the default VAO's element binding, indexed transform-
-feedback bindings, queries in flight.
+feedback bindings, queries in flight. On a context restore the bindings
+are stale (the scalar state is reseeded); no framework we target recovers
+from a lost context anyway.
 
 ## Screen policy
 
@@ -565,7 +614,8 @@ unchanged.
 - **Extension-object methods.** Calls on objects returned by
   `getExtension` (`WEBGL_multi_draw`, `OVR_multiview2`, ...) bypass the
   recorder. Wrap extension objects in their own Proxy when a guest needs
-  one.
+  one. Those that set state (`OES_draw_buffers_indexed`) would also need
+  the scalar-state tracker to follow them.
 
 - **Encoder coverage long-tail.** `HTMLImageElement` /
   `HTMLCanvasElement` / `HTMLVideoElement` / `ImageBitmap` all flow
@@ -629,8 +679,8 @@ unchanged.
   three-WebGLRenderer wrapping a recorder.
 - `packages/portal-netgl/src/target.ts` — `makeNetGLPortalTarget`:
   full-cake adoption factory (scene + anchor → live portal target).
-- `packages/portal-netgl/src/checkpoint.ts` — state checkpoint +
-  binding tracker.
+- `packages/portal-netgl/src/checkpoint.ts` — state checkpoint, binding
+  tracker, scalar-state tracker.
 - `packages/portal-netgl/src/screen-policy.ts` — host-side stencil /
   blend / clear overrides for screen draws.
 - `packages/portal-netgl/src/guest-context.ts` — framework-agnostic guest

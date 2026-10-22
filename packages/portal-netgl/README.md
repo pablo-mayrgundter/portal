@@ -170,7 +170,13 @@ NetGL is two streams over a single transport:
   markers after each frame. Guests built on `makeNetGLGuestContext`
   follow each frame-end with a state checkpoint — ordinary calls that
   restore the guest's GL state — so framework state caches survive the
-  host sharing the context.
+  host sharing the context. The checkpoint is built from state tracked
+  off the call stream (`makeBindingTracker`, `makeScalarStateTracker`), so
+  it makes no synchronous GL queries on the shadow. If you set GL state on
+  the shadow context directly (not through the recorder), pass
+  `scalarState: 'queried'` to `makeNetGLGuestContext` /
+  `makeNetGLCesiumGuest`, which reads it back from the shadow at every
+  frame end instead.
 - **Control** (host ↔ guest): `netgl:ready` handshake announcing the
   guest's anchor + background; `netgl:setPose` from the host with the
   coupled camera state.
