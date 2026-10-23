@@ -213,8 +213,10 @@ type DeckLayerBase = {
    */
   view?: (viewport: DeckViewportLike, opts: GlobeLayerViewOptions) => NetGLLayerView | null
   /**
-   * Replay config. Usually none: the guest draws over deck's frame with no
-   * screen policy. Set `screenFramebuffer` when deck renders into your
+   * Replay config. The screen policy defaults to `clear: 'none'`: the
+   * guest draws into deck's finished frame and tests against its depth, so
+   * none of its screen clears may run (pass `screen: { clear: 'pass' }` to
+   * let them). Set `screenFramebuffer` when deck renders into your
    * framebuffer (`Deck._framebuffer`) rather than the canvas.
    */
   replay?: NetGLReplayConfig
@@ -393,7 +395,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
 
   const common = {
     gl,
-    replay: config.replay,
+    replay: { ...config.replay, screen: { clear: 'none' as const, ...config.replay?.screen } },
     onReady: (msg: NetGLReadyMessage) => {
       config.onReady?.(msg)
       requestRedraw('netgl guest ready')

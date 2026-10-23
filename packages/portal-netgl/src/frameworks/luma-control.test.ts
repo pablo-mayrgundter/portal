@@ -12,9 +12,11 @@ import { attachNetGLDeckLayer, type DeckLike, type DeckViewportLike, type LumaDe
 const W = 64
 const H = 48
 
-const mockDevice = (): LumaDeviceLike => {
+const mockDevice = (calls: string[] = []): LumaDeviceLike => {
   const gl = new Proxy({ drawingBufferWidth: W, drawingBufferHeight: H } as Record<string, unknown>, {
-    get: (t, p: string) => (p in t ? t[p] : () => undefined)
+    get: (t, p: string) => (p in t ? t[p] : () => {
+      calls.push(p)
+    })
   }) as unknown as WebGL2RenderingContext
   return { gl, pushState() {}, popState() {} }
 }
@@ -162,5 +164,30 @@ describe('attachNetGLDeckLayer — anchors', () => {
     await settle()
     expect(other).toEqual([{ type: 'layer:status', status: 'ready' }])
     layer.detach()
+  })
+})
+
+describe('attachNetGLDeckLayer — the guest never clears deck\'s frame', () => {
+  it("drops the guest's screen clears by default (clear: 'none'), and passes them when asked", async () => {
+    for (const clear of [undefined, 'pass'] as const) {
+      const calls: string[] = []
+      const deck = fakeDeck()
+      const { guest, host } = memoryPair()
+      const layer = attachNetGLDeckLayer(deck, {
+        device: mockDevice(calls),
+        transport: host,
+        time: () => 0,
+        ...(clear ? { replay: { screen: { clear } } } : {})
+      })
+      guest.post({ name: 'clearColor', args: [0, 0, 0, 0] })
+      guest.post({ name: 'clear', args: [0x4100] }) // COLOR | DEPTH
+      guest.post({ name: 'drawArrays', args: [0, 0, 1] })
+      guest.post({ type: 'netgl:frame-end' })
+      deck.redraw()
+      expect(calls).toContain('drawArrays')
+      if (clear === 'pass') expect(calls).toContain('clear')
+      else expect(calls).not.toContain('clear')
+      layer.detach()
+    }
   })
 })

@@ -127,6 +127,18 @@ export type NetGLRecorderSession = {
    * between. See `checkpoint.ts`.
    */
   checkpoint(): void
+  /**
+   * Post the checkpoint later: just before the next call the recorder
+   * ships (calls the shadow answers alone don't count), capturing the state
+   * at that moment, or never if no call follows. `checkpoint()` cancels it.
+   *
+   * For a guest drawn several times inside one host frame through
+   * `makeNetGLImmediateLink`: the guest's next draw happens inside the
+   * host's next `link.frame()`, so the checkpoint replays at once instead
+   * of being cloned and queued while the link is closed. See
+   * `NetGLGuestContext.subFrame`.
+   */
+  deferCheckpoint(): void
 }
 
 export type NetGLRecorderSessionOptions = {
@@ -168,6 +180,7 @@ export const makeNetGLRecorderSession = (
   // Scalar state, seeded once from the shadow before the guest's first
   // call: the checkpoint then makes no synchronous queries.
   const state = (options.scalarState ?? 'tracked') === 'tracked' ? makeScalarStateTracker(shadow) : undefined
+  let checkpointDeferred = false
 
   // Scratch 2D canvas reused across encodes to avoid GC churn when an app
   // uploads many textures per frame. Lazily created on first image-source
@@ -293,9 +306,18 @@ export const makeNetGLRecorderSession = (
       const methodName = typeof prop === 'string' ? prop : String(prop)
 
       return function recorded(this: unknown, ...args: unknown[]): unknown {
+        const shadowOnly = isShadowOnly(methodName, args)
+        // A deferred checkpoint goes out before this call reaches the
+        // shadow or the trackers, so it holds the state the call starts
+        // from.
+        if (checkpointDeferred && !shadowOnly) {
+          checkpointDeferred = false
+          postCheckpoint()
+        }
+
         const result = (value as (...a: unknown[]) => unknown).apply(target, args)
 
-        if (isShadowOnly(methodName, args)) return result
+        if (shadowOnly) return result
         bindings.observe(methodName, args)
         state?.observe(methodName, args)
 
@@ -332,10 +354,18 @@ export const makeNetGLRecorderSession = (
     }
   }) as unknown as WebGL2RenderingContext
 
+  const postCheckpoint = (): void => {
+    for (const call of captureCheckpoint(shadow, bindings, encodeArg, state)) post(call)
+  }
+
   return {
     gl,
     checkpoint() {
-      for (const call of captureCheckpoint(shadow, bindings, encodeArg, state)) post(call)
+      checkpointDeferred = false
+      postCheckpoint()
+    },
+    deferCheckpoint() {
+      checkpointDeferred = true
     }
   }
 }

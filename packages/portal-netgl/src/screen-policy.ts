@@ -11,6 +11,10 @@
 //     setting stencil props on every material in the scene, which is
 //     three-specific and misses anything drawn outside the scene graph
 //     (post-process quads). Doing it here works for any framework.
+//   - clear: drop the guest's screen clears ('none'), or all but depth,
+//     confined to its viewport ('depth-only'), so a guest that clears its
+//     canvas every frame doesn't wipe the host's. Applied in replay.ts,
+//     which knows the viewport.
 //   - blend: optionally force premultiplied "over" on screen draws, for
 //     guests whose final screen pass writes transparent background
 //     (Cesium with a transparent backgroundColor) — lets the guest's
@@ -51,12 +55,19 @@ export type NetGLScreenPolicy = {
    */
   blend?: 'pass' | 'premultiplied-over'
   /**
-   * `'depth-only'`: on the screen, drop colour and stencil clears (the
-   * host already painted the door background and owns the stencil mask)
-   * and confine depth clears to the guest's remapped viewport. Default
-   * `'pass'`: clears execute as sent.
+   * What happens to the guest's clears of the screen (its default
+   * framebuffer, or `screenFramebuffer` standing in for it). Clears of the
+   * guest's own framebuffers always execute as sent.
+   *   - `'pass'` (default): screen clears execute as sent.
+   *   - `'depth-only'`: drop colour and stencil clears (the host already
+   *     painted the door background and owns the stencil mask) and confine
+   *     depth clears to the guest's remapped viewport.
+   *   - `'none'`: drop every screen clear, colour, depth and stencil alike.
+   *     For a guest drawn into a frame the host is still rendering, whose
+   *     depth the guest must test against: a three.js city inside Cesium's
+   *     frame, depth-composited with the globe.
    */
-  clear?: 'pass' | 'depth-only'
+  clear?: 'pass' | 'depth-only' | 'none'
 }
 
 type Face = { func: number; ref: number; valueMask: number; fail: number; zfail: number; zpass: number; writeMask: number }

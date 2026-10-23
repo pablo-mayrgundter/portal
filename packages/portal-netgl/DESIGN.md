@@ -185,6 +185,81 @@ feedback bindings, queries in flight. On a context restore the bindings
 are stale (the scalar state is reseeded); no framework we target recovers
 from a lost context anyway.
 
+## Sub-frames
+
+A host can draw one guest several times in one of its frames, with its own
+draws in between. Cesium calls an external renderer once for each depth
+frustum the renderer's bounds overlap (2–3 with log depth off), after
+that frustum's opaque pass, and calls `Context.resetState()` after each
+call. Each draw is a sub-frame of the guest: `link.frame(() => {
+render(); guestCtx.subFrame() })` in each call.
+
+**What's required.** The guest's GL state must be right at the start of
+each sub-frame, and the host has changed it. For Cesium that's nearly all
+of it: `resetState()` resets every binding the checkpoint restores except
+the textures on each unit and the indexed uniform-buffer bindings, and the
+caps outside `RenderState`, all of pixel store and the clear values; then
+it applies its full `RenderState`, which is every other piece of scalar
+state but the two hints and the generic vertex attributes. Cesium's next
+draws bind textures, and set generic vertex attributes for constant
+attributes. So the restore can't be trimmed to what the host changed:
+
+- The replay can't see what the host did without querying the host's
+  context, the synchronous round trips 0.3.0 removed from the shadow.
+- A host that tracked its own calls (a Proxy over its context marking
+  state dirty) could say. For Cesium it would name everything but the
+  hints, the uniform-buffer bindings and the generic attributes of
+  indices with no constant attribute drawn since: a handful of calls of
+  80.
+- Nor can it be trimmed to what the guest sets before using it. A
+  framework skips what its cache says is set, so a sub-frame's first call
+  can be a draw that depends on all of it. Restoring lazily, item by item
+  before the first call that reads each, would need a dependency map of
+  every call to the state it reads, for a saving that the first draw
+  mostly cancels.
+
+**What it costs.** With tracked scalar state (0.3.0, the default) the
+checkpoint makes no queries; it is ordinary state calls.
+`subframe.test.ts` measures it: a three.js guest that never resets its
+cache draws three sub-frames per host frame (a textured cube each, one
+texture unit), the host rendering into its own target and scrambling
+state in between. Per sub-frame, steady state:
+
+| Boundary | NetGL calls replayed | Of them cloned into the queue | GL calls on the host | Queries on the shadow | Pixels |
+|---|---|---|---|---|---|
+| `endFrame()`, `scalarState: 'queried'` | 84–86 | 80 | 84–86 | 79 | right |
+| `endFrame()` (tracked) | 84–86 | 80 | 84–86 | 0 | right |
+| `subFrame()` | 84–86 | 0 | 84–86 | 0 | right |
+| `endFrame({ checkpoint: false })` | 4–6 | 0 | 4–6 | 0 | wrong |
+
+The checkpoint is the 80: 64 scalar calls, and 16 for bindings with one
+texture unit (each further unit adds 6, each uniform-buffer index 1). The
+guest's own calls are only 4–6 because three skips everything its cache
+holds; a real scene's draws outnumber the checkpoint (New York draws
+hundreds of meshes in a frame).
+
+So the per-sub-frame checkpoint is the price of correctness, and with
+tracked state it is cheap: about 80 state calls and no round trips.
+`subFrame()` replays the same calls as `endFrame()`. What it saves is the
+copy. `endFrame()` posts the checkpoint after the frame-end, when the
+immediate link is closed, so the link `structuredClone`s each call into
+its queue to flush at the next `frame()`. `subFrame()` defers it to the
+guest's next call, inside the next `frame()`, where it replays directly
+(`NetGLRecorderSession.deferCheckpoint`). The deferred checkpoint is
+captured when it is posted, before that call reaches the shadow or the
+trackers. That state is the same as at the boundary: nothing ran on the
+guest in between, or whatever did went through the recorder first and
+triggered the post.
+
+`endFrame({ checkpoint: false })` is for when no restore is needed: a host
+that doesn't touch the context between the guest's frames, or a guest
+that resets its own state cache.
+
+Not done: `makeNetGLCesiumGuest` ends each Cesium frame with `endFrame()`,
+so celestiary's Cesium layers still clone one checkpoint a frame (80-odd
+calls, more with Cesium's texture units). Offering the deferral there is a
+small option on the shim.
+
 ## Screen policy
 
 `screen-policy.ts`, via `makeNetGLReplay(gl, { screen })`. Overrides
@@ -195,10 +270,20 @@ applied host-side to guest draws that target the default framebuffer:
 - `clear: 'depth-only'` — screen colour and stencil clears are dropped
   (the host painted the door background and owns the mask); depth clears
   are confined to the guest's remapped viewport.
+- `clear: 'none'` — every screen clear is dropped: `clear` whatever its
+  mask, and every `clearBuffer*`. For a guest drawn into a frame the host
+  is still rendering, testing against the host's depth (a city inside
+  Cesium's frame, [nested guests](#nested-guests-cesium-drawing-new-york)).
+  `'depth-only'` would wipe that depth with the guest's first clear.
 - `blend: 'premultiplied-over'` — screen draws blend `ONE,
   ONE_MINUS_SRC_ALPHA`, for guests whose final pass writes over a
   transparent background (Cesium's atmosphere glow over the host's
   stars).
+
+"Screen" is decided as for the viewport remap: the guest's own draw
+framebuffer binding is null (its default framebuffer), whether or not
+`screenFramebuffer` stands in for it on the host. Clears of the guest's
+own framebuffers always run as sent, under every `clear` mode.
 
 Mechanics: while a policy is active, the guest's setters for the
 overridden state are tracked but not executed; right before each draw or
@@ -241,8 +326,10 @@ into an offscreen target and composite later (celestiary does).
   against the host's depth buffer without clearing it or writing to it.
   Occlusion by the host is free; the guest occludes nothing of the host's.
   This needs the guest's camera to be the host's to the last bit
-  (`globeLayerView` composes it in doubles), and a host far plane that
-  contains the guest (deck: `farZMultiplier`).
+  (`globeLayerView` composes it in doubles), a host far plane that
+  contains the guest (deck: `farZMultiplier`), and none of the guest's
+  screen clears: `attachNetGLDeckLayer` defaults its screen policy to
+  `clear: 'none'`.
 
 ## Findings from Cesium integration
 
@@ -631,6 +718,88 @@ library around them.
   host and guest renders over the lit disc, and brightness profiles
   across the terminator.
 
+## Nested guests: Cesium drawing New York
+
+A guest drawn by a guest. The chain in progress:
+
+- **celestiary**, the three.js host;
+- **Cesium**, a NetGL guest of celestiary on the same page
+  (`makeNetGLImmediateLink`, as in the lessons above);
+- **New York**, slop-newyork's three.js city, a NetGL guest that Cesium
+  draws into its own frame, standing on its terrain.
+
+Cesium draws it through `scene.externalRenderers`, a hook added in the
+celestiary fork of Cesium (celestiary/cesium, branch
+`celestiary/external-render-pass`). The scene calls each renderer once per
+depth frustum its bounds overlap, after the frustum's opaque geometry and
+before its translucent geometry. Cesium's pass framebuffer is bound, and
+its depth holds the globe. In the callback, New York's link replays into
+Cesium's own context: `makeNetGLImmediateLink({ gl: scene.context._gl,
+replay: { screenFramebuffer: () => currentFb, screen: { clear: 'none' } }
+})`. So far this has run two levels deep, Cesium on its own page drawing
+New York (a scratch demo, depth-composited with the terrain and with
+Cesium boxes in front of and behind the city). The three-level chain
+hasn't run end to end.
+
+What it took, or will:
+
+- **In place inside the host's frame means no clears.** Cesium's
+  contract for an external renderer is to draw into the bound
+  framebuffer, test and write depth, and not clear. It should also leave
+  stencil alone, because Cesium keeps classification bits there.
+  - `'depth-only'` drops the colour clear but keeps the depth clear,
+    which wipes the globe the city must test against. Hence
+    `clear: 'none'`.
+  - three's `autoClear = false` does the same for one framework's main
+    pass; the policy does it for any guest.
+  - Clears of the guest's own render targets still run, as under every
+    mode.
+- **The screen is the host's pass target.** The callback is given the
+  framebuffer of the pass (Cesium's scene FBO, or null for the canvas).
+  `screenFramebuffer` resolves on every bind, so `() => currentFb`, set
+  from the callback's `framebuffer`, follows it if a pass changes it.
+- **One draw per frustum: sub-frames.** With log depth off, a frame can
+  have 2–3 frustums, each with its own projection, and Cesium clears
+  depth between them. Each callback is one sub-frame (see
+  [Sub-frames](#sub-frames)). Cesium changes nearly all state between
+  them, so each needs the full checkpoint. Per-frame work (animation,
+  the sun) runs once per Cesium frame; the demo keys it on the
+  callback's `frameNumber`.
+- **Depth must agree here, unlike in celestiary's layers.** There the
+  stencil decides visibility and the two depth conventions never meet.
+  Inside Cesium's frame the city tests against the globe's depth, so it
+  must write depth Cesium's way.
+  - With log depth on, Cesium writes `gl_FragDepth = log2(w − near + 1) /
+    log2(far − near + 1)`. The demo sets that as every material's depth
+    node, from the `near` and `oneOverLog2FarDepthFromNearPlusOne` the
+    callback passes.
+  - With log depth off, the frustum's projection gives standard depth.
+- **The guest's output pass must not leave the bound framebuffer.**
+  three's WebGPURenderer (on its WebGL backend) renders into an internal
+  target whenever it tone-maps or converts colour space at output, then
+  copies the result over the whole screen with no depth. The city
+  outputs linear with no tone mapping instead, and each material encodes
+  sRGB itself.
+- **Handles compose.** In the full chain, `scene.context._gl` is Cesium's
+  recorder, not a raw context.
+  - New York's replay creates its objects through that recorder, which
+    interns them as it does Cesium's own.
+  - Cesium's trackers see New York's state calls, and Cesium's
+    `resetState()` after each callback goes through the same recorder.
+    Cesium's checkpoint therefore stays right without knowing a guest
+    ran.
+- **Each level multiplies the cost of a call.** A New York call runs on
+  New York's shadow, is replayed into Cesium's recorder, runs on
+  Cesium's shadow, and is replayed into celestiary's context. That's
+  three GL executions, two encode-decode passes, and two trackers' worth
+  of observing, for every draw and every checkpoint call. Two open
+  problems below gain weight: the no-draw shadow, and keeping
+  checkpoints to sub-frames that need them.
+- **Open: a stencil policy that only forbids writes.** The `stencil`
+  option tests EQUAL `ref` for a portal mask. Inside Cesium's frame there
+  is no mask, but the guest must not write stencil. three doesn't unless
+  a material asks, so nothing enforces it yet.
+
 ## Layers
 
 ```
@@ -678,7 +847,8 @@ embedded renders from interleaving on the shared GL context.
 Framework-agnostic building blocks (new, and what 1.0 shims build on):
 
 - **`makeNetGLGuestContext({ canvas?, transport? })`** — shadow context,
-  recorder, `endFrame()` (frame-end + checkpoint), `announce()`.
+  recorder, `endFrame()` (frame-end + checkpoint), `subFrame()` (frame-end,
+  checkpoint deferred to the next call), `announce()`.
 - **`makeNetGLCesiumGuest()`** — the Cesium shim: `contextOptions` to pass
   to the Viewer / CesiumWidget, `attach(scene)`.
 - **`makeNetGLHostReceiver({ gl, transport, replay })`** — host-side frame
@@ -852,6 +1022,8 @@ unchanged.
   use. Celestiary saves and restores depth around each guest frame and
   writes proxy spheres (above). A screen policy that gives guest screen
   draws their own depth attachment would make that a library feature.
+  (A guest that shares the host's depth convention, as New York does
+  inside Cesium's frame, can instead keep it: `clear: 'none'`.)
 
 - **No-draw shadow.** The shadow context executes every guest draw as
   well as the replay: 2× GPU for a globe. Cesium needs the shadow's

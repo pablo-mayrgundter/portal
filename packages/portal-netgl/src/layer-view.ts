@@ -55,7 +55,7 @@ export const isNetGLLayerViewMessage = (msg: unknown): msg is NetGLLayerViewMess
   (msg as { type?: unknown }).type === 'layer:view' &&
   typeof (msg as { view?: unknown }).view === 'object'
 
-// --- The rest of the layer control plane that 0.4 speaks ---------------
+// --- The rest of the layer control plane that 0.5 speaks ---------------
 // Shapes from RFC 0001 (docs/rfcs/0001-globe-orbit-layers.md, §6.7, §8.1,
 // §10.6); only the fields named here are read, the rest pass through.
 

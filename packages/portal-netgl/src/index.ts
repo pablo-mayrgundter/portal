@@ -29,6 +29,7 @@ export {
   makeNetGLGuestContext,
   type NetGLGuestContext,
   type NetGLGuestContextConfig,
+  type NetGLEndFrameOptions,
   type NetGLReadyMessage,
   type NetGLReadyAckMessage
 } from './guest-context'
