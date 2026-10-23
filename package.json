@@ -13,6 +13,7 @@
     "dev:netgl": "npm run dev -w @portal/host-netgl-demo",
     "dev:netgl-celestiary": "npm run dev -w @portal/host-netgl-celestiary",
     "dev:netgl-cesium": "npm run dev -w @portal/host-netgl-cesium",
+    "dev:netgl-deck": "npm run dev -w @portal/host-netgl-deck",
     "setup:celestiary": "npm run setup-celestiary -w @portal/host-netgl-celestiary",
     "dev:worker": "npm run dev -w @portal/host-worker-demo",
     "dev:proxy": "npm run dev -w @portal/snapshot-proxy",
