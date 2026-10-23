@@ -12,7 +12,7 @@
 // stream; it just produces structured-clone-safe `NetGLCall`s.
 
 import type { NetGLCall, NetGLEncodedValue } from './messages'
-import { captureCheckpoint, makeBindingTracker } from './checkpoint'
+import { captureCheckpoint, makeBindingTracker, makeScalarStateTracker } from './checkpoint'
 
 // Pure state queries — three calls these, the shadow answers, no wire
 // traffic. The receiver doesn't need to know what three asked.
@@ -129,24 +129,45 @@ export type NetGLRecorderSession = {
   checkpoint(): void
 }
 
+export type NetGLRecorderSessionOptions = {
+  /**
+   * Where the checkpoint's scalar state (caps, blend, depth, stencil,
+   * pixel-store, generic attribs, rects) comes from:
+   *   - `'tracked'` (default): observed from the calls the recorder sees,
+   *     seeded once from the shadow now. The checkpoint makes no
+   *     synchronous calls on the shadow.
+   *   - `'queried'`: read from the shadow with getParameter / isEnabled /
+   *     getVertexAttrib at every checkpoint, ~80 synchronous GPU round
+   *     trips. Use it if you change the shadow's state behind the recorder
+   *     (calls on the shadow itself, or extension objects that set blend
+   *     or caps state).
+   */
+  scalarState?: 'tracked' | 'queried'
+}
+
 /**
  * Recorder Proxy without the session wrapper. Kept for callers that manage
  * frame boundaries themselves and don't want checkpoints (the three.js
- * guest resets three's state cache instead).
+ * guest resets three's state cache instead). Nothing is tracked for a
+ * checkpoint it never takes.
  */
 export const makeNetGLRecorder = (
   shadow: WebGL2RenderingContext,
   post: (call: NetGLCall) => void
-): WebGL2RenderingContext => makeNetGLRecorderSession(shadow, post).gl
+): WebGL2RenderingContext => makeNetGLRecorderSession(shadow, post, { scalarState: 'queried' }).gl
 
 export const makeNetGLRecorderSession = (
   shadow: WebGL2RenderingContext,
-  post: (call: NetGLCall) => void
+  post: (call: NetGLCall) => void,
+  options: NetGLRecorderSessionOptions = {}
 ): NetGLRecorderSession => {
   const handleToId = new Map<object, number>()
   let nextId = 1
   // Object bindings, tracked from the call stream for the checkpoint.
   const bindings = makeBindingTracker()
+  // Scalar state, seeded once from the shadow before the guest's first
+  // call: the checkpoint then makes no synchronous queries.
+  const state = (options.scalarState ?? 'tracked') === 'tracked' ? makeScalarStateTracker(shadow) : undefined
 
   // Scratch 2D canvas reused across encodes to avoid GC churn when an app
   // uploads many textures per frame. Lazily created on first image-source
@@ -263,6 +284,7 @@ export const makeNetGLRecorderSession = (
 
         if (isShadowOnly(methodName, args)) return result
         bindings.observe(methodName, args)
+        state?.observe(methodName, args)
 
         let returnId: number | undefined
         if (
@@ -300,7 +322,7 @@ export const makeNetGLRecorderSession = (
   return {
     gl,
     checkpoint() {
-      for (const call of captureCheckpoint(shadow, bindings, encodeArg)) post(call)
+      for (const call of captureCheckpoint(shadow, bindings, encodeArg, state)) post(call)
     }
   }
 }

@@ -13,11 +13,18 @@ export {
 export {
   makeNetGLRecorder,
   makeNetGLRecorderSession,
-  type NetGLRecorderSession
+  type NetGLRecorderSession,
+  type NetGLRecorderSessionOptions
 } from './recorder'
 export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
 export type { NetGLScreenPolicy } from './screen-policy'
-export { captureCheckpoint, makeBindingTracker, type BindingTracker } from './checkpoint'
+export {
+  captureCheckpoint,
+  makeBindingTracker,
+  makeScalarStateTracker,
+  type BindingTracker,
+  type ScalarStateTracker
+} from './checkpoint'
 export {
   makeNetGLGuestContext,
   type NetGLGuestContext,
