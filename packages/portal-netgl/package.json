@@ -36,10 +36,15 @@
     "three": ">=0.171.0 <1.0.0"
   },
   "devDependencies": {
+    "@deck.gl/core": "^9.4.0",
+    "@luma.gl/core": "^9.4.2",
+    "@luma.gl/engine": "^9.4.2",
+    "@luma.gl/shadertools": "^9.4.2",
+    "@luma.gl/webgl": "^9.4.2",
+    "@portal/portal-iframe": "0.1.0",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^25.6.0",
     "@types/three": "^0.184.0",
-    "@portal/portal-iframe": "0.1.0",
     "gl": "9.0.0-rc.10",
     "jsdom": "^26.1.0",
     "three": "^0.180.0",

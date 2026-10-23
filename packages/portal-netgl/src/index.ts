@@ -82,3 +82,35 @@ export {
   type WindowTransport,
   type WindowTransportOptions
 } from './window-transport'
+export {
+  attachNetGLDeckLayer,
+  globeLayerView,
+  globeFrameOfViewport,
+  withLumaState,
+  type DeckLike,
+  type DeckViewportLike,
+  type LumaDeviceLike,
+  type GlobeFrame,
+  type GlobeLayerViewOptions,
+  type NetGLDeckLayer,
+  type NetGLDeckLayerConfig,
+  type NetGLDeckLayerStats,
+  type DeckImmediateLayerConfig,
+  type DeckReceiverLayerConfig
+} from './frameworks/luma'
+export {
+  makeNetGLThreeOverlayGuest,
+  type NetGLThreeOverlayGuest,
+  type NetGLThreeOverlayGuestConfig
+} from './frameworks/three-overlay'
+export {
+  isNetGLLayerViewMessage,
+  mat4Multiply,
+  mat4InvertRigid,
+  mat4TransformVec4,
+  projectToPixels,
+  sphereToEcef,
+  type NetGLLayerView,
+  type NetGLLayerViewMessage,
+  type NetGLMat4
+} from './layer-view'
