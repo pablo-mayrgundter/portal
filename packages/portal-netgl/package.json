@@ -1,6 +1,6 @@
 {
   "name": "@pablo-mayrgundter/portal-netgl",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "NetGL: link WebGL renderers at the GL layer. Record a guest renderer's WebGL2 calls (three.js, Cesium) and replay them into a host's context, same page or over postMessage, composited through a stencil with no bitmap round-trip.",
   "type": "module",
   "main": "./dist/index.js",

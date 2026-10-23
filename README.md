@@ -126,7 +126,7 @@ The open problems are itemised in
 
 | Package | What | Status |
 |---|---|---|
-| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, cross-origin transports, Cesium shim, deck.gl host adapter, three.js overlay guest | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.2.x, pre-1.0: pin an exact version |
+| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, cross-origin transports, Cesium shim, deck.gl host adapter, three.js overlay guest | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.4.x, pre-1.0: pin an exact version |
 | `portal-layers` | host/guest shim for in-place layers: compositor, lifecycle, transport bindings, contracts | design, [0.1 draft](./docs/portal-layers.md) |
 | [`portal-core`](./packages/portal-core) | engine-agnostic portal geometry, pose coupling, wire types | workspace only |
 | [`portal-three`](./packages/portal-three) | three.js bindings: stencil mask, coupled camera, local endpoint | workspace only |
