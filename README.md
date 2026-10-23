@@ -76,8 +76,9 @@ Works:
   - handle interning;
   - a synchronous shadow context for return values and readback;
   - a guest state checkpoint, so framework state caches survive a shared
-    context;
-  - a host-side screen policy: stencil clip, depth-only clears,
+    context, also for a guest drawn several times in one host frame
+    (sub-frames, one per Cesium depth frustum);
+  - a host-side screen policy: stencil clip, depth-only or no clears,
     premultiplied-over blending, viewport and scissor remapping, and
     redirecting the guest into a host render target.
 - **Transports:**
@@ -115,7 +116,7 @@ The open problems are itemised in
 
 | Package | What | Status |
 |---|---|---|
-| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, Cesium shim | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.2.x, pre-1.0: pin an exact version |
+| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, Cesium shim | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.4.x, pre-1.0: pin an exact version |
 | `portal-layers` | host/guest shim for in-place layers: compositor, lifecycle, transport bindings, contracts | design, [0.1 draft](./docs/portal-layers.md) |
 | [`portal-core`](./packages/portal-core) | engine-agnostic portal geometry, pose coupling, wire types | workspace only |
 | [`portal-three`](./packages/portal-three) | three.js bindings: stencil mask, coupled camera, local endpoint | workspace only |

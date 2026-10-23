@@ -43,9 +43,11 @@ were tried and dropped.
 - **GL tests need a display.** headless-gl can't create a context
   without one, so in containers run `xvfb-run -a npm test`. Without it,
   ~14 GL tests fail with "could not create WebGL2 context", and that's
-  the environment, not your change.  On a GitHub runner the first
-  context in a test file takes about 6 s, hence `testTimeout` in
-  `vitest.config.ts`; a GL test that times out there at 5 s is that.
+  the environment, not your change. With other sessions on the machine,
+  `xvfb-run -a` occasionally loses a race for a display ("Could not open
+  the default X display", one GL test failing): rerun. On a GitHub runner
+  the first context in a test file takes about 6 s, hence `testTimeout`
+  in `vitest.config.ts`; a GL test that times out there at 5 s is that.
 - **Browser checks: headless Chromium on SwiftShader.** Launch Playwright
   with `--use-angle=swiftshader --enable-unsafe-swiftshader`; in cloud
   sessions Chromium is preinstalled (`PLAYWRIGHT_BROWSERS_PATH`), so

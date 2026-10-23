@@ -121,6 +121,55 @@ describe('screen policy — call sequences', () => {
     expect(calls).toEqual([{ name: 'clear', args: [COLOR | DEPTH | STENCIL] }])
   })
 
+  it("'none' drops every screen clear: colour, depth and stencil, clear and clearBuffer*", () => {
+    const { gl, calls } = makeMockGl()
+    const replay = makeNetGLReplay(gl, {
+      remapScreenViewport: () => [10, 20, 30, 40],
+      screen: { clear: 'none' }
+    })
+    replay(call('viewport', 0, 0, 100, 100))
+    calls.length = 0
+    replay(call('clear', COLOR | DEPTH | STENCIL))
+    replay(call('clear', DEPTH))
+    replay(call('clear', 0))
+    replay(call('clearBufferfv', 0x1800 /* COLOR */, 0, [0, 0, 0, 1]))
+    replay(call('clearBufferfv', 0x1801 /* DEPTH */, 0, [1]))
+    replay(call('clearBufferiv', 0x1802 /* STENCIL */, 0, [0]))
+    replay(call('clearBufferuiv', 0x1800, 1, [0, 0, 0, 0]))
+    replay(call('clearBufferfi', 0x84F9 /* DEPTH_STENCIL */, 0, 1, 0))
+    expect(calls).toHaveLength(0)
+  })
+
+  it("'none' still executes screen draws, and clears of the guest's own framebuffers", () => {
+    const { gl, calls } = makeMockGl()
+    const replay = makeNetGLReplay(gl, { screen: { clear: 'none' } })
+    replay(call('drawElements', 4, 36, 0x1403, 0))
+    replay(call('drawArraysInstanced', 4, 0, 3, 2))
+    replay({ name: 'createFramebuffer', args: [], returnId: 1 })
+    replay(call('bindFramebuffer', GL_FRAMEBUFFER, { __netgl_handle: 1 }))
+    replay(call('clear', COLOR | DEPTH | STENCIL))
+    replay(call('clearBufferfi', 0x84F9, 0, 1, 0))
+    replay(call('bindFramebuffer', GL_FRAMEBUFFER, null))
+    replay(call('clear', DEPTH))
+    expect(calls.map((c) => c.name)).toEqual([
+      'drawElements', 'drawArraysInstanced', 'createFramebuffer', 'bindFramebuffer', 'clear', 'clearBufferfi', 'bindFramebuffer'
+    ])
+    expect(calls[4].args).toEqual([COLOR | DEPTH | STENCIL])
+  })
+
+  it("'none' treats screenFramebuffer as the screen: its clears drop, the guest's FBOs' pass", () => {
+    const { gl, calls } = makeMockGl()
+    const hostFbo = { __host: 'cesium-pass' } as unknown as WebGLFramebuffer
+    const replay = makeNetGLReplay(gl, { screenFramebuffer: () => hostFbo, screen: { clear: 'none' } })
+    replay(call('bindFramebuffer', GL_FRAMEBUFFER, null))
+    replay(call('clear', COLOR | DEPTH))
+    replay({ name: 'createFramebuffer', args: [], returnId: 3 })
+    replay(call('bindFramebuffer', 0x8CA9 /* DRAW_FRAMEBUFFER */, { __netgl_handle: 3 }))
+    replay(call('clear', DEPTH))
+    expect(calls.find((c) => c.name === 'bindFramebuffer')?.args).toEqual([GL_FRAMEBUFFER, hostFbo])
+    expect(calls.filter((c) => c.name === 'clear').map((c) => c.args)).toEqual([[DEPTH]])
+  })
+
   it('redirects the default framebuffer to the host FBO when configured', () => {
     const { gl, calls } = makeMockGl()
     const hostFbo = { __host: 'rt' } as unknown as WebGLFramebuffer
@@ -230,5 +279,67 @@ describe('screen policy — composite through a host stencil mask', () => {
     expect(greenLeft).toBeGreaterThan(200) // guest drew inside the mask
     expect(greenRight).toBe(0) // …and nowhere outside it
     expect(at(W - 2, H / 2)).toEqual([128, 128, 128]) // host pixels untouched
+  })
+
+  // A guest drawn into a frame the host is still rendering: the host's
+  // depth holds geometry the guest must test against (Cesium's globe under
+  // a city). The host's left half is "near" (depth 0); a stock three.js
+  // guest (autoClear on, opaque background) draws a plane across the
+  // whole screen.
+  const depthComposite = (clear: 'none' | 'depth-only'): { greenLeft: number; greenRight: number; magenta: number } => {
+    const shadow = makeCtx()
+    const host = makeCtx()
+    host.clearColor(0.5, 0.5, 0.5, 1)
+    host.clearDepth(1)
+    host.clear(host.COLOR_BUFFER_BIT | host.DEPTH_BUFFER_BIT | host.STENCIL_BUFFER_BIT)
+    host.enable(host.SCISSOR_TEST)
+    host.scissor(0, 0, W / 2, H)
+    host.clearDepth(0)
+    host.clear(host.DEPTH_BUFFER_BIT)
+    host.disable(host.SCISSOR_TEST)
+
+    const out: NetGLCall[] = []
+    const session = makeNetGLRecorderSession(shadow, (c) => out.push(structuredClone(c)))
+    session.checkpoint()
+    const r = new THREE.WebGLRenderer({ context: session.gl, antialias: false, stencil: true, depth: true })
+    r.setSize(W, H, false)
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color('#ff00ff')
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: '#00ff00' })))
+    const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 10)
+    cam.position.z = 1.2
+    r.render(scene, cam)
+
+    const replay = makeNetGLReplay(host, { screen: { clear } })
+    replay.invalidate()
+    for (const c of out) replay(c)
+
+    const px = new Uint8Array(W * H * 4)
+    host.readPixels(0, 0, W, H, host.RGBA, host.UNSIGNED_BYTE, px)
+    let greenLeft = 0
+    let greenRight = 0
+    let magenta = 0
+    for (let i = 0; i < W * H; i += 1) {
+      const [r0, g0, b0] = [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]]
+      if (r0 > 200 && g0 < 50 && b0 > 200) magenta += 1
+      if (g0 > 200 && r0 < 50) {
+        if (i % W < W / 2) greenLeft += 1
+        else greenRight += 1
+      }
+    }
+    return { greenLeft, greenRight, magenta }
+  }
+
+  it("clear: 'none' keeps the host's depth: the guest is hidden behind host geometry", () => {
+    const { greenLeft, greenRight, magenta } = depthComposite('none')
+    expect(magenta).toBe(0) // no colour clear
+    expect(greenRight).toBe((W / 2) * H) // drawn where the host is far
+    expect(greenLeft).toBe(0) // and depth-tested out where it's near
+  })
+
+  it("clear: 'depth-only' would wipe that depth (why 'none' exists)", () => {
+    const { greenLeft, magenta } = depthComposite('depth-only')
+    expect(magenta).toBe(0)
+    expect(greenLeft).toBe((W / 2) * H)
   })
 })
