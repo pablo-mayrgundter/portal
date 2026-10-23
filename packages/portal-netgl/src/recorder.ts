@@ -237,9 +237,22 @@ export const makeNetGLRecorderSession = (
     if (handleId !== undefined) return { __netgl_handle: handleId }
     if (ArrayBuffer.isView(arg)) {
       const view = arg as ArrayBufferView & { length: number }
+      const buffer = view.buffer as ArrayBuffer
+      // A view into part of a larger buffer (a framework's scratch pool, a
+      // WASM heap) ships only its own bytes. The whole buffer would be
+      // cloned across the transport otherwise: at best wasted copying, at
+      // worst the guest's entire heap handed to another origin.
+      if (view.byteLength < buffer.byteLength) {
+        return {
+          __netgl_typedarray: view.constructor.name,
+          buffer: buffer.slice(view.byteOffset, view.byteOffset + view.byteLength),
+          offset: 0,
+          length: view.length
+        }
+      }
       return {
         __netgl_typedarray: view.constructor.name,
-        buffer: view.buffer as ArrayBuffer,
+        buffer,
         offset: view.byteOffset,
         length: view.length
       }

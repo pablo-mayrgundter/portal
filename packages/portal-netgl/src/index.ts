@@ -79,8 +79,14 @@ export {
 } from './three-helpers'
 export {
   windowTransport,
+  iframeTransport,
+  parentTransport,
+  resolveParentOrigin,
+  isSerializedOrigin,
   type WindowTransport,
-  type WindowTransportOptions
+  type WindowTransportOptions,
+  type IframeTransportOptions,
+  type ParentTransportOptions
 } from './window-transport'
 export {
   attachNetGLDeckLayer,
