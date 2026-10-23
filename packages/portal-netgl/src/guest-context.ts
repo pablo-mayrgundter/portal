@@ -8,6 +8,8 @@
 //   - frame boundaries: a `netgl:frame-end` marker followed by a state
 //     checkpoint, so the next batch replays from the guest's own GL state
 //     no matter what the host did to the shared context in between
+//     (`endFrame()`), or by a checkpoint deferred to the guest's next call,
+//     for a guest drawn several times inside one host frame (`subFrame()`)
 //   - the `netgl:ready` handshake and inbound control messages
 //
 // A framework shim ("f′" for framework f) is then just:
@@ -75,10 +77,36 @@ export type NetGLGuestContext = {
    */
   shadow: WebGL2RenderingContext
   transport: NetGLTransport
-  /** Mark the end of a frame: posts frame-end, then a checkpoint. */
-  endFrame(): void
+  /**
+   * Mark the end of a frame: posts frame-end, then a checkpoint (when the
+   * context was made with `checkpoints`). `{ checkpoint: false }` posts
+   * the frame-end alone: the next frame then replays from whatever state
+   * the host left, so use it only where the host doesn't touch the shared
+   * context between the guest's frames, or the guest resets its own state
+   * cache.
+   */
+  endFrame(options?: NetGLEndFrameOptions): void
+  /**
+   * Mark the end of a sub-frame: one of several draws of the guest inside
+   * a single host frame, such as one per depth frustum of a Cesium frame.
+   * Posts frame-end, as `endFrame()` does, and defers the checkpoint to
+   * just before the guest's next GL call. Same calls, same state on the
+   * receiver; with `makeNetGLImmediateLink` the next call comes inside the
+   * host's next `link.frame()`, so the checkpoint replays there directly
+   * rather than being cloned into the link's queue. Works across host
+   * frames too: a guest drawn only in sub-frames can call it every time.
+   */
+  subFrame(): void
   /** Post the `netgl:ready` handshake. */
   announce(anchor: PortalAnchor, background?: ColorRGB): void
+}
+
+export type NetGLEndFrameOptions = {
+  /**
+   * Post the state checkpoint after the frame-end. Default true (when the
+   * context has `checkpoints`).
+   */
+  checkpoint?: boolean
 }
 
 /** Host → guest: the `netgl:ready` handshake arrived. */
@@ -112,10 +140,15 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
     gl: session.gl,
     shadow,
     transport,
-    endFrame() {
+    endFrame(options = {}) {
       const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
       transport.post(frameEnd)
-      if (checkpoints) session.checkpoint()
+      if (checkpoints && options.checkpoint !== false) session.checkpoint()
+    },
+    subFrame() {
+      const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
+      transport.post(frameEnd)
+      if (checkpoints) session.deferCheckpoint()
     },
     announce(anchor, background = { r: 0, g: 0, b: 0 }) {
       const ready: NetGLReadyMessage = { type: 'netgl:ready', anchor, background }
