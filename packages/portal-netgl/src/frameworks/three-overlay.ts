@@ -25,7 +25,7 @@
 
 import type * as THREE from 'three'
 import { makeNetGLGuestContext, type NetGLGuestContext } from '../guest-context'
-import { isNetGLLayerViewMessage, mat4InvertRigid, type NetGLLayerView } from '../layer-view'
+import { isNetGLLayerViewMessage, mat4InvertRigid, postLayerInvalidate, type NetGLLayerView } from '../layer-view'
 import type { NetGLTransport } from '../renderer'
 
 export type NetGLThreeOverlayGuestConfig = {
@@ -60,6 +60,11 @@ export type NetGLThreeOverlayGuest = {
    */
   start(): void
   stop(): void
+  /**
+   * Tell the host the scene changed although the view didn't (data
+   * arrived): it sends the view again, and the guest renders it.
+   */
+  invalidate(reason?: string): void
 }
 
 export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig): NetGLThreeOverlayGuest => {
@@ -125,6 +130,9 @@ export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig)
     stop() {
       unsubscribe?.()
       unsubscribe = null
+    },
+    invalidate(reason) {
+      postLayerInvalidate(transport, reason)
     }
   }
 }

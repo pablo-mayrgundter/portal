@@ -200,6 +200,26 @@ unanswered), and redraws deck when the guest's frame arrives. With
 `render: (view) => …` instead, the guest is in the same page: give it
 `layer.transport`, and it renders synchronously in each deck frame.
 
+The adapter also speaks the rest of the layer control plane (shapes from
+RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):
+
+- **`layer:invalidate {reason?}`** (guest → host): the guest's scene changed
+  while the camera and clock didn't (data arrived). The host re-sends the
+  current view with a new `viewId` and redraws, still one view in flight.
+  Guests post it with `postLayerInvalidate(transport, reason)` or the
+  overlay guest's `guest.invalidate(reason)`.
+- **`layer:hello`** (guest → host, repeated until acked): exposed as
+  `layer.hello` and `onHello`, answered with `layer:hello-ack` from
+  `acceptHello(hello)` (default `{ accepted: true }`). A hello also counts
+  as the guest being ready for views.
+- **Anchors:** `layer.subscribeAnchors(patterns)` posts
+  `layer:anchors-subscribe {patterns}` (re-sent when the guest says hello,
+  so it can be called early); `layer.onAnchors(cb)` / `onAnchors` deliver
+  each `layer:anchors {viewId, timeMs, anchors}`, and `layer.anchors` holds
+  the last.
+- Anything else reaches `onControl`; `layer.postToGuest(msg)` sends
+  anything else.
+
 The view (`NetGLLayerView`): `viewMatrix` (ECEF metres → eye metres,
 rigid, column-major), `projectionMatrix` (deck's, scale folded back in,
 so clip space and depth are deck's), `viewport` (drawing-buffer pixels),

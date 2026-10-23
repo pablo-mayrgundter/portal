@@ -55,6 +55,87 @@ export const isNetGLLayerViewMessage = (msg: unknown): msg is NetGLLayerViewMess
   (msg as { type?: unknown }).type === 'layer:view' &&
   typeof (msg as { view?: unknown }).view === 'object'
 
+// --- The rest of the layer control plane that 0.4 speaks ---------------
+// Shapes from RFC 0001 (docs/rfcs/0001-globe-orbit-layers.md, §6.7, §8.1,
+// §10.6); only the fields named here are read, the rest pass through.
+
+/**
+ * Guest → host: something the guest draws changed although the view
+ * didn't (data arrived, a subscription changed). The host sends the current
+ * view again, with a new `viewId`, and redraws.
+ */
+export type NetGLLayerInvalidateMessage = { type: 'layer:invalidate'; reason?: string }
+
+/** Guest → host, repeated until acked: who the guest is and what it can do. */
+export type NetGLLayerHelloMessage = {
+  type: 'layer:hello'
+  /** The layer protocol's version, an integer. */
+  version: number
+  /** What draws ('three', 'cesium', 'celestiary-orbits'). Older guests call it `kind`. */
+  adapter?: string
+  capabilities?: Record<string, unknown>
+  [field: string]: unknown
+}
+
+/** The host's answer to `layer:hello`. Everything but `accepted` is optional (RFC §10.6). */
+export type NetGLLayerHelloAnswer = {
+  accepted: boolean
+  /** Why, when `accepted` is false. */
+  reason?: string
+  [field: string]: unknown
+}
+
+/** Host → guest: the answer to `layer:hello`. */
+export type NetGLLayerHelloAckMessage = NetGLLayerHelloAnswer & { type: 'layer:hello-ack' }
+
+/** A named position a layer publishes (RFC §8.1). */
+export type NetGLAnchor = {
+  /** An anchor URI: 'norad:25544', 'dsn:DSS-43'. */
+  id: string
+  /** Layer-frame metres at the anchors' time. */
+  p?: [number, number, number]
+  /** The same, as celestiary's layer mode (#296) names it. */
+  ecef?: [number, number, number]
+  kind?: string
+  name?: string
+  [field: string]: unknown
+}
+
+/** Guest → host: anchor positions for a view. */
+export type NetGLLayerAnchorsMessage = {
+  type: 'layer:anchors'
+  viewId: number | null
+  timeMs: number
+  /** The whole subscribed set. */
+  anchors?: NetGLAnchor[]
+  /** Or a delta: changed and new, and gone. */
+  upsert?: NetGLAnchor[]
+  remove?: string[]
+}
+
+/** Host → guest: which anchors to publish; replaces the default subscription unless `subId` is set. */
+export type NetGLLayerAnchorsSubscribeMessage = {
+  type: 'layer:anchors-subscribe'
+  /** Ids, 'scheme:*', or '*'. */
+  patterns: string[]
+  subId?: number
+  fields?: Array<'v' | 'geo' | 'meta'>
+  rate?: 'per-view' | 'on-change' | { hz: number }
+}
+
+/** Guest side: tell the host to send the current view again (see `NetGLLayerInvalidateMessage`). */
+export const postLayerInvalidate = (transport: { post(msg: unknown): void }, reason?: string): void => {
+  const msg: NetGLLayerInvalidateMessage = reason === undefined ? { type: 'layer:invalidate' } : { type: 'layer:invalidate', reason }
+  transport.post(msg)
+}
+
+const hasType = (msg: unknown, type: string): boolean =>
+  typeof msg === 'object' && msg !== null && (msg as { type?: unknown }).type === type
+
+export const isNetGLLayerInvalidateMessage = (msg: unknown): msg is NetGLLayerInvalidateMessage => hasType(msg, 'layer:invalidate')
+export const isNetGLLayerHelloMessage = (msg: unknown): msg is NetGLLayerHelloMessage => hasType(msg, 'layer:hello')
+export const isNetGLLayerAnchorsMessage = (msg: unknown): msg is NetGLLayerAnchorsMessage => hasType(msg, 'layer:anchors')
+
 /** a · b, column-major 4×4, in doubles. */
 export const mat4Multiply = (a: ArrayLike<number>, b: ArrayLike<number>): NetGLMat4 => {
   const o = new Array<number>(16)

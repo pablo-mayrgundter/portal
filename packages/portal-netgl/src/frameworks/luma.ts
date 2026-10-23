@@ -38,9 +38,17 @@ import { makeNetGLHostReceiver, type NetGLHostReceiver } from '../host-receiver'
 import { makeNetGLImmediateLink, type NetGLImmediateLink } from '../immediate-link'
 import type { NetGLReadyMessage } from '../guest-context'
 import {
+  isNetGLLayerAnchorsMessage,
+  isNetGLLayerHelloMessage,
+  isNetGLLayerInvalidateMessage,
   mat4Multiply,
   mat4TransformVec4,
   sphereToEcef,
+  type NetGLLayerAnchorsMessage,
+  type NetGLLayerAnchorsSubscribeMessage,
+  type NetGLLayerHelloAckMessage,
+  type NetGLLayerHelloAnswer,
+  type NetGLLayerHelloMessage,
   type NetGLLayerView,
   type NetGLLayerViewMessage,
   type NetGLMat4
@@ -216,6 +224,18 @@ type DeckLayerBase = {
    */
   restore?: 'luma-stack' | 'none'
   onReady?: (msg: NetGLReadyMessage) => void
+  /**
+   * Decide the answer to the guest's `layer:hello` (repeated until acked;
+   * this is called for each). Default: `{ accepted: true }`, the RFC's
+   * defaults. Views go to the guest once it has said `netgl:ready` or
+   * `layer:hello`, accepted or not: refusing doesn't stop the layer.
+   */
+  acceptHello?: (hello: NetGLLayerHelloMessage) => NetGLLayerHelloAnswer
+  /** The guest's first `layer:hello` (and a later one after a reload). */
+  onHello?: (hello: NetGLLayerHelloMessage) => void
+  /** Every `layer:anchors` the guest publishes (also `layer.onAnchors`). */
+  onAnchors?: (msg: NetGLLayerAnchorsMessage) => void
+  /** Any other message from the guest. */
   onControl?: (msg: unknown) => void
   onError?: (err: unknown) => void
 }
@@ -264,6 +284,20 @@ export type NetGLDeckLayer = {
   readonly stats: NetGLDeckLayerStats
   /** Skip the guest while false. Setting it asks deck for a redraw. */
   enabled: boolean
+  /** The guest's `layer:hello`, once received. */
+  readonly hello: NetGLLayerHelloMessage | null
+  /** The last `layer:anchors` the guest published. */
+  readonly anchors: NetGLLayerAnchorsMessage | null
+  /**
+   * Ask the guest to publish these anchors (`layer:anchors-subscribe`;
+   * replaces the subscription). Re-sent when the guest says hello, so it
+   * can be called before the guest has loaded.
+   */
+  subscribeAnchors(patterns: string[], opts?: Omit<NetGLLayerAnchorsSubscribeMessage, 'type' | 'patterns'>): void
+  /** Call `listener` with each `layer:anchors`. Returns an unsubscribe. */
+  onAnchors(listener: (msg: NetGLLayerAnchorsMessage) => void): () => void
+  /** Post any control message to the guest. */
+  postToGuest(msg: unknown): void
   /** Restore deck's previous `onAfterRender` and stop listening. */
   detach(): void
 }
@@ -317,6 +351,46 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     })
   }
 
+  // The layer control plane: hello / hello-ack, invalidate, anchors.
+  let hello: NetGLLayerHelloMessage | null = null
+  let anchors: NetGLLayerAnchorsMessage | null = null
+  let subscription: NetGLLayerAnchorsSubscribeMessage | null = null
+  const anchorListeners = new Set<(msg: NetGLLayerAnchorsMessage) => void>()
+  if (config.onAnchors) anchorListeners.add(config.onAnchors)
+  // Set by `layer:invalidate`: send the next view even if it's unchanged.
+  let forceView = false
+  const postToGuest = (msg: unknown): void => {
+    if (link) link.postToGuest(msg)
+    else receiver?.post(msg)
+  }
+  const onControl = (msg: unknown): void => {
+    if (isNetGLLayerInvalidateMessage(msg)) {
+      forceView = true
+      requestRedraw('netgl guest invalidated')
+      return
+    }
+    if (isNetGLLayerHelloMessage(msg)) {
+      const answer: NetGLLayerHelloAnswer = config.acceptHello ? config.acceptHello(msg) : { accepted: true }
+      const ack: NetGLLayerHelloAckMessage = { ...answer, type: 'layer:hello-ack' }
+      postToGuest(ack)
+      // The guest repeats hello until acked; a hello after that is a reload.
+      const first = hello === null
+      hello = msg
+      if (first) {
+        config.onHello?.(msg)
+        requestRedraw('netgl guest hello')
+      }
+      if (subscription) postToGuest(subscription)
+      return
+    }
+    if (isNetGLLayerAnchorsMessage(msg)) {
+      anchors = msg
+      for (const l of anchorListeners) l(msg)
+      return
+    }
+    config.onControl?.(msg)
+  }
+
   const common = {
     gl,
     replay: config.replay,
@@ -324,7 +398,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
       config.onReady?.(msg)
       requestRedraw('netgl guest ready')
     },
-    onControl: config.onControl,
+    onControl,
     onError: config.onError
   }
   const link = isImmediate ? makeNetGLImmediateLink(common) : null
@@ -344,11 +418,13 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     requestRedraw('netgl guest frame')
   })
   const sendView = (view: NetGLLayerView): void => {
-    if (!receiver || !receiver.ready || inFlight) return
-    // An unchanged view needs no new frame, unless the last one can't be
-    // re-run (it deleted objects, as a three.js guest's first frame does):
-    // then the guest draws it again, so it stays on screen.
-    if (lastSent && sameView(lastSent, view) && receiver.canRerun) return
+    if (!receiver || !(receiver.ready || hello) || inFlight) return
+    // An unchanged view needs no new frame, unless the guest invalidated
+    // its last one, or that one can't be re-run (it deleted objects, as a
+    // three.js guest's first frame does): then the guest draws it again,
+    // so it stays on screen.
+    if (!forceView && lastSent && sameView(lastSent, view) && receiver.canRerun) return
+    forceView = false
     const msg: NetGLLayerViewMessage = { type: 'layer:view', viewId: ++viewId, view }
     receiver.post(msg)
     stats.viewsSent += 1
@@ -380,6 +456,9 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
       cssWidth
     })
     if (!view) return
+    // Same page: the guest renders every deck frame, so an invalidate only
+    // needed the redraw.
+    if (link) forceView = false
     const t0 = performance.now()
     const run = (): void => {
       if (link) {
@@ -414,6 +493,23 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
       enabled = v
       requestRedraw('netgl layer toggled')
     },
+    get hello() {
+      return hello
+    },
+    get anchors() {
+      return anchors
+    },
+    subscribeAnchors(patterns, opts = {}) {
+      subscription = { ...opts, type: 'layer:anchors-subscribe', patterns: [...patterns] }
+      postToGuest(subscription)
+    },
+    onAnchors(listener) {
+      anchorListeners.add(listener)
+      return () => {
+        anchorListeners.delete(listener)
+      }
+    },
+    postToGuest,
     detach() {
       if (detached) return
       detached = true

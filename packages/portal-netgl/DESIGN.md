@@ -325,6 +325,18 @@ satellites) and `frameworks/luma.ts` (`attachNetGLDeckLayer`).
   receiver won't re-run it (see the Cesium findings); with the camera
   still, no new view went out, and the guest vanished after one frame.
   `receiver.canRerun` now tells the adapter to ask again for the same view.
+- **A still view can still need a frame.** Sending views only when they
+  change left guest-side changes unseen while the camera and clock were
+  still (celestiary's DSN feed arriving, a new anchor subscription). The
+  guest now posts `layer:invalidate`, and the host re-sends the current
+  view with a new `viewId`, still one in flight.
+- **The control plane beside NetGL.** celestiary's layer mode (celestiary/
+  web#296) handshakes with `layer:hello` and publishes `layer:anchors`; the
+  adapter acks the hello (`acceptHello`, default `{accepted: true}`), takes
+  it as readiness, and gives anchors an API (`subscribeAnchors`,
+  `onAnchors`), in RFC 0001's shapes. The nonce and MessagePort of RFC
+  §10.2, and `viewId` on `netgl:frame-end` (its open question 18), aren't
+  built.
 - **The camera contract.** deck's globe "common" space is a sphere of 256
   units for 6,370,972 m, with common = k·(e_y, −e_x, e_z). The adapter
   doesn't use those constants (`_GlobeView` is experimental and doesn't

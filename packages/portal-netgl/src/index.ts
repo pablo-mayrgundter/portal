@@ -111,6 +111,17 @@ export {
 } from './frameworks/three-overlay'
 export {
   isNetGLLayerViewMessage,
+  isNetGLLayerInvalidateMessage,
+  isNetGLLayerHelloMessage,
+  isNetGLLayerAnchorsMessage,
+  postLayerInvalidate,
+  type NetGLAnchor,
+  type NetGLLayerAnchorsMessage,
+  type NetGLLayerAnchorsSubscribeMessage,
+  type NetGLLayerHelloMessage,
+  type NetGLLayerHelloAckMessage,
+  type NetGLLayerHelloAnswer,
+  type NetGLLayerInvalidateMessage,
   mat4Multiply,
   mat4InvertRigid,
   mat4TransformVec4,
