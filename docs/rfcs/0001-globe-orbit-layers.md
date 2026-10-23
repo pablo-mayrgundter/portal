@@ -7,7 +7,7 @@
 | **Authors** | the portal maintainers; drafted in an agent session from the netmap × celestiary spike |
 | **Changes** | [`docs/portal-layers.md`](../portal-layers.md): layer kinds, `layer:hello`, `layer:view`, depth contract, security, lifecycle. [`packages/portal-netgl/DESIGN.md`](../../packages/portal-netgl/DESIGN.md): composition modes, screen policy. |
 | **Adds** | the overlay kind; shared depth and extent negotiation; a projection descriptor; the `portal.time/1` and `portal.anchors/1` extensions; anchor URIs; flattened nesting; cross-origin handshake and trust tiers; host adapter restore/invalidate semantics |
-| **Related** | portal [#36](https://github.com/pablo-mayrgundter/portal/pull/36): the luma.gl / deck.gl host adapter, `layer:view` and origin-pinned transports (portal-netgl 0.4.0). celestiary/web [#296](https://github.com/celestiary/web/pull/296): layer mode, the first cross-origin orbits guest (`design/LayerMode.md`). The generative-NYC nested portal RFC (in progress, separate session). |
+| **Related** | portal [#34](https://github.com/pablo-mayrgundter/portal/pull/34) (merged, portal-netgl 0.4.0): `screen.clear: 'none'` and sub-frames, for New York drawn inside Cesium's frame. portal [#36](https://github.com/pablo-mayrgundter/portal/pull/36): the luma.gl / deck.gl host adapter, `layer:view` and origin-pinned transports (being renumbered to portal-netgl 0.5.0, since 0.4.0 is #34's). celestiary/web [#296](https://github.com/celestiary/web/pull/296): layer mode, the first cross-origin orbits guest (`design/LayerMode.md`). The generative-NYC nested portal RFC (in progress, separate session). |
 
 ## 1. Summary
 
@@ -39,8 +39,10 @@ needs a shape to stencil, and orbits have none. So this RFC adds:
 §12 lists what changes in the existing docs. §13 holds the open
 questions.
 
-Two implementations now exist: portal #36 (the deck.gl host) and
-celestiary #296 (the orbits guest). §10.8 records what they found, and
+Three implementations now exist: portal #36 (the deck.gl host),
+celestiary #296 (the orbits guest), and portal #34 (merged: a three.js
+New York drawn inside Cesium's frame, the first nested in-place guest,
+which bears on §5, §9 and §11). §10.8 records what they found, and
 §6.7 maps the message names and fields they built onto this RFC's: where
 they agree the RFC adopts theirs, and where they differ it says which way
 to go.
@@ -89,7 +91,7 @@ What the spike (netmap `spike/celestiary-layer`, celestiary
   `sceneReferredUniform` and Cesium's `Ellipsoid.default` are library
   globals. Two engines in one realm collide; iframes don't.
 
-portal #36 turned the spike's host side into portal-netgl 0.4.0
+portal #36 turned the spike's host side into portal-netgl 0.5.0
 (`attachNetGLDeckLayer`, `globeLayerView`, origin-pinned transports), and
 celestiary #296 its guest side into layer mode, a cross-origin page.
 Their findings are in §10.8.
@@ -186,20 +188,29 @@ interface SharedDepth {
     reversed: boolean              // reverse-Z
   }
   bits: 16 | 24 | 32
-  logarithmic: false               // shared needs the projection's own depth; see below
+  encoding:                        // how the guest must write depth (#34)
+    | { kind: 'projection' }       // the projection's own (deck; Cesium with log depth off)
+    | { kind: 'log'; near: number; oneOverLog2FarDepthFromNearPlusOne: number }
+                                   // Cesium's log depth: gl_FragDepth = log2(w − near + 1) · that factor
 }
 ```
 
 Rules:
 
 - **No depth clears on the screen.** The screen policy drops the guest's
-  colour, depth and stencil clears for screen draws (`clear: 'none'`,
-  §12). Its render-target passes keep their own clears.
+  colour, depth and stencil clears for screen draws: `clear: 'none'`,
+  built in #34 (portal-netgl 0.4.0). `'depth-only'` would wipe the host
+  depth the guest tests against. Its render-target passes keep their own
+  clears.
 - **No projection changes.** No near or far of the guest's own, no TAA
-  jitter, no multi-frustum, no logarithmic depth written from the
-  fragment shader. A Cesium *guest* in shared mode would need one frustum
-  and `logarithmicDepthBuffer: false`; until then Cesium guests stay
-  `in-place` with `save-restore`.
+  jitter, no multi-frustum of the guest's own. A host with several frusta
+  calls the guest once per frustum, each a sub-frame with that frustum's
+  projection (§9.7). A Cesium *guest* in shared mode would need one
+  frustum and `logarithmicDepthBuffer: false`; until then Cesium guests
+  stay `in-place` with `save-restore`.
+- **The guest writes depth the host's way.** With a `log` encoding it
+  writes `gl_FragDepth` by the host's formula from the parameters given,
+  as #34's New York does inside Cesium's frame with log depth on.
 - **Depth writes are a grant.** With `write: true` the guest's depth is
   there for later layers, links and host post-passes. With `write: false`
   (the spike) the guest only tests. Points and lines don't need to occlude
@@ -211,11 +222,11 @@ Rules:
   drawing on or near the host's surface lifts it by more than the host's
   step at that distance, or uses polygon offset, or the layer isn't a
   shared overlay at all but stencilled. Open question 19.
-- **Hosts that can't share.** A host whose depth isn't the depth of one
-  projection matrix (Cesium's log depth over several frusta) offers no
-  `shared`. A `shared-texture` mode (the host's depth as a texture plus
-  its encoding, tested in the guest's shader) would cover it, and is left
-  to open question 2.
+- **Hosts that can't share** offer no `shared`. #34 shows Cesium can:
+  its log depth over several frusta is shared by drawing the guest once
+  per frustum and writing Cesium's log depth (open question 2). A
+  `shared-texture` mode (the host's depth as a texture plus its encoding,
+  tested in the guest's shader) remains for hosts with no such hook.
 
 ### 5.2 Save-restore and guest-private
 
@@ -301,7 +312,7 @@ viewport, exposure". This makes it precise.
 type Vec3 = [number, number, number]
 type Mat4 = number[]                         // 16, column-major, doubles (JS numbers survive structured clone)
 
-// The envelope, as portal-netgl 0.4.0 has it (#36, layer-view.ts: NetGLLayerViewMessage)
+// The envelope, as portal-netgl 0.5.0 has it (#36, layer-view.ts: NetGLLayerViewMessage)
 interface LayerViewMessage {
   type: 'layer:view'
   viewId: number                             // increasing; frames and anchors are tagged with it
@@ -309,7 +320,7 @@ interface LayerViewMessage {
 }
 
 interface LayerView {
-  // Implemented in 0.4.0 (NetGLLayerView, filled by globeLayerView)
+  // Implemented in 0.5.0 (NetGLLayerView, filled by globeLayerView)
   frame: FrameId                             // 'ecef'
   viewMatrix: Mat4       // rigid: layer-frame metres → eye metres. Right-handed; the eye looks down −Z, +Y up.
   projectionMatrix: Mat4 // eye metres → clip, GL conventions (z in [−w, w]): the host's, its scale folded in
@@ -320,6 +331,7 @@ interface LayerView {
 
   // Proposed here
   phase?: 'opaque' | 'translucent' | 'overlay' // only if negotiated (§5.4)
+  subFrame?: { index: number; count: number } // one of several draws this host frame, e.g. per frustum (§9.7)
   eye?: Vec3              // the eye in layer-frame metres, in doubles, for RTE (§6.2); = −Rᵀt of viewMatrix
   clipRange?: { near: number; far: number }  // metres along −Z of the eye: what the projection clips to (§5.3)
   projection?: Projection // a non-matrix kind (§6.4); then viewMatrix and projectionMatrix are absent
@@ -333,7 +345,7 @@ interface LayerView {
 ### 6.1 Frames and units
 
 - **Metres**, always. A host whose world isn't in metres (deck's common
-  units) folds its scale into the projection, as the spike and 0.4.0's
+  units) folds its scale into the projection, as the spike and 0.5.0's
   `globeLayerView` do: `viewMatrix = W/s`,
   `projectionMatrix = P·diag(s, s, s, 1)`. The guest never
   sees the host's units. This changes nothing for celestiary, which is in
@@ -395,16 +407,16 @@ geocentric direction of the same point differ by up to 0.19°, about
 21 km on the ground.
 
 ```ts
-type EarthModel =                                       // `model`, as 0.4.0 names it
-  | { model: 'sphere'; radius: number;                   // 0.4.0 sends this, without `latitude`
+type EarthModel =                                       // `model`, as 0.5.0 names it
+  | { model: 'sphere'; radius: number;                   // 0.5.0 sends this, without `latitude`
       latitude?: 'geodetic-as-spherical' | 'geocentric' } // absent: geodetic-as-spherical (deck, MapLibre globes)
   | { model: 'wgs84' }                                   // a = 6378137, f = 1/298.257223563
   | { model: 'ellipsoid'; radii: Vec3 }
 ```
 
-0.4.0 puts the model in every view (`view.earth`), measured from deck's
+0.5.0 puts the model in every view (`view.earth`), measured from deck's
 viewport, rather than once in `hello-ack`. Per view is fine, and lets a
-host change globes; the RFC adopts it. 0.4.0's `sphereToEcef` is the
+host change globes; the RFC adopts it. 0.5.0's `sphereToEcef` is the
 `geodetic-as-spherical` mapping.
 
 The host declares its model in `hello-ack`, and its **surface mapping**
@@ -476,7 +488,7 @@ interface WebMercatorProjection {
   tangent-plane frame per tile (or per region), in which the Mercator
   view is close to affine, and the guest draws each region with its own
   4×4.
-- **Today (#36):** 0.4.0's view is a single 4×4. deck's `GlobeView`
+- **Today (#36):** 0.5.0's view is a single 4×4. deck's `GlobeView`
   switches to a `WebMercatorViewport` above zoom 12; `globeLayerView`
   then returns null and the adapter skips the guest, so the satellites
   vanish when you zoom in to a city.
@@ -491,11 +503,11 @@ the viewport's `w × h` (`setSize(w, h, false)`, never touching
 
 ### 6.7 What the implementations built, and the diffs
 
-The control plane as #36 (portal-netgl 0.4.0, host side) and #296
+The control plane as #36 (portal-netgl 0.5.0, host side) and #296
 (celestiary layer mode, guest side) implemented it, against this RFC.
 "Adopt" means the RFC now uses the implementation's name or shape.
 
-| Message | #36 (0.4.0) | #296 | RFC | Resolution |
+| Message | #36 (0.5.0) | #296 | RFC | Resolution |
 |---|---|---|---|---|
 | handshake | `netgl:ready` / `netgl:ready-ack`, repeated until acked; origin-pinned transports | `layer:hello`, repeated every 500 ms until `layer:hello-ack` | `layer:hello` / `hello-ack` (folding `netgl:ready` in, as `portal-layers.md` says), plus a nonce (§10.2) | adopt #296's repeat-until-acked hello; #36 adds it beside `netgl:ready` |
 | `layer:hello` | — | `{version: 1, kind: 'celestiary-orbits', capabilities: {anchors, time, labels}, contracts: {depth: 'shared', alpha: 'coverage', color: 'display-srgb'}, extent: {radiusM, beamsM}}` | §10.6 | adopt `version` (an integer) and `capabilities`. #296's `kind` is what the RFC calls `adapter` (`kind` is the layer kind, §4). `contracts.depth` is the guest's own depth encoding in 0.1, so the mode moves to `capabilities.depth`. `color: 'display-srgb'` is 0.1's `display`. `extent.radiusM` is `sphere.radius`; `beamsM` (content past it) is `beyond: 'clamp-to-far'` plus `farthest` (§5.3) |
@@ -526,7 +538,7 @@ draws the root's time. Guests never advance time on their own.
 
 Time travels in two parts. What changes every frame rides in the view;
 what changes rarely is a `layer:time` message, sent when it changes. This
-is what the implementations converged on: 0.4.0 puts `timeMs` in every
+is what the implementations converged on: 0.5.0 puts `timeMs` in every
 view, and #296 also takes `layer:time {utcMs, rate}` for a host that
 doesn't.
 
@@ -588,7 +600,7 @@ Why these:
 - **Negotiated.** The guest asks for `portal.time/1` in `layer:hello`
   (`ext`; #296 sends `capabilities.time: true`); the host grants it in
   `hello-ack`, with the scale it will fill `jd` in. Without the
-  extension a guest still gets `timeMs` in each view (0.4.0 always sends
+  extension a guest still gets `timeMs` in each view (0.5.0 always sends
   it).
 - **The instant rides in the view, not a separate message.** Tying it to
   `viewId` means a frame's time and pose can't come apart: a satellite
@@ -895,6 +907,12 @@ interface LayerChildren {        // guest → host: an intermediate layer declar
 interface LayerFrameMaps { type: 'layer:frame-maps'; viewId: number; maps: Record<string, Mat4> } // moving children
 ```
 
+- **Flat vs composed (#34).** #34 runs the other shape, same page: New
+  York's link replays into Cesium's *recorder* (`scene.context._gl`), so
+  its handles and state go through Cesium's, and Cesium's checkpoint stays
+  right without knowing a guest ran. It works, and it costs a GL execution
+  and an encode-decode per level for every call. Flattening avoids that
+  multiplication; composing needs no root cooperation. Open question 11.
 - **The root creates every iframe.** An intermediate guest (the NYC
   portal, say) asks for children with `layer:children`; the root applies
   its own allow-list and capability policy to each, creates the iframe as
@@ -951,6 +969,33 @@ interface LayerFrameMaps { type: 'layer:frame-maps'; viewId: number; maps: Recor
   radius, the whole subtree goes to `hidden` (`layer:visibility`,
   `portal-layers.md` [Lifecycle](../portal-layers.md#lifecycle)) and
   isn't rendered or sent views.
+
+### 9.7 Sub-frames: one layer drawn several times a frame
+
+From #34. Cesium calls an external renderer once per depth frustum it
+overlaps (2–3 with log depth off), after that frustum's opaque pass, and
+clears depth between frusta. Each call is a sub-frame of the guest:
+`link.frame(() => { render(); guestCtx.subFrame() })`.
+
+- **Each sub-frame needs the full checkpoint.** The host changed nearly
+  all state in between (`Context.resetState()`), and the replay can't see
+  what without querying the host. With tracked state it is about 80 state
+  calls and no round trips. `subFrame()` defers the checkpoint to the
+  guest's next call, so the immediate link replays it directly instead of
+  cloning it. `endFrame({checkpoint: false})` is for a host that doesn't
+  touch the context between frames.
+- **Each sub-frame has its own view**: that frustum's projection, and its
+  depth encoding (`view.subFrame`, `SharedDepth.encoding`). Per-frame work
+  (animation, time) runs once per host frame; #34 keys it on Cesium's
+  `frameNumber`.
+- **Sub-frames need a synchronous binding.** The host calls the guest
+  mid-pass, several times; an async transport can't answer in time. A
+  cross-origin guest inside a multi-frustum host would need its frame
+  drawn once and replayed per frustum, which only works if its draws
+  don't depend on the projection. Not proposed.
+- **Insertion is per phase.** Cesium's hook sits after the opaque pass,
+  before translucent: §5.4's phases exist in a real host (open question
+  13).
 
 ### 9.6 Seams for the NYC RFC
 
@@ -1105,7 +1150,7 @@ everything else on the MessagePort; the window listeners are removed
   in flight, the next sent at the end of the current frame, frames tagged
   with their `viewId`, stale frames re-run without uploads.
 - **Frames aren't tagged yet.** `netgl:frame-end` carries no view id in
-  0.4.0, so the host can't tell which view a frame was drawn for, can't
+  0.5.0, so the host can't tell which view a frame was drawn for, can't
   compose it pose-tagged, and can't measure lag. #296 works around it:
   its `layer:anchors {viewId}`, sent after each frame-end, is the frame's
   receipt, and its test host sends the next view on it. The RFC puts
@@ -1113,7 +1158,7 @@ everything else on the MessagePort; the window listeners are removed
 - **A frame that can't be re-run needs a new view.** A three.js guest's
   first frame deletes its shaders after linking, so the host won't re-run
   it (DESIGN.md's Cesium findings); with the camera still, no new view
-  went out and the guest vanished after one frame. 0.4.0's
+  went out and the guest vanished after one frame. 0.5.0's
   `receiver.canRerun` tells the adapter to ask again for the same view.
 - An overlay has no stencil to slide against, but its content lags the
   host's by the round trip: turning the globe 30°/s at 60 fps moves the
@@ -1246,7 +1291,7 @@ The netmap × celestiary exchange, in these shapes:
 
 // host → guest (with the MessagePort)
 { type: 'layer:hello-ack', accepted: true, layerPath: '/celestiary', kind: 'overlay', projection: 'matrix',
-  depth: { mode: 'shared', func: 'lequal', write: false, clip: { z: 'neg-one-to-one', reversed: false }, bits: 24, logarithmic: false },
+  depth: { mode: 'shared', func: 'lequal', write: false, clip: { z: 'neg-one-to-one', reversed: false }, bits: 24, encoding: { kind: 'projection' } },
   frame: { id: 'ecef', earth: { model: 'sphere', radius: 6370972 } },
   trust: 'trusted-origin',
   ext: { 'portal.time/1': {}, 'portal.anchors/1': { publish: ['norad', 'cospar', 'naif', 'dsn', 'dsn-sc'], share: 'host' } } }
@@ -1254,7 +1299,7 @@ The netmap × celestiary exchange, in these shapes:
   epoch: 3, taiMinusUtc: 37, ut1MinusUtc: 0.0 }
 { type: 'layer:anchors-subscribe', patterns: ['norad:44713'] }
 
-// host → guest, per frame (0.4.0's globeLayerView, plus the RFC's optional fields)
+// host → guest, per frame (0.5.0's globeLayerView, plus the RFC's optional fields)
 { type: 'layer:view', viewId: 812,
   view: { frame: 'ecef', viewMatrix, projectionMatrix, viewport: [0, 0, 2400, 1600], pixelRatio: 2,
           timeMs: 1792756800016, earth: { model: 'sphere', radius: 6370972 },
@@ -1325,7 +1370,7 @@ interface LayerStatus {          // guest → host, extends 0.1's; the field is 
 > added this list.
 
 **portal #36: the luma.gl / deck.gl host adapter and cross-origin
-transports** (portal-netgl 0.4.0; `frameworks/luma.ts`,
+transports** (portal-netgl 0.5.0; `frameworks/luma.ts`,
 `window-transport.ts`, `apps/host-netgl-deck`; DESIGN.md's new sections
 "Findings from deck.gl / luma.gl integration" and "Cross-origin
 iframes"). Tested three ways: two ports (cross-origin, same site),
@@ -1391,6 +1436,29 @@ all structured-clonable.
     camera the guest vanished; `receiver.canRerun` makes the adapter ask
     again. §10.4.
 
+**portal #34 (merged): sub-frames and `clear: 'none'`** (portal-netgl
+0.4.0; DESIGN.md "Sub-frames" and "Nested guests: Cesium drawing New
+York"). A three.js New York drawn by Cesium through the fork's
+`scene.externalRenderers`, two levels deep so far; the three-level chain
+under celestiary hasn't run end to end.
+
+- `clear: 'none'` drops every screen clear, so the guest keeps the host
+  depth it tests against. Confirms §5.1.
+- One draw per depth frustum, each a sub-frame with the full checkpoint
+  (about 80 state calls, no queries), deferred so it isn't cloned. Adds
+  §9.7.
+- The guest writes Cesium's log depth from parameters the callback
+  passes. Adds `SharedDepth.encoding`; changes open question 2.
+- Cesium as a host invalidates (`Context.resetState()` after each
+  callback). Settles §11's Cesium row and open question 14 for the fork.
+- Handles compose through recorders when a guest replays into another
+  guest's recorder, at a cost per level. Bears on §9.1 and open question
+  11.
+- Open there: a stencil mode that forbids writes without a mask (Cesium
+  keeps classification bits in stencil). §12.
+- Its versioning: #34 took portal-netgl 0.4.0, so #36 is being
+  renumbered 0.5.0; this RFC's "0.5.0" means #36.
+
 **celestiary/web #296: layer mode** (`design/LayerMode.md`,
 `js/layer/`; `layer.html?host=<origin>&nets=S,I,D&sats=1`). The first
 cross-origin orbits guest: satellites and the Starlink, Iridium and DSN
@@ -1413,7 +1481,7 @@ networks, with no Scene, UI or ephemeris, in its own bundle budget.
   referrer, and only if it's on the list; `'null'` is refused. Posts only
   to that origin. Confirms §10.2. It ships its own `originTransport`
   because it pins portal-netgl 0.3.0, which filtered by source only;
-  0.4.0's `parentTransport` replaces it.
+  0.5.0's `parentTransport` replaces it.
 - **The Earth.** It places the DSN complexes on a 6,378,137 m sphere,
   7 km off deck's surface. §6.3.
 - **Anchor ids** `dsn-site:gdscc` and `spacecraft:vgr1` differ from the
@@ -1450,7 +1518,7 @@ interface HostAdapter {
     depthBits: number
     antialias: boolean
     clip: SharedDepth['clip']
-    logarithmicDepth: boolean                 // true: no 'shared'
+    depthEncoding: SharedDepth['encoding']     // Cesium with log depth: 'log', per frustum
   }
 }
 ```
@@ -1459,7 +1527,7 @@ interface HostAdapter {
 |---|---|---|---|
 | luma.gl / deck.gl | `restore` | `device.pushState()` / `device.popState()` | luma spies on the context's setters, so its cache follows the guest's calls and never goes stale. But its pipelines set only the parameters they name and assume defaults for the rest, so the guest's leftovers leak (`CULL_FACE` cost deck triangles). The stack puts every tracked value back; deck's next frame was bit-identical to a baseline, in the spike and in #36 (`luma.test.ts` on headless-gl, and Chromium). Program, VAO and buffer bindings are outside the stack, and luma binds those per draw. |
 | three.js | `invalidate` | — / `renderer.resetState()`, then rebind its render target | three's cache doesn't see the guest's calls, so it's dropped. `resetState` also forgets the bound render target (DESIGN.md, celestiary findings), which the adapter rebinds. |
-| Cesium (as a host) | unknown | — | Cesium's `Context` caches render state with no public reset. Open question 14. |
+| Cesium (as a host) | `invalidate` | — / `Context.resetState()`, which the external-renderer hook calls after each callback | #34: celestiary's Cesium fork adds `scene.externalRenderers`, called once per depth frustum after its opaque pass, with Cesium's pass framebuffer bound and its depth holding the globe. `resetState()` resets nearly all state, so the guest needs its full checkpoint each sub-frame (§9.7). Upstream Cesium has no such hook. |
 
 Notes:
 
@@ -1485,9 +1553,9 @@ rest land with their implementation, citing this RFC.
 |---|---|---|
 | `portal-layers.md` Concepts: Layer, Shape | every layer has a shape | `kind`; an overlay has no shape (§4) |
 | `portal-layers.md` Contracts: Depth | `save-restore`, `guest-private`; "guest depth never has to agree with the host's" | adds `shared` and `none`; agreement is required in `shared` only (§5) |
-| `portal-layers.md` Protocol: `layer:view` | "view id, camera, projection, light, time, viewport, exposure" | §6's `LayerViewMessage` (0.4.0's envelope and fields, plus the optional ones), with `portal.time/1` (§7) |
+| `portal-layers.md` Protocol: `layer:view` | "view id, camera, projection, light, time, viewport, exposure" | §6's `LayerViewMessage` (0.5.0's envelope and fields, plus the optional ones), with `portal.time/1` (§7) |
 | `portal-layers.md` Protocol: `layer:hello`, `hello-ack` | version, adapter kind, capabilities, contracts | §10.6: `version`, `adapter`, `capabilities` (kinds, depth, projections, frames), extent, extensions, capability requests, a nonce; the ack's `accepted`, `layerPath`, `trust` |
-| `portal-layers.md` Protocol: `netgl:frame-end {viewId}` | in the table; not built (0.4.0 sends no view id) | build it (§10.4) |
+| `portal-layers.md` Protocol: `netgl:frame-end {viewId}` | in the table; not built (0.5.0 sends no view id) | build it (§10.4) |
 | `portal-layers.md` Protocol: new messages | — | `layer:time`, `layer:extent`, `layer:time-request`, `layer:anchors`, `layer:anchor-table`, `layer:anchor-positions`, `layer:anchors-subscribe`, `-unsubscribe`, `layer:children`, `layer:frame-maps` |
 | `portal-layers.md` Protocol: `layer:status` | loading, ready, data-ready, error | the field is `status`; adds `partial` and `timeCoverage`; host-side states in §10.7 |
 | `portal-layers.md` Transports: `frame` binding | iframe, same or cross origin | the iframe attributes, deploy needs and handshake of §10.1–10.2 |
@@ -1495,7 +1563,7 @@ rest land with their implementation, citing this RFC.
 | `portal-layers.md` Lifecycle | idle … failed | adds connecting, refused, unresponsive, context-lost, crashed (§10.7) |
 | DESIGN.md Composition modes | door, in place | adds overlay (§4). *Done in #36.* |
 | DESIGN.md f → f′ and host needs | three's `resetState` | restore vs invalidate; luma.gl / deck.gl host shipped (§11). *Done in #36.* |
-| DESIGN.md Screen policy | `stencil`, `clear: 'depth-only'`, `blend` | adds `clear: 'none'` (shared depth), `discard: true` (warming without a stencil), and an optional screen scissor for untrusted overlays |
+| DESIGN.md Screen policy | `stencil`, `clear: 'depth-only' \| 'none'`, `blend` | `clear: 'none'` *done in #34*. Adds `discard: true` (warming without a stencil), a stencil mode that forbids writes without a mask (#34's open problem: Cesium keeps classification bits there), and an optional screen scissor for untrusted overlays |
 | DESIGN.md Open problems | — | non-affine host views, view-tagged frames. *Done in #36*; §6.4 and §10.4 propose the answers |
 | DESIGN.md Lessons: same page beats an iframe | stands | unchanged; §10 says why cross-origin anyway |
 | README "Not yet": cross-origin iframes | designed, not built | origin-pinned transports shipped in #36; the trust tiers and handshake of §10 still to build |
@@ -1509,13 +1577,15 @@ discussion, or in an RFC issue citing the number.
    kind for `trusted-origin` and `bundled` guests only, or does an
    `untrusted-gl` overlay get a screen scissor (or a stencil, where the
    host has one) from its extent's screen bounds?
-2. **Cesium as a host.** Its depth is logarithmic, over several frusta.
-   Do we specify a `shared-texture` depth mode now (the host's depth as a
-   texture plus its encoding, tested in the guest's shader), or leave
-   Cesium hosts to `in-place` and `save-restore`?
+2. **Cesium as a host.** *Mostly answered by #34:* shared depth works
+   with Cesium's log depth over several frusta, by drawing the guest once
+   per frustum and writing Cesium's log depth (`SharedDepth.encoding`).
+   Left: does `shared-texture` still need specifying, for hosts with no
+   per-frustum hook (upstream Cesium)?
 3. **Depth writes in shared mode.** Default `write: false` (the spike),
    or `true`, so links, later layers and host post-passes test against the
-   guest?
+   guest? (#34's city writes depth, as Cesium's external-renderer contract
+   requires, so the default may need to be per host.)
 4. **Time on the wire.** Is `timeMs` plus an optional two-part `jd` the
    right minimum, or should every view carry a two-part TT date? And is
    the host the only source of leap seconds and UT1 − UTC, binding on
@@ -1543,15 +1613,24 @@ discussion, or in an RFC issue citing the number.
     grants, as proposed?
 11. **Who creates nested iframes.** The root, on an intermediate guest's
     `layer:children` request (proposed), or the intermediate guest,
-    relaying messages? Does the NYC RFC agree?
+    relaying messages? #34 runs the composed shape on one page (New York
+    replays into Cesium's recorder) and shows its cost: a GL execution and
+    an encode-decode per level per call. Is composed acceptable for
+    same-page levels and flat required for cross-origin ones? Does the NYC
+    RFC agree?
 12. **Time across levels.** One clock everywhere, or may an edge offset
     or scale time (a door into another date)?
-13. **Insertion points.** Is one insertion point per layer per frame
-    enough for v1, with phases later? Should the luma adapter use deck's
-    layer order (a deck layer that runs the guest) from the start?
-14. **Hosts that neither restore nor invalidate.** What does a Cesium
-    host adapter do after a replay, with no public reset of its
-    `Context`'s cache?
+13. **Insertion points.** #34 shows a real host with several: Cesium
+    calls its external renderers per frustum, after opaque and before
+    translucent. So sub-frames and phases are in v1 for synchronous
+    bindings. Left: should the luma adapter use deck's layer order (a deck
+    layer that runs the guest) from the start, and do async bindings get
+    only one insertion point?
+14. **Hosts that neither restore nor invalidate.** *Answered for
+    Cesium by #34:* invalidate, through `Context.resetState()`, which
+    celestiary's fork's `scene.externalRenderers` calls after each
+    callback. Left: upstreaming that hook, or what a host adapter does on
+    upstream Cesium.
 15. **Big anchor sets.** JSON `Anchor`s for subscribed sets, and the
     binary table for whole constellations: is that split right, and is
     the table needed in v1 (Starlink's ~10,000)?
@@ -1604,7 +1683,9 @@ discussion, or in an RFC issue citing the number.
 - The spike: netmap `spike/celestiary-layer` (`web/src/celestiaryLayer.js`)
   and celestiary `spike/satellites-layer` (`js/layer/satellitesLayer.js`),
   local branches, not pushed.
-- The implementations: portal [#36](https://github.com/pablo-mayrgundter/portal/pull/36)
+- The implementations: portal [#34](https://github.com/pablo-mayrgundter/portal/pull/34)
+  (DESIGN.md "Sub-frames" and "Nested guests: Cesium drawing New York"),
+  portal [#36](https://github.com/pablo-mayrgundter/portal/pull/36)
   (`packages/portal-netgl/src/frameworks/luma.ts`, `layer-view.ts`,
   `window-transport.ts`, `apps/host-netgl-deck`) and celestiary/web
   [#296](https://github.com/celestiary/web/pull/296) (`design/LayerMode.md`,
