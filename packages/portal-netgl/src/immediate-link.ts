@@ -23,6 +23,13 @@
 // The host must not touch the GL context from inside `frame()`, and must
 // reset its own framework's state cache after it (three:
 // `renderer.resetState()`), exactly as after a host-receiver `drain()`.
+//
+// `frame()` can run several times in one host frame, the host drawing in
+// between: Cesium calls an external renderer once per depth frustum. Each
+// call is one sub-frame of the guest, which should end it with
+// `subFrame()` rather than `endFrame()` (guest-context.ts): the same
+// checkpoint, but posted at the guest's next call, inside the next
+// `frame()`, so it replays there instead of being cloned into the queue.
 
 import { isNetGLCall, isNetGLFrameEnd, type NetGLCall } from './messages'
 import type { NetGLReadyAckMessage, NetGLReadyMessage } from './guest-context'
@@ -48,7 +55,9 @@ export type NetGLImmediateLink = {
   /**
    * Run one guest frame at this point in the host's frame: flush calls
    * queued since the last frame, then replay each call as `render` makes
-   * it. Closes on the guest's frame-end, or when `render` returns.
+   * it. Closes on the guest's frame-end, or when `render` returns. May run
+   * several times per host frame (sub-frames: the guest ends each with
+   * `subFrame()`).
    */
   frame(render: () => void): void
   /** Post a message to the guest (the guest's `transport.onMessage`). */

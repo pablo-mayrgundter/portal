@@ -109,17 +109,21 @@ const GL_COLOR_ATTACHMENT0 = 0x8CE0
 
 type Rect = readonly [number, number, number, number]
 
+const CLEAR_CALLS = new Set<string>([
+  'clear',
+  'clearBufferfv',
+  'clearBufferiv',
+  'clearBufferuiv',
+  'clearBufferfi'
+])
+
 const DRAW_CALLS = new Set<string>([
   'drawArrays',
   'drawElements',
   'drawArraysInstanced',
   'drawElementsInstanced',
   'drawRangeElements',
-  'clear',
-  'clearBufferfv',
-  'clearBufferiv',
-  'clearBufferuiv',
-  'clearBufferfi'
+  ...CLEAR_CALLS
 ])
 
 export const makeNetGLReplay = (
@@ -154,7 +158,7 @@ export const makeNetGLReplay = (
   let scissorTestEnabled = false
 
   const policy = config.screen ? makeScreenPolicyState(receiver, config.screen) : null
-  const depthOnlyClears = config.screen?.clear === 'depth-only'
+  const clearMode = config.screen?.clear ?? 'pass'
 
   // Map a rect in the sender's intended-viewport space into the applied
   // (remapped) viewport. Identity when no remap is in effect.
@@ -226,7 +230,8 @@ export const makeNetGLReplay = (
     throw new Error(`NetGL replay: unknown encoded value shape`)
   }
 
-  // Screen clears under the 'depth-only' policy. Returns true if the call
+  // Screen clears under the 'depth-only' policy ('none' drops them all
+  // before getting here). Returns true if the call
   // was fully handled (dropped, or executed here) and must not run again.
   const filterScreenClear = (name: string, args: unknown[]): boolean => {
     if (name === 'clear') {
@@ -348,7 +353,8 @@ export const makeNetGLReplay = (
 
     if (DRAW_CALLS.has(call.name)) {
       const toScreen = currentDrawFb === null
-      if (toScreen && depthOnlyClears && filterScreenClear(call.name, decodedArgs)) return
+      if (toScreen && clearMode === 'none' && CLEAR_CALLS.has(call.name)) return
+      if (toScreen && clearMode === 'depth-only' && filterScreenClear(call.name, decodedArgs)) return
       policy?.beforeDraw(toScreen)
     }
 

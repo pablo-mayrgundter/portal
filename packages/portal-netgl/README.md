@@ -10,7 +10,8 @@ Adoption modes:
   pass `guest.contextOptions` to your Viewer and call `guest.attach(scene)`.
 - **Any other WebGL2 framework**: `makeNetGLGuestContext` gives you a
   recorder context to hand the framework and an `endFrame()` to call after
-  each frame. That's the whole shim.
+  each frame (or `subFrame()`, when the host draws it several times a
+  frame). That's the whole shim.
 - **Embedded app authors own their own renderer** (e.g. integrating
   celestiary, bldrs, an existing three.js app into a portal): use
   `makeNetGLPortalGuest`. The factory builds a recorder-wrapped
@@ -132,9 +133,27 @@ renderer.resetState()   // your framework's state cache is stale now
 
 The `screen` policy keeps the guest's screen draws inside the stencil mask
 and stops it clearing your canvas, without the guest knowing it's
-embedded. Options: `stencil`, `clear: 'depth-only'`, `blend:
-'premultiplied-over'`; plus `screenFramebuffer` to land the guest in one of
-your render targets instead of the canvas. See DESIGN.md.
+embedded. It applies to the guest's draws and clears of its default
+framebuffer (the "screen"); the guest's own framebuffers are left alone.
+Options:
+
+- `stencil: { ref, valueMask? }`: screen draws test stencil EQUAL `ref`
+  and write no stencil.
+- `clear`: what happens to the guest's screen clears.
+  - `'pass'` (default): they run as sent.
+  - `'depth-only'`: colour and stencil clears are dropped; depth clears
+    are confined to the guest's (remapped) viewport. For a guest drawn
+    through a door, after you clear depth for it.
+  - `'none'`: every screen clear is dropped, colour, depth and stencil.
+    For a guest drawn into a frame you are still rendering, whose depth
+    it must test against (a three.js city inside Cesium's frame, behind
+    and in front of the globe).
+- `blend: 'premultiplied-over'`: screen draws blend `ONE,
+  ONE_MINUS_SRC_ALPHA`, for a guest that renders over a transparent
+  background.
+
+Plus `screenFramebuffer` to land the guest in one of your render targets
+instead of the canvas. See DESIGN.md.
 
 ## `makeNetGLImmediateLink` — same page, no iframe
 
@@ -161,6 +180,57 @@ between frames (its state checkpoint, async resource uploads) are cloned,
 queued and flushed at the start of the next `frame()`. No frame of latency,
 no structured-clone of every call.
 
+### Sub-frames: one guest, several draws per host frame
+
+A host may need the guest drawn more than once in one of its frames, with
+its own draws in between. Cesium calls an external renderer
+(`scene.externalRenderers`, in the celestiary fork of Cesium) once per depth
+frustum, with its framebuffer bound and the globe in its depth buffer, and
+resets its own state after each call. Run `link.frame()` in each call, and
+end each draw with the guest context's `subFrame()` instead of
+`endFrame()`:
+
+```js
+import { makeNetGLImmediateLink, makeNetGLGuestContext } from '@pablo-mayrgundter/portal-netgl'
+
+let target = null   // the framebuffer Cesium has bound for this pass
+const link = makeNetGLImmediateLink({
+  gl: scene.context._gl,   // Cesium's context: the guest replays into Cesium's frame
+  replay: {
+    screenFramebuffer: () => target,   // the guest's "screen" is Cesium's pass target
+    screen: { clear: 'none' }          // keep Cesium's colour, depth and stencil
+  }
+})
+const guestCtx = makeNetGLGuestContext({ canvas: shadowCanvas, transport: link.transport })
+const city = makeMyThreeApp({ context: guestCtx.gl })   // any WebGL2 framework
+
+scene.externalRenderers.add(new Cesium.ExternalRenderer({
+  boundingVolume: cityBounds,
+  render (p) {   // once per frustum, far to near
+    target = p.framebuffer
+    city.setCamera(p.viewMatrix, p.projectionMatrix)
+    link.frame(() => {
+      city.render()
+      guestCtx.subFrame()
+    })
+  }
+}))
+```
+
+`subFrame()` posts the same frame-end and the same state checkpoint as
+`endFrame()`, so each draw starts from the guest's own GL state whatever
+the host did in between. The difference is when the checkpoint goes out:
+just before the guest's next GL call, which comes inside the next
+`link.frame()`, so it replays there directly instead of being cloned into
+the link's queue while it is closed. It works across host frames too, so
+a guest drawn only this way can call `subFrame()` every time.
+
+`endFrame({ checkpoint: false })` posts the frame-end alone. It's for a
+host that doesn't touch the context between the guest's frames, or a guest
+that resets its own state cache; anything else then replays from the
+host's leftover state. What each costs, and why the checkpoint can't be
+trimmed for a host like Cesium: DESIGN.md, [sub-frames](./DESIGN.md#sub-frames).
+
 ## Protocol
 
 NetGL is two streams over a single transport:
@@ -170,7 +240,8 @@ NetGL is two streams over a single transport:
   markers after each frame. Guests built on `makeNetGLGuestContext`
   follow each frame-end with a state checkpoint — ordinary calls that
   restore the guest's GL state — so framework state caches survive the
-  host sharing the context. The checkpoint is built from state tracked
+  host sharing the context (after `subFrame()`, the checkpoint comes just
+  before the guest's next call instead). The checkpoint is built from state tracked
   off the call stream (`makeBindingTracker`, `makeScalarStateTracker`), so
   it makes no synchronous GL queries on the shadow. If you set GL state on
   the shadow context directly (not through the recorder), pass
