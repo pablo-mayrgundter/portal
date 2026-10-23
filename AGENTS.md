@@ -60,6 +60,21 @@ were tried and dropped.
   host (the same view with the layer forced on and off), compare median
   pixel ratios over a region and brightness profiles. Do it at partial
   phase, not full: that's where colour-pipeline mismatches show.
+- **luma.gl / deck.gl on headless-gl.** `webgl2Adapter.attach(gl)` needs
+  the context to have a `canvas` (define a jsdom canvas on it), and
+  headless-gl answers null for `ACTIVE_UNIFORM_BLOCKS`, which luma's
+  shader reflection reads: shim `getProgramParameter` to answer 0
+  (`frameworks/luma.test.ts`). deck's `_GlobeViewport` needs no GL at all,
+  so camera math tests use it directly.
+- **Two origins locally:** serve one build on two ports (cross-origin,
+  same site), or as `localhost` and `127.0.0.1` (cross-site: Chromium puts
+  the guest in another process). A sandboxed iframe without
+  `allow-same-origin` is cross-origin on one server, but its module
+  scripts load in CORS mode, so the server must send
+  `Access-Control-Allow-Origin` (`python3 -m http.server` doesn't; GitHub
+  Pages does).
+- **The demos' nav drawer opens by default**, over the right half of the
+  page. Hide `#portal-nav-drawer` before a screenshot.
 - **Known SwiftShader quirk:** `gl_PointCoord` flips in point shaders
   that `discard` or sample a depth texture. Use depth state instead.
 - **Static servers and rebuilds.** A build that deletes and recreates

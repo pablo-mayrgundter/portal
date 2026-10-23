@@ -63,15 +63,23 @@ where a host pose gets applied), which lives in the app, not the shim.
 
 **A host (f′ as the embedding side) needs:** a point in its frame to paint
 a stencil mask and drain the guest's frame (`makeNetGLHostReceiver`), and
-a way to reset its own framework's GL-state cache afterwards (three:
-`renderer.resetState()`).
+a way to make its own framework's GL-state cache right afterwards. That is
+one of two opposite things, depending on how the framework caches:
+
+- **Invalidate** (three: `renderer.resetState()`): the cache was bypassed
+  by the replay, so it's stale; drop it and re-query or re-set everything.
+- **Restore** (luma.gl: `device.pushState()` before, `device.popState()`
+  after): luma spies on the context's setters, so its cache followed every
+  replayed call and is correct, but its pipelines assume the state they
+  don't name is still at its default. The guest's leftovers must be put
+  back, not forgotten. See the deck.gl findings.
 
 | Framework | Context injection | Frame boundary | Status |
 |---|---|---|---|
 | three.js | `new WebGLRenderer({ context })` | wrap `setAnimationLoop` / `render` | guest + host, shipped |
 | Cesium | `contextOptions.getWebGLStub(canvas, attrs)` | `scene.postRender` | guest, shipped (`frameworks/cesium.ts`) |
 | Babylon.js | `new Engine(gl, …)` accepts a context | `scene.onAfterRenderObservable` | untried |
-| luma.gl / deck.gl | `WebGLDevice.attach(gl)` | `onAfterRender` | untried |
+| luma.gl / deck.gl | host: replays into `device.gl`; guest: `WebGLDevice.attach(gl)` | `onAfterRender` | host, shipped (`frameworks/luma.ts`); guest untried |
 | regl | `createREGL({ gl })` | after `regl.frame` callback | untried |
 | MapLibre GL | none public — override `canvas.getContext` on the instance before construction | `map.on('render')` | untried |
 
@@ -227,6 +235,15 @@ into an offscreen target and composite later (celestiary does).
   behind it doesn't. Depth composition works both ways without the two
   sides sharing a depth convention.
 
+- **Overlay** (host-netgl-deck): no stencil and no shape. The guest
+  renders the host's exact view, in the host's clip space (the host's own
+  projection matrix), right after the host's scene, and depth-tests
+  against the host's depth buffer without clearing it or writing to it.
+  Occlusion by the host is free; the guest occludes nothing of the host's.
+  This needs the guest's camera to be the host's to the last bit
+  (`globeLayerView` composes it in doubles), and a host far plane that
+  contains the guest (deck: `farZMultiplier`).
+
 ## Findings from Cesium integration
 
 - **`getWebGLStub` is the injection point.** It's in Cesium's public
@@ -272,6 +289,173 @@ into an offscreen target and composite later (celestiary does).
   on whether the host happened to draw before the guest's second frame.
   Transient objects make a frame unrepeatable; the host now skips the
   re-run and shows no guest content for that one host frame.
+
+## Findings from deck.gl / luma.gl integration
+
+From the netmap spike (deck.gl 9.4 `_GlobeView` hosting celestiary's
+satellites) and `frameworks/luma.ts` (`attachNetGLDeckLayer`).
+
+- **Restore luma's state; don't invalidate it.** luma's
+  `WebGLStateTracker` replaces the context's state setters with spies on
+  the gl instance, and the replay calls `gl[name](...)` on that same
+  instance, so luma's cache follows every guest call and never goes
+  stale. Its pipelines, though, set only the parameters a layer names and
+  assume GL defaults for the rest. A three.js guest leaves CULL_FACE on,
+  and deck's land polygons (wound either way) lost triangles in the next
+  frame. `device.pushState()` before the guest and `popState()` after put
+  back every tracked value the guest changed: deck's next frame was then
+  bit-identical to one where the guest never ran (in the spike, in
+  `luma.test.ts` on headless-gl, and in the demo in Chromium). luma's
+  `useProgram` cache sits outside that stack, but it's kept correct by the
+  same spy, and luma binds per draw anyway.
+- **The frame is `onAfterRender`.** It runs synchronously inside
+  `deck.redraw()`, after the layers drew to the default framebuffer, with
+  deck's depth still valid. Chain the app's own `onAfterRender` rather than
+  replacing it. When deck renders into `Deck._framebuffer` (interleaved
+  with a base map), point the replay's `screenFramebuffer` at it.
+- **deck renders on demand.** An iframe guest's frame arrives between deck
+  frames, so the adapter asks for a redraw (at most one per animation
+  frame) when it does. A view is posted only when it changed (camera,
+  viewport or time), at most one unanswered, so a still camera with a
+  pinned clock settles to no frames at all, and a running clock animates
+  at the slower of the two. A same-page guest has no such loop: a live
+  clock needs deck's `_animate` or periodic redraws.
+- **A first frame can't be re-run, and a still view asks for none.** A
+  three.js guest's first frame deletes its shaders after linking, so the
+  receiver won't re-run it (see the Cesium findings); with the camera
+  still, no new view went out, and the guest vanished after one frame.
+  `receiver.canRerun` now tells the adapter to ask again for the same view.
+- **The camera contract.** deck's globe "common" space is a sphere of 256
+  units for 6,370,972 m, with common = k·(e_y, −e_x, e_z). The adapter
+  doesn't use those constants (`_GlobeView` is experimental and doesn't
+  export them): it measures ECEF → common from `viewport.projectPosition`
+  (unit axes, and an altitude step for k), checks that the map is k times
+  a proper rotation and that it predicts other points, and returns null
+  for any viewport where it doesn't. Then W = V·M = s·[R|t] in doubles; the
+  guest gets [R|t] (ECEF metres → eye metres) and P·diag(s, s, s, 1).
+  `luma.test.ts` checks the guest's projection against `viewport.project`
+  to 1e-6 px and deck's NDC depth to 1e-9.
+- **GlobeView becomes Web Mercator above zoom 12.** `getViewportType`
+  switches to a `WebMercatorViewport`, which isn't a linear map of ECEF, so
+  `globeLayerView` returns null and the guest is skipped. A guest that must
+  stay visible up close needs a non-affine view (see open problems).
+- **Depth resolution is kilometres.** deck's depth buffer spans the whole
+  globe view; at zoom 0.3 a step is ~5 km (z²/near·2⁻²⁴). A guest dot at
+  2 km altitude over Brazil tied with deck's land polygons and lost; the
+  demo lifts ground markers 20 km. Ground-clamped guest geometry needs a
+  depth bias, or a stencil instead of depth.
+- **deck's horizon is not depth.** deck hides its own geometry beyond the
+  globe's horizon in the shader, so a host ring for a point 2,000 km up,
+  past the limb, was clipped while the guest's dot, depth-tested, was
+  correctly visible. Host and guest occlusion agree on the globe's disc,
+  not above the limb.
+- **The Earth model is deck's sphere.** deck places longitude, latitude
+  and altitude on a sphere of 6,370,972 m, not WGS84. ECEF positions (an
+  orbit, a satellite) align exactly; geographic ones must be converted on
+  that sphere (the view carries `earth: { model: 'sphere', radius }`) or
+  they land up to ~21 km off.
+- **The context.** deck 9.4's is `stencil: false`, `antialias: true`,
+  `preserveDrawingBuffer: true`. A stencil-clipped guest would need
+  `deviceProps.webgl.stencil: true` (untested).
+- **Testing luma on headless-gl.** `webgl2Adapter.attach(gl)` works if the
+  context gets a `canvas` (a jsdom canvas will do), and headless-gl's
+  WebGL2 answers null for `ACTIVE_UNIFORM_BLOCKS`, which luma's shader
+  reflection reads; `luma.test.ts` shims it to 0.
+
+## Cross-origin iframes
+
+The deck demo runs its guest on another origin three ways: two ports
+(cross-origin, same site), `localhost` vs `127.0.0.1` (cross-site, which
+Chromium puts in another process, as celestiary.org inside github.io
+would be), and a sandboxed iframe without `allow-same-origin` (an opaque
+origin, `'null'`, which is how the GitHub Pages preview shows it). The
+NetGL stream itself crossed unchanged: calls, typed arrays and the ready
+handshake are all structured-clonable, and the guest renders on the
+host's `layer:view` messages with no requestAnimationFrame of its own,
+which Chromium may throttle in a cross-origin frame it considers hidden.
+
+**What was unsafe, and is fixed:**
+
+- **`targetOrigin: '*'`.** Every guest and host posted with `'*'`. A host
+  whose iframe navigated to another origin would keep sending it views;
+  a guest whose parent navigated would keep streaming its GL calls (with
+  any data in them) to the new page. `iframeTransport(iframe, { origin })`
+  and `parentTransport({ hostOrigins })` post with the peer's exact
+  origin, so the browser drops the message instead.
+- **No `event.origin` check.** The only inbound check was `event.source`.
+  That isn't enough: an iframe's `contentWindow`, and a guest's `parent`,
+  is the same WindowProxy after the frame navigates, so a hostile page
+  loaded into it passes. Both transports now check `event.origin` against
+  an allow-list as well. The allow-list must be the app's own constant,
+  never read from the guest's URL (any page could frame it with
+  `?host=itself`). `windowTransport` refuses `'*'` in it, malformed
+  origins, and `'null'` without a source filter (every sandboxed frame is
+  `'null'`).
+- **Whole buffers on the wire.** A typed-array argument shipped its whole
+  underlying `ArrayBuffer`, so a uniform upload from a view into a WASM
+  heap or a framework's scratch pool cloned all of it to the host: wasted
+  copying, and the guest's memory handed to another origin. The recorder
+  now ships only a partial view's own bytes.
+- **Dispatch by any name.** The replay calls `receiver[call.name]`, and
+  `Object.prototype`'s methods (`constructor`, `__defineGetter__`, ...)
+  were reachable that way. They're refused now; so is a typed-array name
+  that isn't own data on the constructor table.
+
+In the browser (`apps/host-netgl-deck`): a host origin not on the guest's
+list gets nothing (the guest refuses to start); a second frame, of another
+origin, posting NetGL into an allowed host is dropped by the source check.
+
+**What remains unsafe** (for the NetGL RFC):
+
+- **Guest GL runs in the host's context, unsandboxed.** A cross-origin
+  guest is still fully trusted with the host's GPU:
+  - resource exhaustion (allocations, huge textures) and shaders that
+    never finish, which lose the host's context (deck doesn't recover
+    from that);
+  - drawing anywhere on the host's canvas: without a screen policy the
+    guest can cover or clear the host's pixels;
+  - reading the host's framebuffer on the GPU (`copyTexImage2D`,
+    `blitFramebuffer` from the default framebuffer, or sampling it after a
+    copy) into its own textures. Nothing flows back over the wire, but
+    the guest sees when the host's next view arrives, so a shader whose
+    cost depends on host pixels is a timing side channel out of the host's
+    page (e.g. map tiles the host drew, or anything else on its canvas).
+  The cheap checks `docs/portal-layers.md` proposes (an entry-point
+  allow-list, no host-framebuffer reads, per-frame budgets, shader length
+  limits) are not built.
+- **Opaque-origin guests need `'*'` outbound.** A sandboxed guest can't be
+  targeted by origin, so host → guest messages go with `'*'` and inbound
+  ones are accepted from that frame's window only. If the sandboxed frame
+  navigates itself, the next views go to the new page. Views carry only
+  camera, viewport and time, but nothing private should ride them.
+- **No handshake beyond origin.** There's no nonce or capability: any
+  page on an allowed origin can drive the guest, and any page on the
+  guest's origin loaded into that frame can feed the host GL. Origin is
+  the whole trust boundary.
+- **Process and thread.** A cross-site guest runs in another renderer
+  process in Chromium (site isolation), not on the host's main thread as
+  the Cesium findings assume. Messages cross processes, so each guest
+  frame costs serialisation on both sides plus IPC; the flow control (one
+  view in flight) still holds, but the latency isn't measured on a real
+  GPU yet.
+- **Frames aren't tagged with their view.** `netgl:frame-end` carries no
+  view id, so the host can't tell which view a frame was drawn for, and
+  can't compose it pose-tagged (docs/portal-layers.md). While the camera
+  moves, an iframe guest lags the host by about a frame.
+- **Embedding policy is the guest's deploy.** The guest's origin must
+  allow being framed by the host (CSP `frame-ancestors`, no
+  `X-Frame-Options: DENY`). A host with COEP `require-corp` needs the
+  guest to send CORP / COEP headers. A sandboxed guest's module scripts
+  load in CORS mode, so its host must send `Access-Control-Allow-Origin`
+  (GitHub Pages does). The guest's storage is partitioned under the
+  host's site, so its caches (IndexedDB, Cache API) start cold in each
+  embedding host.
+- **Tainted images can't cross.** An `ImageBitmap` that isn't
+  origin-clean (from a cross-origin image fetched without CORS) can't be
+  serialised (`DataCloneError` from `postMessage`), and an image element
+  goes through a 2D canvas whose `getImageData` throws when tainted. Not a
+  hole: a guest that uploads such images fails embedded even where WebGL
+  would have refused them anyway. Its images must be CORS-enabled.
 
 ## Celestiary × Cesium: the plan
 
@@ -487,7 +671,13 @@ Framework-agnostic building blocks (new, and what 1.0 shims build on):
   to the Viewer / CesiumWidget, `attach(scene)`.
 - **`makeNetGLHostReceiver({ gl, transport, replay })`** — host-side frame
   buffering + `drain()`, with the replay's viewport remap and screen
-  policy.
+  policy; `onFrame()` and `canRerun` for hosts that render on demand.
+- **`attachNetGLDeckLayer(deck, { device, render | transport })`** — the
+  deck.gl host adapter (`frameworks/luma.ts`).
+- **`makeNetGLThreeOverlayGuest({ WebGLRenderer, scene, camera,
+  transport })`** — a three.js guest drawn from the host's `layer:view`.
+- **`iframeTransport(iframe, { origin })` / `parentTransport({ hostOrigins
+  })`** — origin-pinned postMessage for cross-origin peers.
 
 The three.js-specific shapes, from most-integrated to least:
 
@@ -665,9 +855,20 @@ unchanged.
 
 - **Permission model.** Anything coming over the NetGL wire is executed
   against the host's GL context. A malicious sender can hose the host
-  (resource exhaustion, infinite-loop shaders). For trusted same-origin
-  iframes today; broader use needs a sandboxing layer (e.g., proxy that
-  validates calls match a known schema).
+  (resource exhaustion, infinite-loop shaders). Cross-origin guests are
+  pinned by origin now, but must still be trusted; see "Cross-origin
+  iframes" for what remains. Broader use needs a sandboxing layer (e.g., a
+  proxy that validates calls against a known schema).
+
+- **Non-affine host views.** A guest gets a 4×4 view, so a host whose
+  projection isn't linear in the guest's frame (deck's Web Mercator map,
+  including GlobeView above zoom 12) can't host it. Options: the guest
+  projects in a shader the host supplies, or the host sends a local
+  tangent-plane frame per tile.
+
+- **View-tagged frames.** `netgl:frame-end` should carry the view id the
+  frame was drawn for, so an async host can compose it for that view and
+  measure lag.
 
 ## Layout / where things live
 
@@ -688,6 +889,14 @@ unchanged.
 - `packages/portal-netgl/src/host-receiver.ts` — host frame buffering +
   drain.
 - `packages/portal-netgl/src/frameworks/cesium.ts` — Cesium shim.
+- `packages/portal-netgl/src/frameworks/luma.ts` — deck.gl / luma.gl host
+  adapter: `attachNetGLDeckLayer`, `globeLayerView`, `withLumaState`.
+- `packages/portal-netgl/src/frameworks/three-overlay.ts` — three.js
+  overlay guest driven by `layer:view`.
+- `packages/portal-netgl/src/layer-view.ts` — the `layer:view` message and
+  its matrix helpers.
+- `packages/portal-netgl/src/window-transport.ts` — postMessage transport,
+  with `iframeTransport` / `parentTransport` for cross-origin peers.
 - `packages/portal-netgl/src/messages.ts` — wire types
   (`NetGLCall`, `NetGLFrameEnd`, `NetGLWireMessage`).
 - `packages/portal-netgl/src/proxy.ts` — original in-process proxy
@@ -700,3 +909,5 @@ unchanged.
   shim + celestiary submodule patches.
 - `apps/host-netgl-cesium/` — Cesium guest in a three.js host: door mode
   and Earth-in-place mode.
+- `apps/host-netgl-deck/` — deck.gl GlobeView host with a cross-origin
+  three.js overlay guest.
