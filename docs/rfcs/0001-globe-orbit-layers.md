@@ -7,7 +7,7 @@
 | **Authors** | the portal maintainers; drafted in an agent session from the netmap × celestiary spike |
 | **Changes** | [`docs/portal-layers.md`](../portal-layers.md): layer kinds, `layer:hello`, `layer:view`, depth contract, security, lifecycle. [`packages/portal-netgl/DESIGN.md`](../../packages/portal-netgl/DESIGN.md): composition modes, screen policy. |
 | **Adds** | the overlay kind; shared depth and extent negotiation; a projection descriptor; the `portal.time/1` and `portal.anchors/1` extensions; anchor URIs; flattened nesting; cross-origin handshake and trust tiers; host adapter restore/invalidate semantics |
-| **Related** | the generative-NYC nested portal RFC (in progress, separate session); the luma.gl host adapter PR (in progress) |
+| **Related** | portal [#36](https://github.com/pablo-mayrgundter/portal/pull/36): the luma.gl / deck.gl host adapter, `layer:view` and origin-pinned transports (portal-netgl 0.4.0). celestiary/web [#296](https://github.com/celestiary/web/pull/296): layer mode, the first cross-origin orbits guest (`design/LayerMode.md`). The generative-NYC nested portal RFC (in progress, separate session). |
 
 ## 1. Summary
 
@@ -38,6 +38,12 @@ needs a shape to stencil, and orbits have none. So this RFC adds:
 
 §12 lists what changes in the existing docs. §13 holds the open
 questions.
+
+Two implementations now exist: portal #36 (the deck.gl host) and
+celestiary #296 (the orbits guest). §10.8 records what they found, and
+§6.7 maps the message names and fields they built onto this RFC's: where
+they agree the RFC adopts theirs, and where they differ it says which way
+to go.
 
 ## 2. The use case and its assumptions
 
@@ -82,6 +88,11 @@ What the spike (netmap `spike/celestiary-layer`, celestiary
 - **Realm collisions.** three's `ColorManagement`, celestiary's
   `sceneReferredUniform` and Cesium's `Ellipsoid.default` are library
   globals. Two engines in one realm collide; iframes don't.
+
+portal #36 turned the spike's host side into portal-netgl 0.4.0
+(`attachNetGLDeckLayer`, `globeLayerView`, origin-pinned transports), and
+celestiary #296 its guest side into layer mode, a cross-origin page.
+Their findings are in §10.8.
 
 Assumptions this RFC makes. Each is a seam another RFC can replace.
 
@@ -193,6 +204,13 @@ Rules:
   there for later layers, links and host post-passes. With `write: false`
   (the spike) the guest only tests. Points and lines don't need to occlude
   each other across engines, so `false` is the default.
+- **Ground-level geometry ties with the host.** The host's depth step is
+  what it is: deck's spans the whole globe view, and at zoom 0.3 a step is
+  about 5 km (z²/near·2⁻²⁴; #36). A guest dot 2 km over Brazil tied with
+  deck's land and lost; #36's demo lifts ground markers 20 km. A guest
+  drawing on or near the host's surface lifts it by more than the host's
+  step at that distance, or uses polygon offset, or the layer isn't a
+  shared overlay at all but stencilled. Open question 19.
 - **Hosts that can't share.** A host whose depth isn't the depth of one
   projection matrix (Cesium's log depth over several frusta) offers no
   `shared`. A `shared-texture` mode (the host's depth as a texture plus
@@ -217,16 +235,23 @@ interface LayerExtent {
   frame: FrameId                          // usually the layer frame
   sphere: { center: Vec3; radius: number } // metres; bounds everything the layer draws
   beyond?: 'clip' | 'clamp-to-far'        // what the guest does with content past the granted far
+  farthest?: number                       // m from the centre: the farthest content, past the sphere (#296's beamsM)
 }
 ```
 
 - It's sent in `layer:hello` and again as `layer:extent` when it changes
   (an overlay switched on or off, a DSN link to Voyager appearing).
   Celestiary's satellites: centre 0, radius 4.3e7 m (GEO with a margin).
+  #296 declares `extent: {radiusM: 5e7, beamsM: 3e13}`: the orbits, and
+  the DSN beams out to the Voyagers (§6.7).
+- **deck (#36):** the host sizes its far plane with `farZMultiplier`; at
+  least 4 covers GEO from any zoom (far = (altitude + 2R/cos pitch)·4,
+  7.6 Earth radii). deck has no per-layer far plane, so the adapter sets
+  the multiplier from the largest shared extent.
 - The host sizes its far plane to cover every shared layer's sphere that
   intersects the frustum, `far ≥ |eye − centre| + radius`, up to a limit
-  of its own. Each `layer:view` carries the resulting `clipRange` in
-  metres (§6), so the guest knows what it got.
+  of its own. A `layer:view` may carry the resulting `clipRange` in
+  metres (§6); the guest can also read it off `projectionMatrix`.
 - Pushing the far plane out costs little: perspective depth precision is
   set by the near plane (Δz ≈ z²/(near·2^bits), `portal-layers.md`
   [Depth and overlays](../portal-layers.md#gotchas-that-stay-in-the-app)).
@@ -246,6 +271,13 @@ interface LayerExtent {
 - **Host content that writes no depth can't occlude the guest.** netmap's
   arcs write none, so satellites draw over them. The fix is the host's:
   write depth for the arcs, or draw them after the guest.
+- **Occlusion that isn't depth doesn't reach the guest.** deck hides its
+  own geometry past the globe's horizon in its shaders, not by depth. A
+  host ring for a point 2,000 km up, past the limb, was clipped while the
+  guest's dot, depth-tested, stayed visible (#36). Host and guest agree
+  on the globe's disc, not above the limb. Either the host says how it
+  culls (an occluder sphere in the view) or the mismatch is accepted;
+  open question 20.
 - **No order-independent blending across engines.** A guest's
   translucent draws blend over all the host content drawn before them,
   whatever its depth; host translucent content drawn later blends over
@@ -267,40 +299,43 @@ viewport, exposure". This makes it precise.
 
 ```ts
 type Vec3 = [number, number, number]
-type Mat4 = Float64Array | number[]          // 16, column-major, doubles on the wire
+type Mat4 = number[]                         // 16, column-major, doubles (JS numbers survive structured clone)
 
-interface LayerView {
+// The envelope, as portal-netgl 0.4.0 has it (#36, layer-view.ts: NetGLLayerViewMessage)
+interface LayerViewMessage {
   type: 'layer:view'
   viewId: number                             // increasing; frames and anchors are tagged with it
-  phase?: 'opaque' | 'translucent' | 'overlay' // only if negotiated (§5.4)
+  view: LayerView
+}
 
-  // Pose
-  view: Mat4      // rigid: layer-frame metres → eye metres. Right-handed; the eye looks down −Z, +Y up.
-  eye: Vec3       // the eye in layer-frame metres, = inverse(view)·(0,0,0), in doubles: for RTE (§6.2)
-
-  // Projection
-  projection: Projection                    // §6.4
-  clipRange: { near: number; far: number }  // metres along −Z of the eye: what the projection clips to
-
-  // Raster
+interface LayerView {
+  // Implemented in 0.4.0 (NetGLLayerView, filled by globeLayerView)
+  frame: FrameId                             // 'ecef'
+  viewMatrix: Mat4       // rigid: layer-frame metres → eye metres. Right-handed; the eye looks down −Z, +Y up.
+  projectionMatrix: Mat4 // eye metres → clip, GL conventions (z in [−w, w]): the host's, its scale folded in
   viewport: [number, number, number, number] // [x, y, w, h] in drawing-buffer pixels, GL origin (bottom-left)
   pixelRatio: number                         // drawing-buffer pixels per CSS pixel
+  timeMs: number                             // the frame's time, Unix ms UTC; the host owns the clock (§7)
+  earth?: EarthModel                         // how the host places lat, lon, alt (§6.3)
 
-  // Appearance (portal-layers 0.1, unchanged)
-  light?: { direction: Vec3; intensity?: number } // layer frame, unit vector toward the light
-  exposure?: number
+  // Proposed here
+  phase?: 'opaque' | 'translucent' | 'overlay' // only if negotiated (§5.4)
+  eye?: Vec3              // the eye in layer-frame metres, in doubles, for RTE (§6.2); = −Rᵀt of viewMatrix
+  clipRange?: { near: number; far: number }  // metres along −Z of the eye: what the projection clips to (§5.3)
+  projection?: Projection // a non-matrix kind (§6.4); then viewMatrix and projectionMatrix are absent
+  light?: { direction: Vec3; intensity?: number } // portal-layers 0.1: layer frame, unit vector toward the light
+  exposure?: number                          // portal-layers 0.1
   opacity?: number                           // 0..1, overlay fades (§4); default 1
-
-  // Extensions (§7, §8), present only if negotiated
-  time?: LayerTime
+  time?: LayerTimeFrame                      // portal.time/1's per-frame part, if negotiated (§7)
 }
 ```
 
 ### 6.1 Frames and units
 
 - **Metres**, always. A host whose world isn't in metres (deck's common
-  units) folds its scale into the projection, as the spike did:
-  `view = W/s`, `projection.matrix = P·diag(s, s, s, 1)`. The guest never
+  units) folds its scale into the projection, as the spike and 0.4.0's
+  `globeLayerView` do: `viewMatrix = W/s`,
+  `projectionMatrix = P·diag(s, s, s, 1)`. The guest never
   sees the host's units. This changes nothing for celestiary, which is in
   metres already (`DESIGN.md`, [Celestiary × Cesium](../../packages/portal-netgl/DESIGN.md#celestiary--cesium-the-plan)).
 - **The view is rigid.** Its upper 3×3 is a rotation (determinant +1,
@@ -327,15 +362,16 @@ off by up to 0.9 s of Earth's turn: 420 m at the surface, 2.8 km at GEO.
 
 ### 6.2 Precision
 
-- **Compose in doubles.** The host computes `view`, `eye` and
-  `projection` in float64 and sends them as float64 (structured clone and
+- **Compose in doubles.** The host computes `viewMatrix`, `eye` and
+  `projectionMatrix` in float64 and sends them as float64 (structured clone and
   `Float64Array` keep them). The spike's alignment, 1e-12, depends on it.
 - **float32 on the GPU loses metres.** ECEF coordinates as float32 are
   good to 0.5 m at the surface and LEO and 4 m at GEO (the ULP of
   2²²–2²³ and 2²⁵–2²⁶ m). That's invisible from orbit and visible near
   the ground: jitter in pixels ≈ ULP / distance × focal length in pixels,
   so 0.5 m at 100 m with a 1000 px focal length is 5 px.
-- **So send the eye, and let the guest go relative to it.** Two ways,
+- **So the guest goes relative to the eye** (`view.eye`, or −Rᵀt of
+  `viewMatrix` in doubles). Two ways,
   the guest's choice:
   - *RTC* (relative to centre): the guest gives each object or tile an
     origin near its content and composes `view · model` in doubles on the
@@ -344,7 +380,7 @@ off by up to 0.9 s of Earth's turn: 420 m at the surface, 2.8 km at GEO.
   - *RTE* (relative to eye): positions split into high and low float32
     parts, with `eye` split the same way, subtracted in the shader
     (Cesium's `EncodedCartesian3`, deck's fp64 and `coordinateOrigin`).
-    The rotation-only part of `view` (its 3×3) goes with it.
+    The rotation-only part of `viewMatrix` (its 3×3) goes with it.
 - A guest whose content is far from the eye (satellites seen from deck's
   usual zoom) can skip both. A guest that draws near the ground (DSN
   dishes close up, the NYC session's buildings) can't.
@@ -359,12 +395,17 @@ geocentric direction of the same point differ by up to 0.19°, about
 21 km on the ground.
 
 ```ts
-type EarthModel =
-  | { kind: 'wgs84' }                                   // a = 6378137, f = 1/298.257223563
-  | { kind: 'sphere'; radius: number;
-      latitude: 'geodetic-as-spherical' | 'geocentric' } // deck, MapLibre globes: geodetic-as-spherical
-  | { kind: 'ellipsoid'; radii: Vec3 }
+type EarthModel =                                       // `model`, as 0.4.0 names it
+  | { model: 'sphere'; radius: number;                   // 0.4.0 sends this, without `latitude`
+      latitude?: 'geodetic-as-spherical' | 'geocentric' } // absent: geodetic-as-spherical (deck, MapLibre globes)
+  | { model: 'wgs84' }                                   // a = 6378137, f = 1/298.257223563
+  | { model: 'ellipsoid'; radii: Vec3 }
 ```
+
+0.4.0 puts the model in every view (`view.earth`), measured from deck's
+viewport, rather than once in `hello-ack`. Per view is fine, and lets a
+host change globes; the RFC adopts it. 0.4.0's `sphereToEcef` is the
+`geodetic-as-spherical` mapping.
 
 The host declares its model in `hello-ack`, and its **surface mapping**
 follows from it: where the host draws a point given as geodetic
@@ -387,6 +428,10 @@ follows from it: where the host draws a point given as geodetic
   (`warp: false`). Open question 6.
 - Anchors (§8) are published at the warped positions, where the layer
   draws them, with the physical position in `geo` when they differ.
+- **Found in #296:** celestiary places the DSN complexes on a
+  6,378,137 m sphere, 7 km above deck's 6,370,972 m surface, because its
+  view (flat, §6.7) doesn't carry `earth`. It should place them by
+  `view.earth`.
 
 ### 6.4 Projections that aren't a 4×4
 
@@ -397,14 +442,14 @@ projection is a descriptor, and the guest declares the kinds it can do.
 
 ```ts
 type Projection =
-  | { kind: 'matrix'; matrix: Mat4 }  // eye metres → clip, applied after `view`. Perspective or ortho.
+  | { kind: 'matrix' }                // the default: projectionMatrix after viewMatrix. Perspective or ortho.
   | WebMercatorProjection
   // later: 'equirectangular', 'shader' (a host-supplied GLSL projection prelude)
 
 interface WebMercatorProjection {
   kind: 'webMercator'
   // The guest computes, per vertex: layer frame (ECEF) → geodetic (lat, lon, h) on WGS84
-  // → Mercator world (x, y, z) → clip by `worldToClip`. `view` and `eye` don't apply.
+  // → Mercator world (x, y, z) → clip by `worldToClip`. viewMatrix, projectionMatrix and eye are absent.
   worldSize: number            // Mercator world units for 360° of longitude (deck: 512·2^zoom; or 1)
   worldToClip: Mat4            // the host's view-projection in Mercator world units
   height: { unitsPerMetre: 'at-vertex-latitude' | 'at-view-centre'; centreLat?: number }
@@ -427,6 +472,14 @@ interface WebMercatorProjection {
 - MapLibre 5's custom layers solve the same problem by handing the layer
   a projection prelude to include in its shaders; that's the `shader`
   kind, left for later.
+- A third option, from #36's open problems: the host sends a local
+  tangent-plane frame per tile (or per region), in which the Mercator
+  view is close to affine, and the guest draws each region with its own
+  4×4.
+- **Today (#36):** 0.4.0's view is a single 4×4. deck's `GlobeView`
+  switches to a `WebMercatorViewport` above zoom 12; `globeLayerView`
+  then returns null and the adapter skips the guest, so the satellites
+  vanish when you zoom in to a city.
 
 ### 6.5 Viewport and pixel ratio
 
@@ -436,39 +489,86 @@ widths) into drawing-buffer pixels. The guest sizes its shadow canvas to
 the viewport's `w × h` (`setSize(w, h, false)`, never touching
 `canvas.style`; DESIGN.md [Findings from celestiary integration](../../packages/portal-netgl/DESIGN.md#findings-from-celestiary-integration)).
 
+### 6.7 What the implementations built, and the diffs
+
+The control plane as #36 (portal-netgl 0.4.0, host side) and #296
+(celestiary layer mode, guest side) implemented it, against this RFC.
+"Adopt" means the RFC now uses the implementation's name or shape.
+
+| Message | #36 (0.4.0) | #296 | RFC | Resolution |
+|---|---|---|---|---|
+| handshake | `netgl:ready` / `netgl:ready-ack`, repeated until acked; origin-pinned transports | `layer:hello`, repeated every 500 ms until `layer:hello-ack` | `layer:hello` / `hello-ack` (folding `netgl:ready` in, as `portal-layers.md` says), plus a nonce (§10.2) | adopt #296's repeat-until-acked hello; #36 adds it beside `netgl:ready` |
+| `layer:hello` | — | `{version: 1, kind: 'celestiary-orbits', capabilities: {anchors, time, labels}, contracts: {depth: 'shared', alpha: 'coverage', color: 'display-srgb'}, extent: {radiusM, beamsM}}` | §10.6 | adopt `version` (an integer) and `capabilities`. #296's `kind` is what the RFC calls `adapter` (`kind` is the layer kind, §4). `contracts.depth` is the guest's own depth encoding in 0.1, so the mode moves to `capabilities.depth`. `color: 'display-srgb'` is 0.1's `display`. `extent.radiusM` is `sphere.radius`; `beamsM` (content past it) is `beyond: 'clamp-to-far'` plus `farthest` (§5.3) |
+| `layer:hello-ack` | — | `{accepted}` | §10.6 | adopt `accepted: boolean`, with `reason` when false |
+| `layer:view` | `{type, viewId, view: {frame, viewMatrix, projectionMatrix, viewport, pixelRatio, timeMs, earth}}` | flat: `{type, viewId, viewMatrix, projectionMatrix, viewport, pixelRatio, timeMs?}` | §6 | adopt #36's envelope and field names (it's the published type). **#296 must read `msg.view`**: today the two don't interoperate, and #296 never sees `earth` |
+| `layer:time` | — (time per view) | `{utcMs, rate?}` | §7.1 | adopt as the on-change clock state, renamed `timeMs`, with the RFC's other fields |
+| `netgl:frame-end` | no view id | no view id; `layer:anchors {viewId}` after it is the frame's receipt | `netgl:frame-end {viewId}` (as `portal-layers.md` already says) | add `viewId` to frame-end in portal-netgl; anchors stop doubling as the receipt. Open question 18 |
+| `layer:anchors` | — | `{viewId, timeMs, anchors: [{id, ecef, name?, kind}]}`, the subscribed set | §8.1 | adopt `timeMs`, `anchors` (the whole set), `name`, `kind`; keep `p` for `ecef` |
+| `layer:anchors-subscribe` | — | `{patterns}`, replacing the subscription | §8.1 | adopt `patterns`; `subId`, `fields` and `rate` optional |
+| `layer:status` | — | `{status: 'loading' \| 'ready' \| 'error', partial?, message?}` | §10.7 | adopt `status` and `partial` (what failed to load, the rest drawn) |
+| `layer:visibility`, `layer:dispose` | — | `{state: 'hidden' \| …}`; dispose | `portal-layers.md` | as is |
+
+`globeLayerView`'s output is `LayerView`'s implemented half: `frame`,
+`viewMatrix`, `projectionMatrix`, `viewport`, `pixelRatio`, `timeMs`,
+`earth: {model: 'sphere', radius}`. It derives deck's ECEF → common map
+from `viewport.projectPosition` (unit axes and an altitude step), checks
+it's k times a proper rotation that predicts other points, and returns
+null otherwise (Web Mercator, above zoom 12). Its tests check the
+guest's projection against `viewport.project` to 1e-6 px and deck's NDC
+depth to 1e-9.
+
 ## 7. Time: the `portal.time/1` extension
 
 The outermost host owns the clock. Every layer, at every nesting level,
 draws the root's time. Guests never advance time on their own.
 
-### 7.1 The time a view carries
+### 7.1 The time a view carries, and the clock's state
+
+Time travels in two parts. What changes every frame rides in the view;
+what changes rarely is a `layer:time` message, sent when it changes. This
+is what the implementations converged on: 0.4.0 puts `timeMs` in every
+view, and #296 also takes `layer:time {utcMs, rate}` for a host that
+doesn't.
 
 ```ts
-interface LayerTime {
-  // The instant the frame shows
-  unixMs: number                // POSIX ms, UTC (no leap seconds), float64: 0.24 µs resolution in 2026
-  jd?: [number, number]         // two-part Julian date in `scale` (SOFA style: any split, the sum is the date)
-  scale?: 'UTC' | 'TAI' | 'TT' | 'TDB' | 'UT1' // of jd; default 'UTC'
+// Per view (in LayerView)
+//   timeMs: number             the instant the frame shows: POSIX ms, UTC (no leap seconds), float64
+//   time?: LayerTimeFrame      the rest, with portal.time/1
+interface LayerTimeFrame {
+  jd?: [number, number]         // two-part Julian date in the clock's `scale` (SOFA style: any split, the sum is the date)
+  epoch: number                 // the clock's epoch this frame belongs to (below)
+  elapsedMs: number             // wall ms since the layer started, monotonic, runs while paused:
+                                // for animation that isn't simulation (pulses, fades)
+}
 
-  // So every layer converts scales the same way
-  taiMinusUtc: number           // s; 37 since 2017
-  ut1MinusUtc?: number          // s, |·| < 0.9; absent means 0
-
-  // How it's moving
+// On change (host → guest), and once after hello-ack
+interface LayerTimeMessage {
+  type: 'layer:time'
+  timeMs: number                // the clock's time when sent (#296 calls it utcMs), for a guest between views
   rate: number                  // simulation s per wall s; negative runs backward
   paused: boolean               // rate is kept, but time doesn't advance
   scrubbing: boolean            // the user is dragging time: skip fetches and expensive refreshes
   live: boolean                 // the host says time tracks the wall clock now (rate 1, near now)
   epoch: number                 // bumps on a discontinuity (a jump, a scrub, a sign change of rate):
                                 // drop interpolation state, extrapolations and caches keyed to time
-  elapsedMs: number             // wall ms since the layer started, monotonic, runs while paused:
-                                // for animation that isn't simulation (pulses, fades)
+  scale?: 'UTC' | 'TAI' | 'TT' | 'TDB' | 'UT1' // of jd; default 'UTC'
+  taiMinusUtc: number           // s; 37 since 2017
+  ut1MinusUtc?: number          // s, |·| < 0.9; absent means 0
 }
 ```
 
+Rules:
+
+- **A view's `timeMs` wins.** A guest draws the view's time. Only a view
+  without one (a host that doesn't send it) is drawn at the clock
+  extrapolated from the last `layer:time`, as #296 does, and failing both
+  at the wall clock.
+- **`layer:time` is state, not a tick.** A host sends it on a change of
+  rate, pause, scrub, epoch or offsets, not per frame.
+
 Why these:
 
-- **`unixMs` is enough for this use case.** A float64 of Unix ms
+- **`timeMs` is enough for this use case.** A float64 of Unix ms
   resolves 0.24 µs now; a Starlink satellite moves 2 mm in that. A single
   double Julian date resolves only 40 µs (0.3 m at 7.6 km/s). `jd` in two
   parts is for guests that work in TT or TDB (ephemerides) and want the
@@ -485,17 +585,23 @@ Why these:
 
 ### 7.2 How it travels
 
-- **Negotiated, then per frame.** The guest asks for `portal.time/1` in
-  `layer:hello` (`ext`); the host grants it in `hello-ack`, with the scale
-  it will fill `jd` in. Then every `layer:view` carries `time`.
-- **Per frame, inside the view, not a separate message.** It's a dozen
-  numbers. Tying it to `viewId` means a frame's time and pose can't come
-  apart: a satellite moves 127 m in a 60 Hz frame, so a one-frame
-  mismatch between time and pose shows as jitter against the globe.
-- **Hosts that render on demand** must redraw while time runs: deck
-  renders only when something changes, so its adapter keeps redrawing
-  while `!paused && rate !== 0` (deck's `_animate`, or a requestAnimationFrame
-  calling `deck.redraw()`).
+- **Negotiated.** The guest asks for `portal.time/1` in `layer:hello`
+  (`ext`; #296 sends `capabilities.time: true`); the host grants it in
+  `hello-ack`, with the scale it will fill `jd` in. Without the
+  extension a guest still gets `timeMs` in each view (0.4.0 always sends
+  it).
+- **The instant rides in the view, not a separate message.** Tying it to
+  `viewId` means a frame's time and pose can't come apart: a satellite
+  moves 127 m in a 60 Hz frame, so a one-frame mismatch between time and
+  pose shows as jitter against the globe.
+- **Hosts that render on demand** must redraw while time runs. deck
+  renders only when something changes. #36's adapter posts a view only
+  when the camera, viewport or time changed, at most one unanswered, and
+  asks deck for a redraw (at most one per animation frame) when the
+  guest's frame arrives. So a still camera with a paused clock settles to
+  no frames, and a running clock animates at the slower of host and
+  guest. A same-page guest has no such loop: a live clock needs deck's
+  `_animate` or periodic redraws.
 
 ### 7.3 Guests with clocks of their own
 
@@ -523,7 +629,7 @@ interface TimeCoverage {
 ```ts
 interface LayerTimeRequest {  // guest → host
   type: 'layer:time-request'
-  unixMs?: number
+  timeMs?: number
   rate?: number
   paused?: boolean
   reason: string              // shown or logged by the host
@@ -549,50 +655,61 @@ type AnchorRef = string       // an AnchorId, or one qualified by a layer path, 
 
 interface Anchor {
   id: AnchorId
-  aliases?: AnchorId[]        // other names of the same thing: 'cospar:1998-067A'
   p: Vec3                     // layer-frame metres, at the view's time, where the layer draws it
+                              // (#296: `ecef`; the RFC keeps `p` because frames other than ECEF come with nesting)
+  kind?: string               // what it is, for the host's styling: 'satellite', 'dsn-dish', 'dsn-site' (#296)
+  name?: string               // a display name (#296)
+  aliases?: AnchorId[]        // other names of the same thing: 'cospar:1998-067A'
   v?: Vec3                    // m/s in the layer frame (ECEF: relative to the turning Earth)
-  placement: 'physical' | 'schematic'
-                              // schematic: a layout position, not a place (netmap's cyber and hybrid
-                              // layouts, its altitude-as-hierarchy on the globe)
+  placement?: 'physical' | 'schematic' // default physical. schematic: a layout position, not a place
+                              // (netmap's cyber and hybrid layouts, its altitude-as-hierarchy on the globe)
   geo?: [number, number, number] // WGS84 lat°, lon°, h m of the thing itself, when that isn't p
   radius?: number             // m, drawn size: for picking, and to end lines at the edge
-  drawn: boolean              // the layer draws it now (shown, not culled)
-  label?: string
+  drawn?: boolean             // the layer draws it now (shown, not culled); default true
   meta?: Record<string, string | number | boolean> // small and public (§8.6)
 }
 
 interface LayerAnchors {      // publisher → host
   type: 'layer:anchors'
-  viewId: number              // the view, so the time, the positions are for
-  full: boolean               // true: replaces the set; false: a delta
-  upsert: Anchor[]
-  remove?: AnchorId[]
+  viewId: number | null       // the view the positions are for
+  timeMs: number              // their time (#296), so a host can extrapolate without the view
+  anchors?: Anchor[]          // the whole subscribed set (#296's form; implies full)
+  upsert?: Anchor[]           // or a delta: changed and new
+  remove?: AnchorId[]         //           and gone
 }
 
 // For big sets (Starlink's ~10,000): the ids once, then positions as typed arrays
-interface LayerAnchorTable { type: 'layer:anchor-table'; tableId: number; ids: AnchorId[]; placement: 'physical' | 'schematic' }
+interface LayerAnchorTable { type: 'layer:anchor-table'; tableId: number; ids: AnchorId[]; placement?: 'physical' | 'schematic' }
 interface LayerAnchorPositions {
   type: 'layer:anchor-positions'
   tableId: number
   viewId: number
+  timeMs: number
   p: Float64Array             // 3 per id, in table order; NaN for "not drawn"
   v?: Float64Array
 }
 
 interface LayerAnchorSubscribe { // host → publisher (on its own behalf or a subscriber's)
   type: 'layer:anchors-subscribe'
-  subId: number
-  match: string[]             // ids, or a namespace with '*': 'norad:44713', 'dsn:*'
+  patterns: string[]          // ids, 'scheme:*', or '*' (#296's matcher)
+  subId?: number              // absent: replaces the one default subscription (#296); present: one of several
   fields?: Array<'v' | 'geo' | 'meta'>
-  rate: 'per-view' | 'on-change' | { hz: number }
+  rate?: 'per-view' | 'on-change' | { hz: number } // default per-view
 }
 interface LayerAnchorUnsubscribe { type: 'layer:anchors-unsubscribe'; subId: number }
 ```
 
+#296 publishes its anchors after each frame, the subscribed set whole,
+about 270 KB a second for all of Starlink at 60 Hz. Its own question,
+whether to publish orbital elements once and let the host propagate, is
+open question 22.
+
 - A publisher advertises its namespaces and rough counts in `hello`
   (`ext['portal.anchors/1'].publish`) and publishes only what's
-  subscribed. Nothing flows by default.
+  subscribed. Nothing flows by default. **Diff:** #296 publishes the
+  DSN's few dozen anchors (`dsn:*`, `dsn-site:*`, `spacecraft:*`) before
+  any subscription. Cheap, but it's the host's bandwidth and the
+  publisher's disclosure; the RFC asks #296 to start empty.
 - The host is a publisher too: its own anchors (netmap's `asn:14593`) go
   in the same index at layer path `/`.
 
@@ -618,6 +735,16 @@ compare as strings.
 | `local` | a layer's own thing, with no public name | anything; meaningful only qualified by a layer path (§8.3) | `portal:/celestiary#local:selected` | the layer |
 
 Notes:
+
+- **Diffs with #296** (`js/layer/anchors.js`, made in one module so it
+  can follow this RFC):
+
+  | #296 | RFC | Change |
+  |---|---|---|
+  | `norad:25544` | `norad:25544` | none |
+  | `dsn:DSS-43` | `dsn:DSS-43` | none |
+  | `dsn-site:gdscc` | `dsn:GDSCC` | one prefix for the DSN's dishes and complexes, upper case as DSN Now's config has them |
+  | `spacecraft:vgr1` | `dsn-sc:VGR1`, aliased to `naif:-31` | an authority-named prefix, upper case; add the NAIF alias where known |
 
 - **Why `naif:` and `dsn-sc:`, not `spacecraft:`.** A prefix should name
   an authority whose ids are stable, not a category. NAIF ids are what
@@ -847,7 +974,7 @@ stays the binding for trusted, bundled guests.
 ### 10.1 The iframe
 
 ```html
-<iframe src="https://sats.celestiary.example/layer.html"
+<iframe src="https://sats.celestiary.example/layer.html?nets=S,I,D#portal-nonce=4f9c…"
         sandbox="allow-scripts allow-same-origin"
         allow=""
         referrerpolicy="strict-origin"
@@ -858,70 +985,144 @@ stays the binding for trusted, bundled guests.
 - **Full-viewport and invisible**, per DESIGN.md's finding that a 1×1
   iframe throttles or kills a real app's loop.
 - **`allow-same-origin` keeps the guest's own origin.** It's
-  cross-origin to the host, so this grants nothing over the host;
-  without it the guest is an opaque origin and loses its storage and
-  origin-restricted APIs and tokens.
+  cross-origin to the host, so this grants nothing over the host.
+  Without it the guest is an opaque origin (`'null'`): it loses its
+  storage and origin-restricted APIs and tokens, the host can only post
+  to it with `'*'`, and its module scripts load in CORS mode (#36). #36's
+  GitHub Pages preview runs its guest that way, since there guest and
+  host share an origin and the sandbox is what makes them cross-origin.
+  This RFC recommends a real origin; opaque-origin guests are open
+  question 17.
 - **`allow=""`** grants no permissions-policy features (camera,
   geolocation, …).
-- **The guest restricts who embeds it**, with CSP `frame-ancestors`
-  listing the hosts it serves.
+- **`referrerpolicy` must send at least the origin** (`strict-origin`,
+  or the default): a Firefox guest finds its host by the referrer (§10.2).
+- **The nonce rides in the URL's fragment**, which is never sent to a
+  server, and which a page navigated into the frame doesn't have (§10.2).
+
+What the guest's deployment must provide (#36):
+
+| Need | Why |
+|---|---|
+| CSP `frame-ancestors <the hosts>`, and no `X-Frame-Options: DENY` | the guest decides who may frame it |
+| CORP / COEP headers, if the host sends COEP `require-corp` | or the host can't embed it |
+| `Access-Control-Allow-Origin` on its scripts, for an opaque-origin guest | its module scripts load in CORS mode (GitHub Pages sends it) |
+| CORS-enabled images | a tainted `ImageBitmap` can't be cloned (`DataCloneError`), and a tainted image fails the 2D-canvas conversion |
+
+**Storage is partitioned by the host's site.** The guest's IndexedDB and
+Cache API start cold in each host that embeds it: celestiary's data is
+fetched again per embedding site, not shared with celestiary.org's own
+pages.
 
 ### 10.2 The handshake
+
+**What's built.** #36 pins both transports by origin:
+`iframeTransport(iframe, {origin})` and `parentTransport({hostOrigins})`
+post with the peer's exact origin and drop inbound messages whose
+`event.source` or `event.origin` doesn't match. The source check alone
+failed: an iframe's `contentWindow` (and a guest's `parent`) is the same
+WindowProxy after the frame navigates, so a hostile page loaded into it
+passed. #296's guest does the same with its own `originTransport`, and
+repeats `layer:hello` every 500 ms until acked. Origin is then the whole
+trust boundary: any page on an allowed origin can drive the guest, and any
+page on the guest's origin loaded into that frame can feed the host GL
+(#36).
+
+**The host's origin, from the guest's side.** The guest needs it before
+its first message, so it never posts with `'*'`:
+
+1. `location.ancestorOrigins[0]`, where it exists (Chromium, Safari);
+2. else `document.referrer`'s origin (Firefox has no `ancestorOrigins`);
+3. else a `?host=` parameter (#296).
+
+Each candidate is taken only if it's on the guest's **allow-list, a
+constant in its build** (#296's `ALLOWED_ORIGINS`, extended at build time,
+never at run time). The URL may pick an origin from the list, never add
+one: any page could frame the guest with `?host=itself` (#36).
+
+**Proposed on top: a nonce, then a port.**
 
 ```
 host                                                guest (in the iframe)
 ────                                                ─────────────────────
-                        ◄── parent.postMessage({type: 'layer:announce', protocol}, '*')
-                            repeated every 500 ms until connected; carries nothing else
+iframe.src = guestUrl + '#portal-nonce=' + nonce
+                        ◄── parent.postMessage({type: 'layer:hello', version, nonce, …}, hostOrigin)
+                            repeated every 500 ms until acked
 check event.source === iframe.contentWindow
-check event.origin ∈ the host's allow-list
+check event.origin ∈ the host's allow-list (constant)
+check nonce === the one in this iframe's URL
 const {port1, port2} = new MessageChannel()
 iframe.contentWindow.postMessage(
-  {type: 'layer:connect', protocol, nonce}, event.origin, [port2]) ──►
-                                                    check event.origin ∈ the guest's host allow-list
-                                                    (location.ancestorOrigins isn't in every browser,
-                                                    so the guest checks the connect's origin)
-                        ◄── port: layer:hello {nonce, …}
-port: layer:hello-ack ──►
+  {type: 'layer:hello-ack', accepted: true, …}, event.origin, [port2]) ──►
+                                                    check event.origin ∈ the guest's allow-list
 everything else on the MessagePort; the window listeners are removed
 ```
 
-- `'*'` is safe for the announce only because it carries nothing.
-  Everything after goes to a checked origin or over the port.
-- The repeat-until-acked rule is DESIGN.md's (`announce()` every 500 ms).
-- A second `layer:connect`, or one with the wrong nonce, is ignored. A
-  reconnect (the iframe reloaded, §10.7) starts over with a new nonce.
+- **The nonce authenticates the frame's first document**, not just its
+  origin: a page navigated into the frame can't echo it. It's what makes
+  an opaque-origin guest (origin `'null'`, shared by every sandboxed
+  frame) safe to accept.
+- **The port dies with the document.** If the frame navigates after the
+  ack, the new page has no port, so nothing more reaches it, whatever the
+  first message's target origin was. The host also watches the iframe's
+  `load` event (it fires on every navigation, cross-origin too) and drops
+  the layer to `crashed` (§10.7).
+- **A capability beyond origin** would be a token the host's server
+  issues for the guest (or the reverse), checked by the other side's
+  server. Not proposed yet; open question 21.
+- A reconnect (the iframe reloaded, §10.7) starts over with a new nonce.
 
 ### 10.3 Messages and transferables
 
 - **One message per guest frame**: its calls, its checkpoint and
   `netgl:frame-end {viewId}`, batched. Cross-process, the per-message
   cost dominates.
+- **Ship a typed-array view's bytes, never its whole buffer.** Before #36
+  the recorder cloned a partial view's whole underlying `ArrayBuffer`: a
+  uniform upload from a view into a WASM heap or a framework's scratch
+  pool handed all of that memory to the host's origin. It now copies only
+  the view's range.
 - **Transfer only what the recorder owns**: buffers it made itself (its
-  `ImageData` conversions, copies of sub-ranges). A guest framework's own
+  `ImageData` conversions, those copies). A guest framework's own
   `ArrayBuffer`s are cloned, because frameworks keep and reuse them
   (three's attribute arrays, Cesium's typed arrays) and a transfer would
   detach them in the guest.
 - **`ImageBitmap`s are cloned**, unless the adapter knows the guest
-  closes them after upload.
+  closes them after upload. Tainted ones can't cross at all (§10.1).
 - **`SharedArrayBuffer`** (for big anchor tables, ring buffers) needs
   cross-origin isolation on both pages (COOP and COEP, and the iframe
   allowed `cross-origin-isolated`). Optional, and not assumed.
 
 ### 10.4 Scheduling and lag
 
-- A cross-origin iframe is out of process under site isolation, so it's
-  always `portal-layers.md`'s **AsyncScheduler**: at most one view in
-  flight, the next sent at the end of the current frame, frames tagged
+- A cross-site iframe runs in another renderer process under Chromium's
+  site isolation (#36 checked `localhost` inside `127.0.0.1`), not on the
+  host's main thread as DESIGN.md's Cesium findings assume. Each frame
+  then costs serialisation on both sides plus IPC. A cross-origin but
+  same-site frame may share the host's process. The latency isn't
+  measured on a real GPU yet.
+- So it's always `portal-layers.md`'s **AsyncScheduler**: at most one view
+  in flight, the next sent at the end of the current frame, frames tagged
   with their `viewId`, stale frames re-run without uploads.
+- **Frames aren't tagged yet.** `netgl:frame-end` carries no view id in
+  0.4.0, so the host can't tell which view a frame was drawn for, can't
+  compose it pose-tagged, and can't measure lag. #296 works around it:
+  its `layer:anchors {viewId}`, sent after each frame-end, is the frame's
+  receipt, and its test host sends the next view on it. The RFC puts
+  `viewId` on frame-end (open question 18).
+- **A frame that can't be re-run needs a new view.** A three.js guest's
+  first frame deletes its shaders after linking, so the host won't re-run
+  it (DESIGN.md's Cesium findings); with the camera still, no new view
+  went out and the guest vanished after one frame. 0.4.0's
+  `receiver.canRerun` tells the adapter to ask again for the same view.
 - An overlay has no stencil to slide against, but its content lags the
   host's by the round trip: turning the globe 30°/s at 60 fps moves the
   satellites half a degree against it per frame of lag. The host sends
   views predicted by the measured round trip, as `portal-layers.md`
   proposes for camera motion.
 - The guest renders when a `layer:view` arrives, not from its own
-  `requestAnimationFrame`, which browsers throttle in invisible and
-  cross-origin frames.
+  `requestAnimationFrame`, which Chromium may throttle in a cross-origin
+  frame it considers hidden (#36's guest and #296's both do this).
 
 ### 10.5 What NetGL can't protect, and the trust tiers
 
@@ -930,7 +1131,7 @@ isolate its GL. A hostile or broken guest can:
 
 - **exhaust the GPU**: huge buffers and textures, or shaders that run
   long enough to trip the GPU watchdog. Either loses the host's context,
-  and the host's whole canvas with it.
+  and the host's whole canvas with it (deck doesn't recover from that).
 - **reach the host's pixels**: it can't name the host's objects (handles
   are interned per guest), but it can name the default framebuffer
   (`null`) and so whatever `screenFramebuffer` maps it to.
@@ -939,11 +1140,19 @@ isolate its GL. A hostile or broken guest can:
   since readback is answered by the guest's shadow, which has none of the
   host's pixels. But the guest can draw them elsewhere, and flow-control
   acks are a timing channel for shaders whose cost depends on them.
-- **spoof the host's UI**: an overlay has no stencil, so it can paint
-  anywhere. `door` and `in-place` are confined by the screen policy's
-  stencil override.
+- **cover, clear or spoof the host's pixels**: without a screen policy
+  (#36's overlay runs with none) the guest can draw or clear anywhere on
+  the host's canvas. An overlay has no stencil, so even with a policy it
+  can paint anywhere. `door` and `in-place` are confined by the screen
+  policy's stencil override.
 - **call anything on the context**: the replay calls `gl[name](…)` with
-  the name from the message.
+  the name from the message. #36 refuses `Object.prototype`'s names
+  (`constructor`, `__defineGetter__`, …), which were reachable that way,
+  and typed-array names that aren't own data on the constructor table.
+  Every real method of the context is still callable.
+
+None of 0.1's cheap checks (an entry-point allow-list, no host-framebuffer
+reads, per-frame budgets, shader length limits) is built yet (#36).
 
 So trust is declared per layer, and decides what the replay checks.
 This proposes a tier between 0.1's full trust and its `untrusted-gl`,
@@ -952,7 +1161,7 @@ because the guests here are cross-origin but trusted.
 | Tier | Who | GL | Checks |
 |---|---|---|---|
 | `bundled` | `inPage` | full | none |
-| `trusted-origin` (new) | a cross-origin iframe from an origin on the host's allow-list | full | method allow-list; no reads or copies from the host's framebuffers; budgets as crash guards. Always on, cheap. |
+| `trusted-origin` (new) | a cross-origin iframe from an origin on the host's allow-list | full | method allow-list; no reads or copies from the host's framebuffers; budgets as crash guards. Always on, cheap; not built yet. #36 and #296 run at this tier with only the origin pinning. |
 | `untrusted-gl` | any other origin the host accepts | validated | the above, plus shader size limits, enforced budgets, a GPU-time watchdog (`EXT_disjoint_timer_query_webgl2`) that suspends the layer, and overlays refused or scissored to their extent's screen bounds |
 | `isolated` | anyone | none in the host's context | frame-RPC bitmaps ([frame-rpc-portals.md](../frame-rpc-portals.md)): full isolation, no shared depth, packed-depth precision |
 
@@ -965,16 +1174,16 @@ code the host doesn't trust.
 ### 10.6 Capabilities
 
 `layer:hello` asks; `layer:hello-ack` grants a subset. A guest that can't
-work with what it got reports `layer:status {state: 'failed', reason}`.
+work with what it got reports `layer:status {status: 'error', message}`.
 
 ```ts
 type Capability =
   | { cap: 'kind'; kind: LayerKind }
   | { cap: 'depth'; mode: DepthMode; write?: boolean }
   | { cap: 'projection'; kind: Projection['kind'] }
-  | { cap: 'time'; jdScale?: LayerTime['scale'] }
+  | { cap: 'time'; jdScale?: LayerTimeMessage['scale'] }
   | { cap: 'anchors:publish'; namespaces: string[]; share?: 'host' | 'layers' }
-  | { cap: 'anchors:subscribe'; match: string[] }
+  | { cap: 'anchors:subscribe'; patterns: string[] }
   | { cap: 'gl:extensions'; names: string[] }
   | { cap: 'children'; max: number }
   | { cap: 'budget'; callsPerFrame: number; uploadBytesPerFrame: number; liveObjects: number }
@@ -982,66 +1191,78 @@ type Capability =
 
 type DepthMode = 'shared' | 'save-restore' | 'guest-private' | 'none'
 
-interface LayerHello {          // extends portal-layers 0.1's
+interface LayerHello {          // extends portal-layers 0.1's, and #296's
   type: 'layer:hello'
-  protocol: 'portal-layers/0.2'
-  nonce: string                 // from layer:connect
-  adapter: string               // 'three', 'cesium', …
-  kinds: LayerKind[]
-  depth: DepthMode[]
-  projections: Array<Projection['kind']>
-  frames: FrameId[]
-  warp?: boolean                // §6.3: does it place positions by the host's surface mapping
-  extent?: LayerExtent
-  ext: { 'portal.time/1'?: {}; 'portal.anchors/1'?: { publish: string[]; counts?: Record<string, number> } }
-  requests: Capability[]
-  contracts: { alpha: 'coverage'; color: unknown; depth: 'none' | 'log' | 'linear' } // 0.1's
+  version: number               // the layer protocol, an integer (#296: 1; this RFC's shapes would be 2)
+  nonce?: string                // from the iframe URL's fragment (§10.2)
+  adapter: string               // what draws: 'three', 'cesium', 'celestiary-orbits' (#296 calls this `kind`)
+  capabilities: {               // what the guest can do (#296: {anchors, time, labels})
+    kinds: LayerKind[]
+    depth: DepthMode[]          // #296 puts 'shared' in contracts.depth; it belongs here
+    projections: Array<Projection['kind']>
+    frames: FrameId[]
+    warp?: boolean              // §6.3: does it place positions by the host's surface mapping
+    anchors?: boolean
+    time?: boolean
+    labels?: boolean            // #296: does it draw names (it doesn't; the host names anchors)
+  }
+  extent?: LayerExtent          // #296: {radiusM, beamsM} = {sphere: {center: 0, radius}, farthest}
+  ext?: { 'portal.time/1'?: {}; 'portal.anchors/1'?: { publish: string[]; counts?: Record<string, number> } }
+  requests?: Capability[]       // grants it asks for
+  contracts: { alpha: 'coverage'; color: 'display' | 'linear'; depth?: 'none' | 'log' | 'linear' } // 0.1's;
+                                // #296's color 'display-srgb' is 0.1's 'display'
 }
 
 interface LayerHelloAck {
   type: 'layer:hello-ack'
-  layerPath: string
-  kind: LayerKind
-  depth: SharedDepth | { mode: Exclude<DepthMode, 'shared'> }
-  projection: Projection['kind']
-  frame: FrameDescriptor
-  trust: 'bundled' | 'trusted-origin' | 'untrusted-gl'
-  ext: { 'portal.time/1'?: { jdScale?: string }; 'portal.anchors/1'?: { publish: string[]; share: 'host' | 'layers' } }
-  granted: Capability[]
-  refused?: { reason: string }  // then the layer goes to 'refused'
+  accepted: boolean             // #296; false: the layer goes to 'refused'
+  reason?: string
+  layerPath?: string
+  kind?: LayerKind
+  depth?: SharedDepth | { mode: Exclude<DepthMode, 'shared'> }
+  projection?: Projection['kind']
+  frame?: FrameDescriptor
+  trust?: 'bundled' | 'trusted-origin' | 'untrusted-gl'
+  ext?: { 'portal.time/1'?: { jdScale?: string }; 'portal.anchors/1'?: { publish: string[]; share: 'host' | 'layers' } }
+  granted?: Capability[]
 }
 ```
 
-The netmap × celestiary exchange:
+Everything but `accepted` is optional in the ack, so #296's `{accepted:
+true}` is a valid one: it means "the defaults" (an overlay, shared depth
+as the view's projection implies, ECEF, no anchors shared on).
+
+The netmap × celestiary exchange, in these shapes:
 
 ```js
-// guest → host
-{ type: 'layer:hello', protocol: 'portal-layers/0.2', nonce, adapter: 'three',
-  kinds: ['overlay'], depth: ['shared', 'none'], projections: ['matrix'], frames: ['ecef'], warp: true,
-  extent: { frame: 'ecef', sphere: { center: [0, 0, 0], radius: 4.3e7 }, beyond: 'clamp-to-far' },
+// guest → host (repeated every 500 ms until acked)
+{ type: 'layer:hello', version: 2, nonce, adapter: 'celestiary-orbits',
+  capabilities: { kinds: ['overlay'], depth: ['shared', 'none'], projections: ['matrix'], frames: ['ecef'],
+                  warp: true, anchors: true, time: true, labels: false },
+  extent: { frame: 'ecef', sphere: { center: [0, 0, 0], radius: 5e7 }, farthest: 3e13, beyond: 'clamp-to-far' },
   ext: { 'portal.time/1': {}, 'portal.anchors/1': { publish: ['norad', 'cospar', 'naif', 'dsn', 'dsn-sc'] } },
-  requests: [{ cap: 'kind', kind: 'overlay' }, { cap: 'depth', mode: 'shared', write: false }],
-  contracts: { alpha: 'coverage', color: 'display', depth: 'linear' } }
+  requests: [{ cap: 'depth', mode: 'shared', write: false }],
+  contracts: { alpha: 'coverage', color: 'display' } }
 
-// host → guest
-{ type: 'layer:hello-ack', layerPath: '/celestiary', kind: 'overlay', projection: 'matrix',
+// host → guest (with the MessagePort)
+{ type: 'layer:hello-ack', accepted: true, layerPath: '/celestiary', kind: 'overlay', projection: 'matrix',
   depth: { mode: 'shared', func: 'lequal', write: false, clip: { z: 'neg-one-to-one', reversed: false }, bits: 24, logarithmic: false },
-  frame: { id: 'ecef', earth: { kind: 'sphere', radius: 6370972, latitude: 'geodetic-as-spherical' } },
+  frame: { id: 'ecef', earth: { model: 'sphere', radius: 6370972 } },
   trust: 'trusted-origin',
-  ext: { 'portal.time/1': {}, 'portal.anchors/1': { publish: ['norad', 'cospar', 'naif', 'dsn', 'dsn-sc'], share: 'host' } },
-  granted: [/* … */] }
+  ext: { 'portal.time/1': {}, 'portal.anchors/1': { publish: ['norad', 'cospar', 'naif', 'dsn', 'dsn-sc'], share: 'host' } } }
+{ type: 'layer:time', timeMs: 1792756800000, rate: 1, paused: false, scrubbing: false, live: true,
+  epoch: 3, taiMinusUtc: 37, ut1MinusUtc: 0.0 }
+{ type: 'layer:anchors-subscribe', patterns: ['norad:44713'] }
 
-// host → guest, then per frame
-{ type: 'layer:anchors-subscribe', subId: 1, match: ['norad:44713'], rate: 'per-view' }
-{ type: 'layer:view', viewId: 812, view, eye, projection: { kind: 'matrix', matrix },
-  clipRange: { near, far }, viewport: [0, 0, 2400, 1600], pixelRatio: 2,
-  time: { unixMs: 1792756800000, taiMinusUtc: 37, ut1MinusUtc: 0.0, rate: 1, paused: false,
-          scrubbing: false, live: true, epoch: 3, elapsedMs: 84211 } }
+// host → guest, per frame (0.4.0's globeLayerView, plus the RFC's optional fields)
+{ type: 'layer:view', viewId: 812,
+  view: { frame: 'ecef', viewMatrix, projectionMatrix, viewport: [0, 0, 2400, 1600], pixelRatio: 2,
+          timeMs: 1792756800016, earth: { model: 'sphere', radius: 6370972 },
+          time: { epoch: 3, elapsedMs: 84211 } } }
 
-// guest → host, per frame
-{ type: 'layer:anchors', viewId: 812, full: false,
-  upsert: [{ id: 'norad:44713', p: [/* ECEF m, warped */], v: [/* m/s */], placement: 'physical', drawn: true }] }
-// …its netgl batch, ending in netgl:frame-end {viewId: 812}
+// guest → host, per frame: its netgl batch, ending in netgl:frame-end {viewId: 812}; then
+{ type: 'layer:anchors', viewId: 812, timeMs: 1792756800016,
+  anchors: [{ id: 'norad:44713', kind: 'satellite', name: 'STARLINK-1007', p: [/* ECEF m, warped */], v: [/* m/s */] }] }
 
 // host: links layer
 host.links.add({ from: 'portal:/celestiary#norad:44713', to: 'portal:/#asn:14593' })
@@ -1066,9 +1287,10 @@ from any running state:
 ```
 
 ```ts
-interface LayerStatus {          // guest → host, extends 0.1's
+interface LayerStatus {          // guest → host, extends 0.1's; the field is `status`, as #296 has it
   type: 'layer:status'
-  state: 'loading' | 'ready' | 'data-ready' | 'error'
+  status: 'loading' | 'ready' | 'data-ready' | 'error'
+  partial?: string[]             // #296: parts that failed to load, the rest drawn ('ready' with partial)
   message?: string
   timeCoverage?: TimeCoverage['timeCoverage'] // §7.3
 }
@@ -1087,26 +1309,126 @@ interface LayerStatus {          // guest → host, extends 0.1's
   guest's handles are gone. The host re-handshakes each one, and the guest
   re-creates and re-uploads (its shadow, unaffected, still has its state:
   the adapter replays its creations).
-- **Crashed.** The iframe reloaded (its `load` fires again) or the port
-  closed. The host replaces the layer's handle table and reconnects, or
-  fails the layer after a limit.
+- **Crashed.** The iframe navigated or reloaded (its `load` fires again)
+  or the port closed. The host stops sending to it at once (an
+  opaque-origin guest is posted to with `'*'`, so the next view would go
+  to whatever page is there now), replaces the layer's handle table and
+  reconnects with a new nonce, or fails the layer after a limit.
 
-### 10.8 Findings from implementation (to fill in)
+### 10.8 Findings from implementation
 
-> **This subsection is for the implementations to append to**: the
-> luma.gl host adapter PR (cross-origin support, in progress), and any
-> later spike. One bullet per finding: what happened, what fixed it, and
-> which section above it confirms, changes or contradicts. Don't edit the
-> sections above to match silently; note it here, and change them in a
-> reviewed commit that cites the finding.
+> **Implementations append here**: one bullet per finding, saying what
+> happened, what fixed it, and which section it confirms, changes or
+> contradicts. Don't edit the sections above to match silently; note it
+> here, and change them in a reviewed commit that cites the finding. The
+> sections above were reconciled with #36 and #296 in the commit that
+> added this list.
 
-- *luma.gl host adapter, cross-origin iframe (PR: to link):*
-  - handshake (§10.2): …
-  - batching and transferables (§10.3): …
-  - lag and prediction (§10.4): …
-  - restore semantics, `pushState`/`popState` across an async replay (§11): …
-  - iframe throttling and visibility (§10.1, §10.4): …
-- *Other implementations:* …
+**portal #36: the luma.gl / deck.gl host adapter and cross-origin
+transports** (portal-netgl 0.4.0; `frameworks/luma.ts`,
+`window-transport.ts`, `apps/host-netgl-deck`; DESIGN.md's new sections
+"Findings from deck.gl / luma.gl integration" and "Cross-origin
+iframes"). Tested three ways: two ports (cross-origin, same site),
+`localhost` inside `127.0.0.1` (cross-site, another process), and a
+sandboxed iframe without `allow-same-origin` (opaque origin). The NetGL
+stream crossed unchanged: calls, typed arrays and the ready handshake are
+all structured-clonable.
+
+- *Fixed:*
+  - **`'*'` outbound.** Transports posted with `targetOrigin: '*'`, so a
+    navigated frame or parent kept receiving views or GL calls. They post
+    to the peer's exact origin now. Confirms §10.2.
+  - **Source-only inbound check.** A navigated frame is the same
+    WindowProxy and passed it. There's now an `event.origin` allow-list
+    too; `windowTransport` refuses `'*'` in it, malformed origins, and
+    `'null'` without a source filter. Confirms §10.2.
+  - **Whole buffers on the wire.** A typed-array view shipped its whole
+    underlying `ArrayBuffer` (a guest's WASM heap would have reached the
+    host). Only the view's bytes go now. Added to §10.3.
+  - **Dispatch by any name.** The replay could call `Object.prototype`
+    methods by name; refused now. Changes §10.5's "call anything" (real
+    context methods remain callable).
+- *Remaining* (now in §10 and §13):
+  - Guest GL runs unsandboxed in the host's context: resource exhaustion,
+    hung shaders, a lost context (deck doesn't recover), drawing over the
+    host, reading the host's framebuffer on the GPU, and frame timing as
+    a side channel out of the host's page. §10.5.
+  - An opaque-origin (sandboxed) guest can only be posted to with `'*'`.
+    §10.1, §10.2, open question 17.
+  - Origin is the whole trust boundary: no nonce or capability. §10.2
+    proposes the nonce and port; open question 21.
+  - Cross-site process isolation's latency is unmeasured. §10.4.
+  - Frame-ends carry no view id, so an async host can't compose a frame
+    for the view it was drawn for. §10.4, open question 18.
+  - Deploy needs: CSP `frame-ancestors` on the guest's site, CORP/COEP if
+    the host uses COEP, CORS for an opaque-origin guest's scripts;
+    tainted images can't cross; the guest's storage is partitioned per
+    host site. §10.1.
+  - Chromium may throttle rAF in a cross-origin frame it considers
+    hidden, so guests render on view messages. Confirms §10.4.
+  - Firefox has no `ancestorOrigins`; the guest falls back to the
+    referrer. Changes §10.2 (the guest finds the host's origin before
+    its first message, rather than announcing to `'*'`).
+  - The view is a single 4×4. §6.4.
+  - The host's allow-list must be a constant in the guest's code, never
+    read from the URL. §10.2.
+- *Netmap / deck specifics:*
+  - `farZMultiplier` ≥ 4 covers GEO. Confirms §5.3.
+  - `GlobeView` switches to Web Mercator above zoom 12, and the guest is
+    skipped there (`globeLayerView` returns null). §6.4.
+  - deck's depth step is about 5 km at low zoom, so ground-level guest
+    geometry ties with deck's land and needs a lift (the demo's 20 km) or
+    a bias. §5.1, open question 19.
+  - Guest points above the limb stay visible while deck clips its own
+    past the horizon in its shaders. §5.4, open question 20.
+  - deck's Earth is a 6,370,972 m sphere, exposed as `view.earth`
+    (`{model: 'sphere', radius}`), measured, not hard-coded. Adopted in
+    §6.3.
+  - `pushState` / `popState` around the replay leaves deck's next frame
+    bit-identical, in `luma.test.ts` on headless-gl and in Chromium.
+    Confirms §11.
+  - A first frame that deletes objects can't be re-run, so with a still
+    camera the guest vanished; `receiver.canRerun` makes the adapter ask
+    again. §10.4.
+
+**celestiary/web #296: layer mode** (`design/LayerMode.md`,
+`js/layer/`; `layer.html?host=<origin>&nets=S,I,D&sats=1`). The first
+cross-origin orbits guest: satellites and the Starlink, Iridium and DSN
+networks, with no Scene, UI or ephemeris, in its own bundle budget.
+
+- **The contract as built** is in §6.7: `layer:hello` repeated until
+  acked, a flat `layer:view`, `layer:time {utcMs, rate}`,
+  `layer:anchors-subscribe {patterns}`, `layer:anchors {viewId, timeMs,
+  anchors}`, `layer:status {status}`, `layer:visibility`,
+  `layer:dispose`. The RFC adopts most of the names; the diffs are listed
+  there.
+- **It doesn't interoperate with #36 yet.** #36 sends `{type, viewId,
+  view: {…}}`; #296 reads the fields flat and so never sees `earth`. One
+  of them changes; the RFC picks #36's envelope. §6.7.
+- **Anchors as the frame receipt.** Its `layer:anchors {viewId}`, after
+  each frame-end, is what its test host sends the next view on, because
+  frame-ends carry no view id. §10.4, open question 18.
+- **Origins.** A constant `ALLOWED_ORIGINS`, extended only at build time
+  (`LAYER_ORIGINS`); the host's origin comes from `?host=` or the
+  referrer, and only if it's on the list; `'null'` is refused. Posts only
+  to that origin. Confirms §10.2. It ships its own `originTransport`
+  because it pins portal-netgl 0.3.0, which filtered by source only;
+  0.4.0's `parentTransport` replaces it.
+- **The Earth.** It places the DSN complexes on a 6,378,137 m sphere,
+  7 km off deck's surface. §6.3.
+- **Anchor ids** `dsn-site:gdscc` and `spacecraft:vgr1` differ from the
+  registry. §8.2.
+- **Anchor volume.** All of Starlink at 60 Hz is about 270 KB a second.
+  §8.1, open question 22.
+- **Default subscription.** It publishes the DSN's anchors before any
+  subscription. §8.1.
+- **Display-referred colour, realm isolation.** celestiary's
+  `sceneReferredUniform` is a module global; the separate iframe realm
+  keeps it from colliding with a host's. Confirms §2's realm collisions.
+- **Its own open questions** (labels by guest or host, picking by
+  nearest anchor or `layer:pick`, relaying the DSN feed so several embeds
+  make one request, WGS84 heights for the dishes) are app-side, except
+  picking, which is `portal-layers.md`'s roadmap.
 
 ## 11. Host adapter semantics
 
@@ -1135,7 +1457,7 @@ interface HostAdapter {
 
 | Framework | `afterReplay` | `begin` / `end` | Why |
 |---|---|---|---|
-| luma.gl / deck.gl | `restore` | `device.pushState()` / `device.popState()` | luma spies on the context's setters, so its cache follows the guest's calls and never goes stale. But its pipelines set only the parameters they name and assume defaults for the rest, so the guest's leftovers leak (`CULL_FACE` cost deck triangles). The stack puts every tracked value back; the spike's next deck frame was bit-identical to a baseline. Program, VAO and buffer bindings are outside the stack, and luma binds those per draw. |
+| luma.gl / deck.gl | `restore` | `device.pushState()` / `device.popState()` | luma spies on the context's setters, so its cache follows the guest's calls and never goes stale. But its pipelines set only the parameters they name and assume defaults for the rest, so the guest's leftovers leak (`CULL_FACE` cost deck triangles). The stack puts every tracked value back; deck's next frame was bit-identical to a baseline, in the spike and in #36 (`luma.test.ts` on headless-gl, and Chromium). Program, VAO and buffer bindings are outside the stack, and luma binds those per draw. |
 | three.js | `invalidate` | — / `renderer.resetState()`, then rebind its render target | three's cache doesn't see the guest's calls, so it's dropped. `resetState` also forgets the bound render target (DESIGN.md, celestiary findings), which the adapter rebinds. |
 | Cesium (as a host) | unknown | — | Cesium's `Context` caches render state with no public reset. Open question 14. |
 
@@ -1156,24 +1478,27 @@ Notes:
 
 ## 12. What this changes in the existing docs
 
-Nothing below is edited yet; each lands with the implementation, citing
-this RFC.
+#36 already made some of these in DESIGN.md (marked *done in #36*). The
+rest land with their implementation, citing this RFC.
 
 | Where | Today | Proposed |
 |---|---|---|
 | `portal-layers.md` Concepts: Layer, Shape | every layer has a shape | `kind`; an overlay has no shape (§4) |
 | `portal-layers.md` Contracts: Depth | `save-restore`, `guest-private`; "guest depth never has to agree with the host's" | adds `shared` and `none`; agreement is required in `shared` only (§5) |
-| `portal-layers.md` Protocol: `layer:view` | "view id, camera, projection, light, time, viewport, exposure" | §6's `LayerView`, with `portal.time/1` (§7) |
-| `portal-layers.md` Protocol: `layer:hello`, `hello-ack` | version, adapter kind, capabilities, contracts | §10.6: kinds, depth, projections, frames, extent, extensions, capability requests; the ack assigns `layerPath` and `trust` |
-| `portal-layers.md` Protocol: new messages | — | `layer:extent`, `layer:time-request`, `layer:anchors`, `layer:anchor-table`, `layer:anchor-positions`, `layer:anchors-subscribe`, `-unsubscribe`, `layer:children`, `layer:frame-maps`; the iframe's `layer:announce` and `layer:connect` |
-| `portal-layers.md` Protocol: `layer:status` | loading, ready, data-ready, error | adds `timeCoverage`; host-side states in §10.7 |
+| `portal-layers.md` Protocol: `layer:view` | "view id, camera, projection, light, time, viewport, exposure" | §6's `LayerViewMessage` (0.4.0's envelope and fields, plus the optional ones), with `portal.time/1` (§7) |
+| `portal-layers.md` Protocol: `layer:hello`, `hello-ack` | version, adapter kind, capabilities, contracts | §10.6: `version`, `adapter`, `capabilities` (kinds, depth, projections, frames), extent, extensions, capability requests, a nonce; the ack's `accepted`, `layerPath`, `trust` |
+| `portal-layers.md` Protocol: `netgl:frame-end {viewId}` | in the table; not built (0.4.0 sends no view id) | build it (§10.4) |
+| `portal-layers.md` Protocol: new messages | — | `layer:time`, `layer:extent`, `layer:time-request`, `layer:anchors`, `layer:anchor-table`, `layer:anchor-positions`, `layer:anchors-subscribe`, `-unsubscribe`, `layer:children`, `layer:frame-maps` |
+| `portal-layers.md` Protocol: `layer:status` | loading, ready, data-ready, error | the field is `status`; adds `partial` and `timeCoverage`; host-side states in §10.7 |
+| `portal-layers.md` Transports: `frame` binding | iframe, same or cross origin | the iframe attributes, deploy needs and handshake of §10.1–10.2 |
 | `portal-layers.md` Security | cross-origin refused unless `trust: 'untrusted-gl'` | the four tiers of §10.5, with `trusted-origin` for allow-listed cross-origin guests |
 | `portal-layers.md` Lifecycle | idle … failed | adds connecting, refused, unresponsive, context-lost, crashed (§10.7) |
-| DESIGN.md Composition modes | door, in place | adds overlay (§4) |
+| DESIGN.md Composition modes | door, in place | adds overlay (§4). *Done in #36.* |
+| DESIGN.md f → f′ and host needs | three's `resetState` | restore vs invalidate; luma.gl / deck.gl host shipped (§11). *Done in #36.* |
 | DESIGN.md Screen policy | `stencil`, `clear: 'depth-only'`, `blend` | adds `clear: 'none'` (shared depth), `discard: true` (warming without a stencil), and an optional screen scissor for untrusted overlays |
-| DESIGN.md f → f′ table: luma.gl / deck.gl | untried | context from `onDeviceInitialized`'s `device.gl`, frame hook `onAfterRender`, host state by `pushState`/`popState` (§2, §11) |
+| DESIGN.md Open problems | — | non-affine host views, view-tagged frames. *Done in #36*; §6.4 and §10.4 propose the answers |
 | DESIGN.md Lessons: same page beats an iframe | stands | unchanged; §10 says why cross-origin anyway |
-| README "Not yet": cross-origin iframes | designed, not built | as the luma adapter lands |
+| README "Not yet": cross-origin iframes | designed, not built | origin-pinned transports shipped in #36; the trust tiers and handshake of §10 still to build |
 
 ## 13. Open questions
 
@@ -1191,7 +1516,7 @@ discussion, or in an RFC issue citing the number.
 3. **Depth writes in shared mode.** Default `write: false` (the spike),
    or `true`, so links, later layers and host post-passes test against the
    guest?
-4. **Time on the wire.** Is `unixMs` plus an optional two-part `jd` the
+4. **Time on the wire.** Is `timeMs` plus an optional two-part `jd` the
    right minimum, or should every view carry a two-part TT date? And is
    the host the only source of leap seconds and UT1 − UTC, binding on
    guests?
@@ -1234,6 +1559,33 @@ discussion, or in an RFC issue citing the number.
     build the `untrusted-gl` validation layer, or route such guests to
     `isolated` frame-RPC bitmaps and give up shared depth for them?
 
+17. **Opaque-origin guests.** A sandboxed guest without
+    `allow-same-origin` has origin `'null'` and can only be posted to with
+    `'*'`. Do we support them (the nonce in the iframe URL and the
+    MessagePort of §10.2 as the only authenticators, and the host stopping
+    on the iframe's `load`), or require every guest to have a real origin?
+18. **The frame receipt.** Put `viewId` on `netgl:frame-end` (as
+    `portal-layers.md` already says, and proposed here), so `layer:anchors`
+    stops doubling as the receipt (#296)? Or make a separate
+    `layer:frame {viewId}` the receipt, leaving NetGL's marker alone?
+19. **Ground-level geometry and the host's depth step.** deck's step is
+    ~5 km at low zoom. Should the view carry the host's depth resolution
+    at the eye (or a recommended lift or bias), or is lifting ground
+    geometry the guest's business?
+20. **Occlusion that isn't depth.** deck hides its own geometry past the
+    horizon in its shaders, and the guest's depth-tested points above the
+    limb stay visible. Should the view carry the host's occluder (a sphere)
+    so the guest can match, or is the mismatch accepted?
+21. **Trust beyond origin.** Is origin pinning plus a nonce per iframe
+    enough for `trusted-origin` guests, or do we want a capability (a
+    token issued by one side's server, checked by the other's) before any
+    third-party guest?
+22. **Motion models instead of positions.** For whole constellations,
+    should a publisher be able to publish orbital elements once (OMM) and
+    let the host propagate, as #296 asks, rather than positions per frame
+    (~270 KB/s for Starlink at 60 Hz)? That puts SGP4 in the host: is that
+    a reach between codebases the separation of concerns forbids?
+
 ## 14. References
 
 - `docs/portal-layers.md`: the 0.1 layer design this extends.
@@ -1252,3 +1604,8 @@ discussion, or in an RFC issue citing the number.
 - The spike: netmap `spike/celestiary-layer` (`web/src/celestiaryLayer.js`)
   and celestiary `spike/satellites-layer` (`js/layer/satellitesLayer.js`),
   local branches, not pushed.
+- The implementations: portal [#36](https://github.com/pablo-mayrgundter/portal/pull/36)
+  (`packages/portal-netgl/src/frameworks/luma.ts`, `layer-view.ts`,
+  `window-transport.ts`, `apps/host-netgl-deck`) and celestiary/web
+  [#296](https://github.com/celestiary/web/pull/296) (`design/LayerMode.md`,
+  `js/layer/`).

@@ -11,7 +11,7 @@ the record of why.
 
 | # | Title | Status | Changes |
 |---|---|---|---|
-| [0001](./0001-globe-orbit-layers.md) | Globe + orbit layers: the overlay kind, shared depth, the view message, time, anchors, nesting, cross-origin guests | Draft | `layer:view`, `layer:hello`, depth and trust in `portal-layers.md`; screen policy in DESIGN.md |
+| [0001](./0001-globe-orbit-layers.md) | Globe + orbit layers: the overlay kind, shared depth, the view message, time, anchors, nesting, cross-origin guests | Draft | `layer:view`, `layer:hello`, depth and trust in `portal-layers.md`; screen policy in DESIGN.md. Implementations: portal #36, celestiary/web #296 |
 
 ## Process
 
