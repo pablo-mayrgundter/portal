@@ -9,9 +9,9 @@ feedback and integrations are worth as much as code right now.
   file a *Test report* issue. It helps whether things worked or didn't:
   we need coverage across browsers, OSes and GPUs.
 - **RFCs.** Open an *RFC* issue for design questions and proposals. For
-  anything larger than a few paragraphs, open a PR with a markdown doc,
-  next to the design it changes (e.g. `packages/portal-netgl/DESIGN.md`
-  or `docs/`), and link it from the issue. The open questions are listed
+  anything larger than a few paragraphs, open a PR with a numbered RFC
+  in [`docs/rfcs/`](./docs/rfcs/README.md) (its README has the process),
+  and link it from the issue. The open questions are listed
   in the [README](./README.md#get-involved).
 - **Adoption.** Open an *Adoption* issue describing your app and what
   you want to embed. Integrations are how the design gets tested, and
