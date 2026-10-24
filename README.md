@@ -222,7 +222,7 @@ before they settle:
   won't expose their GL.
 
 Small questions can go straight into an issue. Larger proposals are
-welcome as a markdown doc in a PR.
+welcome as an RFC in [`docs/rfcs/`](./docs/rfcs/README.md), in a PR.
 
 **Adopt it.** If you have a 3D web app that should embed another engine
 in place (a globe, a map, a CAD or BIM viewer, a splat scene) or open a
@@ -254,6 +254,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
 - [`packages/portal-netgl/README.md`](./packages/portal-netgl/README.md): the NetGL API and protocol.
 - [`packages/portal-netgl/DESIGN.md`](./packages/portal-netgl/DESIGN.md): architecture, the screen policy, composition modes, findings from the Cesium and celestiary integrations, open problems.
 - [`docs/portal-layers.md`](./docs/portal-layers.md): the `portal-layers` 0.1 design, and the gotchas that stay in the app.
+- [`docs/rfcs/`](./docs/rfcs/README.md): RFCs, the proposals for changing these designs, and how to write and comment on one.
 - [`docs/netgl-renderer.md`](./docs/netgl-renderer.md): the original NetGL design notes and spikes.
 - [`docs/frame-rpc-portals.md`](./docs/frame-rpc-portals.md): the frame-RPC portal design and its history (endpoints, traversal, recursion, server-side rendering).
 - [`docs/deploying-proxies.md`](./docs/deploying-proxies.md): the snapshot and share proxies behind the demos' social previews.

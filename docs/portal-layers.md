@@ -12,6 +12,12 @@ Its `CesiumLayers.js` is ~900 lines, and most of them belong here.
 The second half of this doc, **Gotchas that stay in the app**, is the
 guide for what a library can't decide for you.
 
+> **Proposed changes:** [RFC 0001](./rfcs/0001-globe-orbit-layers.md)
+> (draft) extends this design for a globe host with an orbits guest: an
+> overlay layer kind, shared depth, a precise `layer:view`, time and
+> anchor extensions, nesting, and cross-origin trust tiers. Its §12
+> lists what it would change here.
+
 ## Scope
 
 0.1 does:
