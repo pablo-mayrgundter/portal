@@ -59,7 +59,7 @@ export type NetGLRendererConfig = Omit<THREE.WebGLRendererParameters, 'context'>
  */
 export const createNetGLRenderer = (config: NetGLRendererConfig): THREE.WebGLRenderer => {
   const { shadow, transport, ...threeOpts } = config
-  const recorder = makeNetGLRecorder(shadow, (call: NetGLCall) => transport.post(call))
+  const recorder = makeNetGLRecorder(shadow, (call: NetGLCall, transfer) => transport.post(call, transfer))
   // Pass the shadow's canvas explicitly. Without this, three's WebGLRenderer
   // constructor falls back to its own createCanvasElement() — and setSize()
   // resizes THAT canvas, while `gl.canvas` (read via the recorder proxy)

@@ -69,7 +69,9 @@ export type NetGLThreeOverlayGuest = {
 
 export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig): NetGLThreeOverlayGuest => {
   const { scene, camera, transport } = config
-  const core = makeNetGLGuestContext({ transport, canvas: config.canvas })
+  // `'all'`: the overlay hears the host through `core.transport`, so the
+  // host's views can come over the MessageChannel too.
+  const core = makeNetGLGuestContext({ transport, canvas: config.canvas, messageChannel: 'all' })
   const renderer = new config.WebGLRenderer({
     antialias: false,
     alpha: true,
@@ -119,7 +121,7 @@ export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig)
     render,
     start() {
       if (unsubscribe) return
-      unsubscribe = transport.onMessage((msg) => {
+      unsubscribe = core.transport.onMessage((msg) => {
         if (!isNetGLLayerViewMessage(msg)) return
         config.onView?.(msg.view)
         applyView(msg.view)
@@ -132,7 +134,7 @@ export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig)
       unsubscribe = null
     },
     invalidate(reason) {
-      postLayerInvalidate(transport, reason)
+      postLayerInvalidate(core.transport, reason)
     }
   }
 }

@@ -20,8 +20,12 @@
 // 2. Frame: `onAfterRender` runs synchronously inside `deck.redraw()`, after
 //    the layers have drawn to the default framebuffer, with deck's depth
 //    still valid. deck renders on demand, so an asynchronous guest (an
-//    iframe) has to ask for a redraw when its frame arrives; the adapter
-//    does, at most once per animation frame.
+//    iframe) has to ask for a redraw when its frame arrives. The adapter
+//    asks for one in the next animation frame and drops it if deck drew in
+//    the meantime (the controller moving the camera, or the host's own
+//    `deck.redraw()` from a clock): that draw already drained the frame.
+//    deck 9 has no public "needs redraw" flag (`layerManager` is
+//    protected), so this is the adapter's own folding.
 //
 // 3. View: deck's GlobeViewport works in "common" units (a sphere of 256
 //    for the Earth's radius). The adapter derives the ECEF → common map
@@ -274,6 +278,10 @@ export type NetGLDeckLayerStats = {
   viewsSent: number
   /** ms spent in the last guest replay, push/pop included. */
   lastMs: number
+  /** Redraws the adapter forced (`deck.redraw(reason)`). */
+  redrawsForced: number
+  /** Redraws the adapter wanted but dropped, deck having drawn already. */
+  redrawsFolded: number
 }
 
 export type NetGLDeckLayer = {
@@ -309,6 +317,17 @@ export type NetGLDeckLayer = {
   postToGuest(msg: unknown): void
   /** Whether the guest has said `layer:hello` or `netgl:ready`. */
   readonly live: boolean
+  /**
+   * Receiver only: ask the guest for a frame of the last viewport at the
+   * host's current time, without redrawing deck now; deck redraws once,
+   * when the frame arrives. For a clock that moves only the guest's
+   * content: calling `deck.redraw()` each tick instead draws deck twice
+   * per tick (once with the old guest frame, once when the new one
+   * lands). Nothing is sent while a view is in flight (the redraw its
+   * frame brings sends the new time) or when the view hasn't changed.
+   * Returns whether a view was sent.
+   */
+  requestGuestFrame(): boolean
   /** Restore deck's previous `onAfterRender` and stop listening. */
   detach(): void
 }
@@ -346,19 +365,31 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
   const time = config.time ?? Date.now
   const toView = config.view ?? globeLayerView
   const restore = config.restore ?? 'luma-stack'
-  const stats: NetGLDeckLayerStats = { hostFrames: 0, guestFrames: 0, viewsSent: 0, lastMs: 0 }
+  const stats: NetGLDeckLayerStats = { hostFrames: 0, guestFrames: 0, viewsSent: 0, lastMs: 0, redrawsForced: 0, redrawsFolded: 0 }
   const isImmediate = 'render' in config
   let enabled = true
   let lastView: NetGLLayerView | null = null
   let redrawQueued = false
   let detached = false
 
+  // A redraw in the next animation frame, unless deck draws before then
+  // (deck's animation-loop callback runs ahead of ours in that frame, and
+  // a host's forced redraw may come sooner): that draw ran onAfterRender,
+  // which drained whatever this redraw was for.
+  let drewSinceRequest = false
   const requestRedraw = (reason: string): void => {
     if (redrawQueued || detached) return
     redrawQueued = true
+    drewSinceRequest = false
     nextFrame(() => {
       redrawQueued = false
-      if (!detached) deck.redraw(reason)
+      if (detached) return
+      if (drewSinceRequest) {
+        stats.redrawsFolded += 1
+        return
+      }
+      stats.redrawsForced += 1
+      deck.redraw(reason)
     })
   }
 
@@ -468,10 +499,16 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     }, viewTimeoutMs)
   }
 
+  // The last viewport the guest was drawn for, and the view options of
+  // that frame, for `requestGuestFrame`.
+  let lastViewport: DeckViewportLike | null = null
+  let lastCssWidth: number | undefined
+
   const previous = deck.props.onAfterRender ?? null
   const onAfterRender = (context: unknown): void => {
     previous?.(context)
     stats.hostFrames += 1
+    drewSinceRequest = true
     if (!enabled || detached) return
     const viewports = deck.getViewports()
     const viewport = config.viewId ? viewports.find((v) => v.id === config.viewId) : viewports[0]
@@ -502,6 +539,8 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     else run()
     stats.lastMs = performance.now() - t0
     lastView = view
+    lastViewport = viewport
+    lastCssWidth = cssWidth
     sendView(view)
   }
   deck.setProps({ onAfterRender })
@@ -542,6 +581,19 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     postToGuest,
     get live() {
       return live
+    },
+    requestGuestFrame() {
+      if (!receiver || detached || !enabled || !lastViewport || inFlight) return false
+      const view = toView(lastViewport, {
+        timeMs: time(),
+        drawingBufferWidth: gl.drawingBufferWidth,
+        drawingBufferHeight: gl.drawingBufferHeight,
+        cssWidth: lastCssWidth
+      })
+      if (!view) return false
+      const before = stats.viewsSent
+      sendView(view)
+      return stats.viewsSent > before
     },
     detach() {
       if (detached) return

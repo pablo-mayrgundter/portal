@@ -19,7 +19,16 @@
 // (stencil clipping, clears, viewport placement) lives on the host side in
 // the replay's `screen` config, not in the shim.
 
-import type { NetGLCall, NetGLFrameEnd } from './messages'
+import {
+  NETGL_WIRE_VERSION,
+  isNetGLCall,
+  isNetGLFrameEnd,
+  type NetGLBatch,
+  type NetGLCall,
+  type NetGLFrameEnd,
+  type NetGLPortOpenMessage,
+  type NetGLStreamItem
+} from './messages'
 import type { ColorRGB, PortalAnchor } from './portal-types'
 import { makeNetGLRecorderSession } from './recorder'
 import type { NetGLTransport } from './renderer'
@@ -36,6 +45,22 @@ export type NetGLReadyMessage = {
   type: 'netgl:ready'
   anchor: PortalAnchor
   background: ColorRGB
+  /**
+   * The highest wire version the guest speaks (absent: 1). 2: it sends
+   * `netgl:batch` once the host's ack says 2 as well.
+   */
+  wire?: number
+  /**
+   * Wire 2: the guest takes a MessageChannel port for its stream.
+   * `'stream'`: it sends over the port and keeps hearing the host on the
+   * window. `'all'`: the host's messages may come over the port as well
+   * (the app listens through `guest.transport`).
+   */
+  port?: 'stream' | 'all'
+  /** Stream items the guest had posted on the window when it sent this. */
+  seq?: number
+  /** Random per guest page load: tells a reload from a repeated announcement. */
+  session?: string
 }
 
 export type NetGLGuestContextConfig = {
@@ -65,6 +90,28 @@ export type NetGLGuestContextConfig = {
    * `shadow` directly.
    */
   scalarState?: 'tracked' | 'queried'
+  /**
+   * Wire 2's MessageChannel (see `NetGLReadyMessage.port`). Default
+   * `'stream'`: take the host's port, if it offers one, for everything this
+   * context sends (the call stream, and what the app posts through
+   * `transport`), and keep hearing the host on the transport given.
+   * `'all'`: also let the host send its messages over the port; only for an
+   * app that listens through this context's `transport` rather than the
+   * one it passed in. `false`: no port (batches still go on the transport).
+   */
+  messageChannel?: 'stream' | 'all' | false
+  /** Highest wire version to offer. Default 2; 1 posts one message per call. */
+  wire?: 1 | 2
+}
+
+/** What the guest and its host agreed on, from the ready handshake. */
+export type NetGLGuestWire = {
+  /** 1 until a host's ack says 2. */
+  readonly version: number
+  /** Whether the stream goes over the host's MessageChannel. */
+  readonly port: boolean
+  /** Batches sent (wire 2). */
+  readonly batches: number
 }
 
 export type NetGLGuestContext = {
@@ -76,7 +123,15 @@ export type NetGLGuestContext = {
    * isn't seen by the tracked checkpoint (`scalarState`).
    */
   shadow: WebGL2RenderingContext
+  /**
+   * The transport to the host, as the app should use it for its own
+   * messages: posts go the stream's way (over the host's port once there
+   * is one, in order after the calls already sent), and listeners hear the
+   * transport given and the port.
+   */
   transport: NetGLTransport
+  /** The negotiated wire. */
+  readonly wire: NetGLGuestWire
   /**
    * Mark the end of a frame: posts frame-end, then a checkpoint (when the
    * context was made with `checkpoints`). `{ checkpoint: false }` posts
@@ -110,7 +165,15 @@ export type NetGLEndFrameOptions = {
 }
 
 /** Host → guest: the `netgl:ready` handshake arrived. */
-export type NetGLReadyAckMessage = { type: 'netgl:ready-ack' }
+export type NetGLReadyAckMessage = {
+  type: 'netgl:ready-ack'
+  /** The wire the host will read: min(its own, the guest's). Absent: 1. */
+  wire?: number
+  /** Echo of the ready's `seq`. */
+  seq?: number
+  /** Wire 2: a MessageChannel port for the stream, transferred with this message. */
+  port?: MessagePort
+}
 
 const READY_RESEND_MS = 500
 
@@ -120,45 +183,185 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
     contextAttributes = { antialias: false, stencil: true, depth: true },
     checkpoints = true
   } = config
-  const transport: NetGLTransport =
+  const base: NetGLTransport =
     config.transport ?? windowTransport({ output: parent, inputFilter: parent })
+  const offerWire = config.wire ?? NETGL_WIRE_VERSION
+  const portMode = config.messageChannel ?? 'stream'
+  const session = Math.random().toString(36).slice(2) + Date.now().toString(36)
 
   const shadow = (canvas as HTMLCanvasElement).getContext('webgl2', contextAttributes) as WebGL2RenderingContext | null
   if (!shadow) throw new Error('makeNetGLGuestContext: failed to create WebGL2 shadow context')
 
+  // The wire. Until the host's ack says 2, every item goes out alone, as
+  // wire 1 has it; after, items queue and go as one batch per frame-end.
+  let version = 1
+  let port: MessagePort | null = null
+  let batches = 0
+  // Stream items posted on `base`: counted so that the host, after the
+  // switch to the port, can wait for the ones still in flight on the window.
+  let windowItems = 0
+  let queue: NetGLStreamItem[] = []
+  let queueTransfer: Transferable[] = []
+
+  const flush = (): void => {
+    if (queue.length === 0) return
+    const msg: NetGLBatch = { type: 'netgl:batch', batch: queue }
+    const transfer = queueTransfer
+    queue = []
+    queueTransfer = []
+    batches += 1
+    if (port) {
+      port.postMessage(msg, transfer)
+    } else {
+      windowItems += msg.batch.length
+      base.post(msg, transfer)
+    }
+  }
+
+  const postItem = (item: NetGLStreamItem, transfer?: Transferable[], urgent?: boolean): void => {
+    if (version < 2) {
+      windowItems += 1
+      base.post(item, transfer)
+      return
+    }
+    // An app object that must be serialised before the call returns (an
+    // ImageBitmap the app may close): it goes now, in a batch of its own,
+    // so if it can't be cloned (a tainted bitmap) only that call is lost.
+    if (urgent) flush()
+    queue.push(item)
+    if (transfer) queueTransfer.push(...transfer)
+    if (urgent) flush()
+  }
+
   // No checkpoints: nothing to track for ('queried' makes no calls until a
   // checkpoint is taken, and none is).
-  const session = makeNetGLRecorderSession(shadow, (call: NetGLCall) => transport.post(call), {
+  const recorder = makeNetGLRecorderSession(shadow, (call: NetGLCall, transfer, urgent) => postItem(call, transfer, urgent), {
     scalarState: checkpoints ? config.scalarState : 'queried'
   })
 
+  // Inbound: the app's listeners hear the transport given and, once open,
+  // the port (`'all'`).
+  const listeners = new Set<(msg: unknown) => void>()
+  const transport: NetGLTransport = {
+    post(msg, transfer) {
+      if (isNetGLCall(msg) || isNetGLFrameEnd(msg)) {
+        postItem(msg, transfer)
+        if (isNetGLFrameEnd(msg)) flush()
+        return
+      }
+      if (port) port.postMessage(msg, transfer ?? [])
+      else base.post(msg, transfer)
+    },
+    onMessage(listener) {
+      listeners.add(listener)
+      const off = base.onMessage(listener)
+      return () => {
+        listeners.delete(listener)
+        off()
+      }
+    }
+  }
+
+  const openPort = (p: MessagePort, seq: number): void => {
+    port = p
+    if (portMode === 'all') {
+      p.onmessage = (ev: MessageEvent) => {
+        const data = ev.data as unknown
+        if (!data || typeof data !== 'object') return
+        for (const l of [...listeners]) l(data)
+      }
+    }
+    const open: NetGLPortOpenMessage = { type: 'netgl:port', seq, after: windowItems }
+    p.postMessage(open)
+  }
+
+  // The host's ack settles the wire, once per page load.
+  let negotiated = false
+  const onAck = (msg: unknown): boolean => {
+    if ((msg as { type?: unknown }).type !== 'netgl:ready-ack') return false
+    if (negotiated) return true
+    negotiated = true
+    const ack = msg as NetGLReadyAckMessage
+    const agreed = Math.min(offerWire, typeof ack.wire === 'number' ? ack.wire : 1)
+    if (agreed >= 2) {
+      version = 2
+      // From here a call may wait in the queue until the frame ends, so its
+      // arrays are copied when it's recorded.
+      recorder.snapshot = true
+      const p = ack.port
+      if (portMode !== false && p && typeof (p as MessagePort).postMessage === 'function') {
+        openPort(p, typeof ack.seq === 'number' ? ack.seq : 0)
+      } else {
+        p?.close?.()
+      }
+    } else {
+      ack.port?.close?.()
+    }
+    return true
+  }
+
   // Initial checkpoint: pins the receiver to GL defaults before the
   // framework's first calls, so batch 1 doesn't inherit host state either.
-  if (checkpoints) session.checkpoint()
+  if (checkpoints) recorder.checkpoint()
 
   return {
-    gl: session.gl,
+    gl: recorder.gl,
     shadow,
     transport,
+    wire: {
+      get version() {
+        return version
+      },
+      get port() {
+        return port !== null
+      },
+      get batches() {
+        return batches
+      }
+    },
     endFrame(options = {}) {
       const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
-      transport.post(frameEnd)
-      if (checkpoints && options.checkpoint !== false) session.checkpoint()
+      postItem(frameEnd)
+      flush()
+      // The checkpoint starts the next frame: in wire 2 it waits in the
+      // queue and leads the next batch.
+      if (checkpoints && options.checkpoint !== false) recorder.checkpoint()
     },
     subFrame() {
       const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
-      transport.post(frameEnd)
-      if (checkpoints) session.deferCheckpoint()
+      postItem(frameEnd)
+      flush()
+      if (checkpoints) recorder.deferCheckpoint()
     },
     announce(anchor, background = { r: 0, g: 0, b: 0 }) {
-      const ready: NetGLReadyMessage = { type: 'netgl:ready', anchor, background }
-      transport.post(ready)
-      const timer = setInterval(() => transport.post(ready), READY_RESEND_MS)
-      const unsubscribe = transport.onMessage((msg) => {
-        if ((msg as { type?: unknown }).type !== 'netgl:ready-ack') return
-        clearInterval(timer)
-        unsubscribe()
+      const ready = (): NetGLReadyMessage => {
+        const msg: NetGLReadyMessage = { type: 'netgl:ready', anchor, background }
+        if (offerWire >= 2) {
+          msg.wire = offerWire
+          msg.seq = windowItems
+          msg.session = session
+          if (portMode !== false && typeof MessageChannel !== 'undefined') msg.port = portMode
+        }
+        return msg
+      }
+      // Listen first: a same-page link acks synchronously, inside the post.
+      let timer: ReturnType<typeof setInterval> | null = null
+      let acked = false
+      const unsubscribe = base.onMessage((msg) => {
+        if (!onAck(msg)) return
+        acked = true
+        if (timer) clearInterval(timer)
+        unsubscribeLater()
       })
+      let unsubscribed = false
+      function unsubscribeLater(): void {
+        if (unsubscribed) return
+        unsubscribed = true
+        // Not inside the listener's own dispatch.
+        queueMicrotask(unsubscribe)
+      }
+      base.post(ready())
+      if (!acked) timer = setInterval(() => base.post(ready()), READY_RESEND_MS)
     }
   }
 }

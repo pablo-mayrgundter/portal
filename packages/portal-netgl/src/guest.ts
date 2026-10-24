@@ -199,7 +199,7 @@ export const makeNetGLPortalGuest = (
   const transport: WindowTransport = transportOverride
     ?? windowTransport({ output: outputTarget, inputFilter })
 
-  const recorder = makeNetGLRecorder(shadow, (call: NetGLCall) => transport.post(call))
+  const recorder = makeNetGLRecorder(shadow, (call: NetGLCall, transfer) => transport.post(call, transfer))
 
   // Build the renderer with the recorder as its GL context. ALL three.js
   // calls — including construction-phase setup like default-texture creation

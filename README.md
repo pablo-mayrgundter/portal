@@ -86,7 +86,12 @@ Works:
   - same page, synchronous, zero lag (`makeNetGLImmediateLink`);
   - `postMessage` to iframes, with flow control and ready/ack
     handshakes; cross-origin iframes with both ends pinned by origin
-    (`iframeTransport`, `parentTransport`).
+    (`iframeTransport`, `parentTransport`);
+  - one message per guest frame over a `MessageChannel` (wire 2, 0.6),
+    negotiated in the handshake, so 0.5 guests and hosts still work: a
+    cross-site guest frame went from ~187 messages and ~240 ms of host
+    main-thread deserialisation to one message and under 1 ms, and only
+    the bytes each call reads cross (Starlink's frame: 494 KB to 51 KB).
 - **Guests:** three.js (including an overlay guest driven by the host's
   view), and Cesium unmodified through its `getWebGLStub` hook.
 - **Hosts:** three.js, and deck.gl / luma.gl (`attachNetGLDeckLayer`:
@@ -127,7 +132,7 @@ The open problems are itemised in
 
 | Package | What | Status |
 |---|---|---|
-| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, cross-origin transports, Cesium shim, deck.gl host adapter, three.js overlay guest | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.5.x, pre-1.0: pin an exact version |
+| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, cross-origin transports, Cesium shim, deck.gl host adapter, three.js overlay guest | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.6.x, pre-1.0: pin an exact version |
 | `portal-layers` | host/guest shim for in-place layers: compositor, lifecycle, transport bindings, contracts | design, [0.1 draft](./docs/portal-layers.md) |
 | [`portal-core`](./packages/portal-core) | engine-agnostic portal geometry, pose coupling, wire types | workspace only |
 | [`portal-three`](./packages/portal-three) | three.js bindings: stencil mask, coupled camera, local endpoint | workspace only |

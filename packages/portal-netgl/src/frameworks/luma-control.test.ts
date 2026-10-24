@@ -222,3 +222,62 @@ describe('attachNetGLDeckLayer — control posts wait for a live guest', () => {
     layer.detach()
   })
 })
+
+describe('attachNetGLDeckLayer — redraws', () => {
+  const ready = { type: 'netgl:ready', anchor: { position: [0, 0, 0], normal: [0, 0, 1], up: [0, 1, 0] }, background: { r: 0, g: 0, b: 0 } }
+
+  it('folds a guest frame into a redraw that comes first, and forces one otherwise', async () => {
+    const deck = fakeDeck()
+    const { guest, host, received } = memoryPair()
+    const layer = attachNetGLDeckLayer(deck, { device: mockDevice(), transport: host, time: () => 0 })
+    guest.post(ready)
+    await settle()
+    expect(views(received)).toHaveLength(1)
+    // The guest's frame arrives and the host draws (its clock) before the
+    // adapter's redraw comes due: that draw replays it; nothing more.
+    const draws = deck.redraws
+    guest.post({ type: 'netgl:frame-end' })
+    await new Promise((r) => setTimeout(r, 0))
+    deck.redraw('host clock')
+    await settle()
+    expect(deck.redraws).toBe(draws + 1)
+    expect(layer.stats.redrawsFolded).toBe(1)
+    // Nobody else draws: the adapter does.
+    layer.postToGuest({ type: 'noop' })
+    postLayerInvalidate(guest)
+    await settle()
+    guest.post({ type: 'netgl:frame-end' })
+    await settle()
+    expect(layer.stats.redrawsForced).toBeGreaterThan(0)
+    layer.detach()
+  })
+
+  it('requestGuestFrame sends the new time without drawing deck; deck draws once when it lands', async () => {
+    const deck = fakeDeck()
+    let now = 1000
+    const { guest, host, received } = memoryPair()
+    const layer = attachNetGLDeckLayer(deck, { device: mockDevice(), transport: host, time: () => now })
+    guest.post(ready)
+    await settle()
+    guest.post({ type: 'netgl:frame-end' })
+    await settle()
+    expect(views(received)).toHaveLength(1)
+    // Unchanged clock: nothing to ask for.
+    expect(layer.requestGuestFrame()).toBe(false)
+    const draws = deck.redraws
+    now = 1250
+    expect(layer.requestGuestFrame()).toBe(true)
+    // One in flight: a second ask waits for it.
+    now = 1500
+    expect(layer.requestGuestFrame()).toBe(false)
+    await settle()
+    expect(views(received).slice(-1)[0].view.timeMs).toBe(1250)
+    expect(deck.redraws).toBe(draws)
+    // Its frame lands: one draw, which sends the 1500 view on its way.
+    guest.post({ type: 'netgl:frame-end' })
+    await settle()
+    expect(deck.redraws).toBe(draws + 1)
+    expect(views(received).slice(-1)[0].view.timeMs).toBe(1500)
+    layer.detach()
+  })
+})

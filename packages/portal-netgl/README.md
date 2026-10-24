@@ -171,7 +171,10 @@ instead of the canvas. See DESIGN.md.
 `receiver.onFrame(cb)` calls back when a guest frame completes (for hosts
 that render on demand), `receiver.post(msg)` sends the guest a control
 message, and `receiver.canRerun` says whether `drain()` would re-run the
-last frame when nothing new has arrived.
+last frame when nothing new has arrived. `receiver.wire` reports what the
+guest negotiated (`version`, `port`: `'none' | 'offered' | 'open'`) and
+counts messages, items and batches; `wire: 1` or `messageChannel: false`
+in the config turn batching or the port off.
 
 ## Cross-origin iframes
 
@@ -197,6 +200,15 @@ Origin pinning is not a sandbox: the guest's GL still executes in your
 context, so a cross-origin guest must still be one you trust. DESIGN.md
 ["Cross-origin iframes"](./DESIGN.md#cross-origin-iframes) lists what
 remains open.
+
+Across origins, each message costs about a millisecond on the receiving
+main thread whatever its size, so 0.6 sends a guest frame as **one
+message**, over a **MessageChannel** when it can (wire 2, below). Nothing
+to configure: a guest on `makeNetGLGuestContext` (the Cesium shim, the
+three.js overlay guest) and a host on `makeNetGLHostReceiver` (or
+`attachNetGLDeckLayer`) negotiate it in the ready handshake, and either
+end talks to a 0.5 peer as 0.5 did. The host hands its port only to an
+exact origin, so a sandboxed (`'null'`) guest batches over the window.
 
 ## `attachNetGLDeckLayer` — deck.gl / luma.gl host
 
@@ -230,6 +242,16 @@ unanswered), and redraws deck when the guest's frame arrives. With
 `layer.transport`, and it renders synchronously in each deck frame. The
 replay's screen policy defaults to `clear: 'none'`, so a guest that clears
 its canvas can't wipe deck's colour or depth.
+
+**Redraws.** deck renders on demand, so the adapter asks for a redraw when
+a guest frame arrives, in the next animation frame, and drops it if deck
+has drawn in the meantime (the camera moving, or your own
+`deck.redraw()`): that draw already showed the frame (`stats.redrawsForced`,
+`stats.redrawsFolded`). A clock that moves only the guest's content
+shouldn't call `deck.redraw()` each tick, which draws deck once with the
+old guest frame and again when the new one lands: call
+`layer.requestGuestFrame()`, which sends the current view at the new time
+without drawing, and deck draws once when the frame comes back.
 
 The adapter also speaks the rest of the layer control plane (shapes from
 RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):
@@ -363,7 +385,8 @@ trimmed for a host like Cesium: DESIGN.md, [sub-frames](./DESIGN.md#sub-frames).
 
 ## Protocol
 
-NetGL is two streams over a single transport:
+NetGL is two streams over a single transport (or, in wire 2, the stream
+over a MessageChannel the host hands the guest):
 
 - **Calls** (sender → receiver): `NetGLCall { name, args, returnId? }`
   for every GL call, plus `NetGLFrameEnd { type: 'netgl:frame-end' }`
@@ -382,6 +405,34 @@ NetGL is two streams over a single transport:
   guest's anchor + background; `netgl:setPose` from the host with the
   coupled camera state (door portals), or `layer:view` with the host's
   exact view (overlays, `attachNetGLDeckLayer`).
+
+**Wire versions.** Wire 1 (0.5 and before) posts one message per call
+and per frame-end. Wire 2 (0.6):
+
+- The guest's `netgl:ready` says `wire: 2`, and the host's
+  `netgl:ready-ack` answers with the version it will read. A guest only
+  batches after an ack that says 2, so it talks wire 1 to a 0.5 host, and
+  a 0.6 host still reads a 0.5 guest's per-call messages. The same-page
+  link acks without a version: its calls still replay as they're made.
+- A frame's items (the checkpoint and calls since the last batch, then the
+  frame-end) go as one `{ type: 'netgl:batch', batch: [...] }`; calls
+  made between frames ride the next batch. Calls are copied when recorded
+  so a held call keeps its values. The host handles each item as if it had
+  come alone, so frame buffering, re-runs and the delete rule are as
+  before.
+- A guest that says `port: 'stream' | 'all'` gets one end of a
+  `MessageChannel` in the ack (transferred), when the host's transport
+  posts to an exact origin. The guest's stream, and what the app posts
+  through `guest.transport`, then flow over it; the guest's first port
+  message, `netgl:port {seq, after}`, tells the host how many window items
+  to wait for, so nothing is reordered across the switch. With `'all'`
+  (the three.js overlay guest) the host's control comes over the port as
+  well: use it only if your app listens through `guest.transport`.
+  `makeNetGLGuestContext({ messageChannel, wire })` sets both.
+- The recorder ships only the elements a call reads (WebGL2's
+  source-offset overloads, texture uploads cut by the unpack state,
+  `vertexAttrib*v`), and lists its own copies for transfer. Your buffers
+  are never transferred.
 
 See [`DESIGN.md`](./DESIGN.md) for the architecture, the adoption
 findings that surfaced building celestiary integration, and the open
