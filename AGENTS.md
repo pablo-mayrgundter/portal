@@ -69,6 +69,15 @@ were tried and dropped.
   shader reflection reads: shim `getProgramParameter` to answer 0
   (`frameworks/luma.test.ts`). deck's `_GlobeViewport` needs no GL at all,
   so camera math tests use it directly.
+- **Timing GPU work on SwiftShader:** end the timed span with a 1-pixel
+  `readPixels`, not `gl.finish()`, which Chromium returns from without
+  waiting (0.3 ms for a full frame). Time one context with the other
+  idle: both share the GPU process, so a sync in one waits on the
+  other's queue too. To take a draw out of a measurement, give the
+  context an own property (`gl.drawArrays = () => {}`): three and the
+  recorder look the method up on the object. In a hidden (`display:
+  none`) iframe, `frame.waitForFunction` needs `polling: <ms>`: its
+  default polls on animation frames, which don't come.
 - **Two origins locally:** serve one build on two ports (cross-origin,
   same site), or as `localhost` and `127.0.0.1` (cross-site: Chromium puts
   the guest in another process). A sandboxed iframe without

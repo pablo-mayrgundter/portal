@@ -402,6 +402,16 @@ over a MessageChannel the host hands the guest):
   `scalarState: 'queried'` to `makeNetGLGuestContext` /
   `makeNetGLCesiumGuest`, which reads it back from the shadow at every
   frame end instead.
+- **The shadow's draws** (0.6.2): by default the shadow executes every
+  call, draws included, so it holds the guest's rendered frame for
+  readback (Cesium's picking). A guest that never reads its own pixels (an
+  overlay) can pass `makeNetGLGuestContext({ shadowDraws: false })`: draws
+  and clears (`draw*`, `clear`, `clearBuffer*`, `blitFramebuffer`) are
+  recorded and shipped as ever but skipped on the shadow, so the guest's
+  pixel work is done once, by the host's replay. State, uploads, handles
+  and queries still run on the shadow, and the stream is unchanged. The
+  cost: `readPixels`, picking and occlusion queries on the guest answer
+  nothing meaningful, and draw-time GL errors aren't raised there.
 - **Control** (host ↔ guest): `netgl:ready` handshake announcing the
   guest's anchor + background; `netgl:setPose` from the host with the
   coupled camera state (door portals), or `layer:view` with the host's
