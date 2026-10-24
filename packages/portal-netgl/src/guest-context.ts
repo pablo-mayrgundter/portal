@@ -3,7 +3,8 @@
 // Everything a NetGL guest needs that isn't specific to one framework:
 //   - a shadow WebGL2 context (answers the framework's synchronous queries,
 //     mints handles, and — because it executes every call — holds the
-//     guest's rendered pixels for readback such as picking)
+//     guest's rendered pixels for readback such as picking; with
+//     `shadowDraws: false` it skips draws and clears, and holds no pixels)
 //   - a recorder Proxy over it, posting NetGLCalls onto a transport
 //   - frame boundaries: a `netgl:frame-end` marker followed by a state
 //     checkpoint, so the next batch replays from the guest's own GL state
@@ -102,6 +103,18 @@ export type NetGLGuestContextConfig = {
   messageChannel?: 'stream' | 'all' | false
   /** Highest wire version to offer. Default 2; 1 posts one message per call. */
   wire?: 1 | 2
+  /**
+   * Execute draws and clears on the shadow too. Default true: the shadow
+   * then holds the guest's rendered frame, for readback such as picking.
+   * False ships them unchanged but skips them on the shadow, so the guest's
+   * pixel work is done once, by the host's replay, not twice: for a guest
+   * that never reads its own pixels (an overlay). Readback (`readPixels`,
+   * picking, occlusion queries) then answers nothing meaningful. State
+   * calls, uploads, handles and queries still run on the shadow, and the
+   * recorded stream is the same either way. See
+   * `NetGLRecorderSessionOptions.shadowDraws`.
+   */
+  shadowDraws?: boolean
 }
 
 /** What the guest and its host agreed on, from the ready handshake. */
@@ -236,7 +249,8 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
   // No checkpoints: nothing to track for ('queried' makes no calls until a
   // checkpoint is taken, and none is).
   const recorder = makeNetGLRecorderSession(shadow, (call: NetGLCall, transfer, urgent) => postItem(call, transfer, urgent), {
-    scalarState: checkpoints ? config.scalarState : 'queried'
+    scalarState: checkpoints ? config.scalarState : 'queried',
+    shadowDraws: config.shadowDraws ?? true
   })
 
   // Inbound: the app's listeners hear the transport given and, once open,

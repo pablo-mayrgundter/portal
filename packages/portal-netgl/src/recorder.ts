@@ -87,6 +87,24 @@ const SHADOW_ONLY = new Set<string>([
   'clientWaitSync'
 ])
 
+// Calls that only write pixels: what `shadowDraws: false` keeps off the
+// shadow (they still ship). Nothing later reads their effect on GL state,
+// only on the framebuffer: copyTexImage2D stays, since it defines a
+// texture level's size and format.
+const DRAWS = new Set<string>([
+  'drawArrays',
+  'drawElements',
+  'drawArraysInstanced',
+  'drawElementsInstanced',
+  'drawRangeElements',
+  'clear',
+  'clearBufferfv',
+  'clearBufferiv',
+  'clearBufferuiv',
+  'clearBufferfi',
+  'blitFramebuffer'
+])
+
 // `readPixels(x, y, w, h, format, type, offset)` — the PIXEL_PACK_BUFFER
 // form — writes into a GPU buffer that later calls may consume, so it has
 // to replay. Every other readPixels form writes into client memory.
@@ -406,6 +424,18 @@ export type NetGLRecorderSessionOptions = {
    *     or caps state).
    */
   scalarState?: 'tracked' | 'queried'
+  /**
+   * Execute draws and clears (`drawArrays`, `drawElements`, their instanced
+   * and range forms, `clear`, `clearBuffer*`, `blitFramebuffer`) on the
+   * shadow as well as recording them. Default true. False records and
+   * ships them as ever but skips them on the shadow, which then does none
+   * of the guest's pixel work: state calls, uploads, handle minting and
+   * queries still run there. The cost: the shadow's pixels are no longer
+   * the guest's frame, so readback (`readPixels`, picking,
+   * `getBufferSubData` after transform feedback, occlusion queries) answers
+   * nothing meaningful, and draw-time GL errors aren't raised on it.
+   */
+  shadowDraws?: boolean
 }
 
 /**
@@ -433,6 +463,7 @@ export const makeNetGLRecorderSession = (
   const state = (options.scalarState ?? 'tracked') === 'tracked' ? makeScalarStateTracker(shadow) : undefined
   let checkpointDeferred = false
   let snapshot = false
+  const shadowDraws = options.shadowDraws ?? true
   // Per call: the buffers the encoder made (transferable), and whether an
   // argument is an app object that must be serialised now.
   let owned: ArrayBuffer[] = []
@@ -642,7 +673,10 @@ export const makeNetGLRecorderSession = (
           postCheckpoint()
         }
 
-        const result = (value as (...a: unknown[]) => unknown).apply(target, args)
+        // Draws return nothing, so skipping one changes no answer.
+        const result = shadowDraws || !DRAWS.has(methodName)
+          ? (value as (...a: unknown[]) => unknown).apply(target, args)
+          : undefined
 
         if (shadowOnly) return result
         bindings.observe(methodName, args)

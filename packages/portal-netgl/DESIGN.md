@@ -102,12 +102,12 @@ The Cesium shim is ~40 lines because of this: context injection via
 `getWebGLStub`, `endFrame()` on `postRender`, done.
 
 **"Same GPU."** The composite happens in the host's context, so it is
-one GPU. The guest's shadow context runs on it too, and currently
+one GPU. The guest's shadow context runs on it too, and by default
 executes every call, draws included: 2× GPU work for the guest's scene.
 The shadow does need the draws when the framework reads pixels back
-(Cesium picking and `pickPosition`-based camera collision); a
-`shadowDraws: false` mode for guests that never read back is an easy
-perf win.
+(Cesium picking and `pickPosition`-based camera collision). A guest that
+never reads back (an overlay) can pass `shadowDraws: false` (0.6.2): see
+"No-draw shadow" under the guest's layers below.
 
 ## State checkpoint
 
@@ -711,7 +711,17 @@ because the guest delivers more frames per second in the same window.)
   at rest; `requestGuestFrame()` does, by not drawing for the tick at all.
 - **Still open:** the guest's own frame cost (its render, and the shadow
   context drawing everything a second time) is now most of input →
-  shown on SwiftShader; see "No-draw shadow" in the open problems.
+  shown on SwiftShader; the shadow's part is the next bullet.
+- **The shadow's share, measured (0.6.2).** celestiary's orbits guest
+  (satellites, Starlink, Iridium, the DSN: 117 calls, ~12 KB a frame) in
+  celestiary's two-origin check host, on SwiftShader, where a frame's wall
+  clock to a 1-pixel `readPixels` stands in for GPU time, each context
+  timed with the other idle: the shadow's draws took 10.2 ms at 1280×720
+  and 11 ms at 2560×1440 (0.8 ms with them skipped), the host's replay of
+  the same draws 11 ms and 19 ms (0.9–1.1 ms with its draws skipped). So
+  the shadow was a third to a half of the overlay's GPU work, and
+  `shadowDraws: false` takes it out. On a real GPU it's unproven: an
+  Apple M2 A/B on netmap gave inconsistent medians run to run.
 
 **On a real GPU (Apple M2, ANGLE Metal, Chrome 151, DPR 1.8; netmap's
 `?orbits_perf=1` on netmap#8, 0.6.0 on the host, production celestiary on
@@ -1025,6 +1035,21 @@ call:
    the same call shape.
 3. Posts a `NetGLCall { name, args, returnId? }` onto a transport.
 
+**No-draw shadow (`shadowDraws: false`, 0.6.2).** Step 1 can skip the
+calls that only write pixels: `drawArrays`, `drawElements`, their
+instanced and range forms, `clear`, `clearBuffer*` and `blitFramebuffer`.
+They are still encoded and posted, so the stream is the same call for
+call; everything else (state, uploads, `copyTexImage2D`, which defines a
+texture level, handle minting, queries) still runs on the shadow, so the
+framework's synchronous answers don't change and the checkpoint is built
+as before. The cost is the shadow's pixels: they are no longer the
+guest's frame, so client-memory readback (`readPixels`, picking,
+`getBufferSubData` after transform feedback, occlusion query results)
+answers nothing meaningful, and draw-time GL errors (an incomplete
+framebuffer at a draw) aren't raised on the shadow. Default true; Cesium
+guests keep it, since they pick. `shadow-draws.test.ts` checks the host's
+pixels are byte-equal either way and the shadow stays undrawn.
+
 The replay reverses the encoding and re-executes against the host's
 context. The host owns when to drain: the sender emits a `NetGLFrameEnd`
 marker after each frame; the host buffers calls between markers and drains
@@ -1036,7 +1061,7 @@ embedded renders from interleaving on the shared GL context.
 
 Framework-agnostic building blocks (new, and what 1.0 shims build on):
 
-- **`makeNetGLGuestContext({ canvas?, transport? })`** — shadow context,
+- **`makeNetGLGuestContext({ canvas?, transport?, shadowDraws? })`** — shadow context,
   recorder, `endFrame()` (frame-end + checkpoint), `subFrame()` (frame-end,
   checkpoint deferred to the next call), `announce()`.
 - **`makeNetGLCesiumGuest()`** — the Cesium shim: `contextOptions` to pass
@@ -1215,11 +1240,13 @@ unchanged.
   (A guest that shares the host's depth convention, as New York does
   inside Cesium's frame, can instead keep it: `clear: 'none'`.)
 
-- **No-draw shadow.** The shadow context executes every guest draw as
-  well as the replay: 2× GPU for a globe. Cesium needs the shadow's
-  pixels only for readback (picking, camera collision). A shadow mode
-  that skips draws when no readback is pending would halve the cost,
-  and it matters most for guests warming up unseen.
+- **No-draw shadow, for guests that read back.** `shadowDraws: false`
+  (0.6.2) skips the shadow's draws for a guest that never reads its
+  pixels. Cesium does read them (picking, camera collision), so it still
+  draws everything twice: 2× GPU for a globe. A mode that executes draws
+  only when a readback is pending (or replays the last frame onto the
+  shadow before one) would halve that, and it matters most for guests
+  warming up unseen.
 
 - **Colour contract.** Host and guest must agree on colour space and
   tone mapping, and today each guest shader has to be taught the host's.
