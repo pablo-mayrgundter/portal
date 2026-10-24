@@ -12,6 +12,7 @@ the record of why.
 | # | Title | Status | Changes |
 |---|---|---|---|
 | [0001](./0001-globe-orbit-layers.md) | Globe + orbit layers: the overlay kind, shared depth, the view message, time, anchors, nesting, cross-origin guests | Draft | `layer:view`, `layer:hello`, depth and trust in `portal-layers.md`; screen policy in DESIGN.md. Implementations: portal #36, celestiary/web #296 |
+| [0002](./0002-nested-in-place-guests.md) | Nested in-place guests: celestiary → Cesium → Slop New York; flattened same-page links, the in-host-frame contract, light, ground and `enu` frames, lean shadows and staged set-up, layer packaging | Draft | Answers 0001's questions 11 and 13 for same-page chains; amends 0001 §4, §5, §6, §9.1, §10; `portal-layers.md` colour, frames, lifecycle, security; DESIGN.md nested guests, sub-frames, screen policy. Drawn from celestiary/web #287, slop-newyork #1 |
 
 ## Process
 

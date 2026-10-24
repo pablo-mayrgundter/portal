@@ -726,6 +726,10 @@ library around them.
 
 ## Nested guests: Cesium drawing New York
 
+> [RFC 0002](../../docs/rfcs/0002-nested-in-place-guests.md) (draft) proposes
+> flattening this chain (§4), the in-frame guest's contract (§5) and moving
+> celestiary's lean shadow and staged set-up into this package (§9).
+
 A guest drawn by a guest. The chain in progress:
 
 - **celestiary**, the three.js host;

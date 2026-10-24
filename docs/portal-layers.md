@@ -17,6 +17,11 @@ guide for what a library can't decide for you.
 > overlay layer kind, shared depth, a precise `layer:view`, time and
 > anchor extensions, nesting, and cross-origin trust tiers. Its §12
 > lists what it would change here.
+> [RFC 0002](./rfcs/0002-nested-in-place-guests.md) (draft) does the same
+> for a nested in-place guest drawn inside its host's frame (Slop New York
+> inside Cesium inside celestiary): flattened same-page links, light and
+> ground extensions, `enu` frames, lean shadows, staged set-up and layer
+> packaging. Its §13 lists what it would change here.
 
 ## Scope
 
