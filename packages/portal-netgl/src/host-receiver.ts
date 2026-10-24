@@ -53,6 +53,7 @@ import {
   isNetGLCall,
   isNetGLFrameEnd,
   type NetGLCall,
+  type NetGLFrameEnd,
   type NetGLPortOpenMessage
 } from './messages'
 import type { NetGLReadyAckMessage, NetGLReadyMessage } from './guest-context'
@@ -110,6 +111,28 @@ export type NetGLHostReceiverConfig = {
    * `iframeTransport` has for a non-opaque origin): never with `'*'`.
    */
   messageChannel?: boolean
+  /**
+   * Host reprojection (`reproject.ts`): compose each guest frame for the
+   * host's current view rather than the one it was drawn for. Turns on the
+   * replay's `reproject` (vertex shaders rewritten), notes which view each
+   * frame was drawn for when it completes, and before each frame's calls
+   * replay (a re-run too) asks for that view's correction.
+   */
+  reproject?: NetGLReceiverReprojectConfig
+}
+
+export type NetGLReceiverReprojectConfig = {
+  /**
+   * Which view a frame was drawn for, called on its frame-end. Default:
+   * the frame-end's `viewId`, else null.
+   */
+  frameView?: (end: NetGLFrameEnd) => number | null
+  /**
+   * The correction for a frame drawn for `viewId` (the guest's old clip
+   * space → the host's current one, column-major), or null for none.
+   * Called at drain time, once per frame in the batch.
+   */
+  correction: (viewId: number | null) => ArrayLike<number> | null
 }
 
 /** The wire the receiver and its guest agreed on. */
@@ -158,13 +181,22 @@ export type NetGLHostReceiver = {
    * frame-end). For hosts that render on demand (deck.gl), which must ask
    * for a redraw to drain it. Returns an unsubscribe.
    */
-  onFrame(listener: () => void): () => void
+  onFrame(listener: (end: NetGLFrameEnd) => void): () => void
+  /**
+   * The views the frames of the last `drain()` were drawn for, in order
+   * (several when frames arrived faster than the host drained them): the
+   * frame-ends' `viewId`, or what `reproject.frameView` said. Null where
+   * unknown.
+   */
+  readonly drainedViews: ReadonlyArray<number | null>
   /** Stop listening to the transport. Idempotent. */
   stop(): void
 }
 
 export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHostReceiver => {
-  const replay = makeNetGLReplay(config.gl, config.replay)
+  const reprojectConfig = config.reproject ?? null
+  const replay = makeNetGLReplay(config.gl, reprojectConfig ? { ...config.replay, reproject: true } : config.replay)
+  const frameView = reprojectConfig?.frameView ?? ((end: NetGLFrameEnd) => (typeof end.viewId === 'number' ? end.viewId : null))
   const onError = config.onError ?? ((err: unknown) => console.error('[netgl-host] replay error:', err))
   const seenErrors = new Set<string>()
 
@@ -174,7 +206,13 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
   let last: NetGLCall[] | null = null
   // Whether `last` may be re-run: false if it deleted any GL object.
   let lastRerunnable = false
-  const frameListeners = new Set<() => void>()
+  // Where each frame starts in `pending` / `last`, and the view it was
+  // drawn for.
+  type FrameMark = { at: number; viewId: number | null }
+  let pendingMarks: FrameMark[] = []
+  let lastMarks: FrameMark[] = []
+  let drainedViews: Array<number | null> = []
+  const frameListeners = new Set<(end: NetGLFrameEnd) => void>()
 
   const maxWire = config.wire ?? NETGL_WIRE_VERSION
   const outputOrigin = (config.transport as { outputOrigin?: unknown }).outputOrigin
@@ -210,10 +248,14 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       return true
     }
     if (isNetGLFrameEnd(msg)) {
+      // Before the listeners: the host's own bookkeeping (a view in
+      // flight) is still as it was when the frame was drawn.
+      const mark: FrameMark = { at: pending ? pending.length : 0, viewId: frameView(msg) }
       if (pending) pending.push(...inFlight)
       else pending = inFlight
+      pendingMarks.push(mark)
       inFlight = []
-      for (const l of frameListeners) l()
+      for (const l of frameListeners) l(msg)
       return true
     }
     return false
@@ -344,9 +386,15 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     else config.transport.post(msg, transfer)
   }
 
-  const run = (batch: NetGLCall[], stale: boolean): void => {
+  const run = (batch: NetGLCall[], marks: FrameMark[], stale: boolean): void => {
     replay.invalidate()
+    let m = 0
     for (let i = 0; i < batch.length; i += 1) {
+      // Each frame's correction, before its first call.
+      while (reprojectConfig && m < marks.length && marks[m].at <= i) {
+        replay.setReprojection(reprojectConfig.correction(marks[m].viewId))
+        m += 1
+      }
       const call = batch[i]
       if (stale && (call.returnId !== undefined || UPLOADS.has(call.name))) continue
       try {
@@ -359,6 +407,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
         }
       }
     }
+    if (reprojectConfig) replay.setReprojection(null)
   }
 
   return {
@@ -399,17 +448,25 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
         frameListeners.delete(listener)
       }
     },
+    get drainedViews() {
+      return drainedViews
+    },
     drain() {
       if (pending) {
         const batch = pending
+        const marks = pendingMarks
         pending = null
+        pendingMarks = []
         last = batch
+        lastMarks = marks
         lastRerunnable = !batch.some((c) => c.name.startsWith('delete'))
-        run(batch, false)
+        drainedViews = marks.map((mk) => mk.viewId)
+        run(batch, marks, false)
         return true
       }
       if (last && lastRerunnable) {
-        run(last, true)
+        drainedViews = lastMarks.map((mk) => mk.viewId)
+        run(last, lastMarks, true)
         return true
       }
       return false

@@ -427,9 +427,9 @@ satellites) and `frameworks/luma.ts` (`attachNetGLDeckLayer`).
   ("target origin does not match").
 - **three is optional.** A deck host needs no three.js, but the main entry
   imports it at runtime (the three renderer helpers), so a bundle without
-  three fails. Hosts import `@pablo-mayrgundter/portal-netgl/core`. The nonce and MessagePort of RFC
-  §10.2, and `viewId` on `netgl:frame-end` (its open question 18), aren't
-  built.
+  three fails. Hosts import `@pablo-mayrgundter/portal-netgl/core`. The nonce of RFC
+  §10.2 isn't built; `viewId` on `netgl:frame-end` (its open question 18)
+  is, as an optional field (see "Host reprojection").
 - **The camera contract.** deck's globe "common" space is a sphere of 256
   units for 6,370,972 m, with common = k·(e_y, −e_x, e_z). The adapter
   doesn't use those constants (`_GlobeView` is experimental and doesn't
@@ -466,6 +466,99 @@ satellites) and `frameworks/luma.ts` (`attachNetGLDeckLayer`).
   context gets a `canvas` (a jsdom canvas will do), and headless-gl's
   WebGL2 answers null for `ACTIVE_UNIFORM_BLOCKS`, which luma's shader
   reflection reads; `luma.test.ts` shims it to 0.
+
+## Host reprojection
+
+netmap's orbits (celestiary's satellites in a cross-origin iframe over
+deck's globe) lagged the globe on every pan and zoom. The `?orbits_perf=1`
+captures showed why: per composite `lagDraws` was 1 and `lagMs` 100 to
+150 ms. When the camera moves, deck draws its globe at the new view at
+once, while the guest's frame is still the one rendered for the previous
+view; on an M2 the page ran at 9 to 12 fps while zooming, so one frame of
+lag was plain to see. Waiting for the guest (lockstep) would cost frame
+rate, so the host corrects the guest's frame instead (`reproject: true` on
+`attachNetGLDeckLayer`; `reproject` on the receiver and the replay
+underneath).
+
+**The correction.** An overlay guest draws in the host's clip space:
+clip_f = P_f · V_f · p for p in the view's frame (ECEF metres). The host
+sent that view, so it knows VP_f, and it knows its current VP_now. Then
+C = VP_now · VP_f⁻¹ gives C · clip_f = VP_now · p exactly, for every p: a
+perspective view-projection is an invertible homogeneous 4×4, and C is
+linear in clip coordinates, so applied to `gl_Position` before the divide
+it gets x, y, depth and clipping all right (clip z is linear in the clip
+coordinates too, so the guest still depth-tests correctly against deck's
+globe at the new view). Both VPs come from the same encoding
+(`globeLayerView`: ECEF metres, rigid V, deck's projection with the scale
+put back), so any origin or scale the host folds in cancels. In doubles,
+C = P_now · (V_now · V_f⁻¹) · P_f⁻¹, the rigid part inverted as rigid;
+the GPU applies it in float32, which `reproject.test.ts` puts well under
+a hundredth of a pixel for a pan and zoom.
+
+**Applying it generically.** The replay rewrites each vertex shader as
+its `shaderSource` replays (the type comes from the `createShader` it
+tracked): the guest's `main` (definition and any prototype) is renamed
+`netgl_main`, and appended after everything else, so `#version`,
+`#extension`, `precision` and preprocessor branches stay put:
+
+    uniform highp mat4 netgl_reproject;
+    void main() { netgl_main(); gl_Position = netgl_reproject * gl_Position; }
+
+(highp explicitly: a shader with `precision mediump float` would otherwise
+get C at half precision on a phone.) Fragment shaders are untouched. After
+compiling a rewritten shader the replay checks its compile status once and,
+if the rewrite broke it, compiles the guest's own source instead. The
+uniform's location is looked up at the program's first draw after each
+link (a link resets uniforms) and the matrix is set, before a draw, only
+when the program doesn't hold the one that draw needs: C for draws to the
+screen, the identity for the guest's own framebuffers. The guest's
+introspection runs on its shadow context against its own shader, and an
+extra uniform moves no attribute or uniform of its own.
+
+**Which view a frame was for.** `netgl:frame-end` now carries an optional
+`viewId` (`endFrame({ viewId })`; the three.js overlay guest sends it), the
+open problem "view-tagged frames". Without it the adapter takes the view
+in flight when the frame-end arrived: it never has more than one out, and
+celestiary's guest draws exactly one frame per view. The receiver notes the
+view on each frame-end, keeps where each frame starts in a concatenated
+batch, and asks for the frame's correction before its first call, so two
+frames drained at once each get their own, and a re-run of the last frame
+is corrected for the view of the deck frame it's re-run in. That re-run is
+the case that matters most: while the camera moves and the guest is slower
+than deck, every deck frame re-runs the last guest frame, and now each one
+lands at deck's view.
+
+**Checked in a browser.** `apps/host-netgl-deck` (`?reproject=0` turns it
+off) in headless Chromium on SwiftShader, 800×500, its three.js guest in a
+cross-site iframe, the clock pinned: after a settled frame at one view, the
+camera moved 4° and 2° and 0.3 zoom and deck drew once, re-running the
+guest's old frame. Corrected, that composite was pixel-identical to the
+guest's own frame for the new view once it landed (0 pixels differed); with
+the correction forced off, 2,837 pixels differed and the guest's pixels
+overlapped the truth's not at all (several dots hid behind the globe's
+depth at their old positions).
+
+**Limits.**
+- Only the position is corrected. Screen-space extrusion done in the
+  vertex shader against the old view (wide lines, clip-space sprites,
+  labels) is scaled slightly by C during the lag; point sizes are pixels
+  and are unaffected (celestiary's satellites are points). Choices the
+  guest made from the old eye stay (celestiary culls far-side dishes by
+  the old view), and objects moving in time aren't moved: C is the
+  camera's change only.
+- Depth written in the fragment shader (`gl_FragDepth`, logarithmic depth)
+  isn't corrected. celestiary's layer page uses three's default depth.
+- A resize isn't followed: the guest's frame keeps its own `gl.viewport`.
+- A guest that composites a full-screen pass to the screen would have its
+  quad moved and its offscreen image left as it was: leave `reproject` off.
+- The "hide this vertex" idiom (`gl_Position = vec4(2.0, 2.0, 2.0, 1.0)`)
+  is a homogeneous point too, and a large C could bring it on screen, so
+  the wrapper leaves alone a vertex in front of the camera (w > 0) and
+  outside the old clip volume on all three axes. A real vertex there is
+  clipped in the old frame anyway; one of a line or triangle crossing in
+  from that corner keeps its old position.
+- A compile check per rewritten vertex shader is one synchronous query at
+  set-up, not per frame.
 
 ## Cross-origin iframes
 
@@ -1194,9 +1287,11 @@ unchanged.
 
 - **Guest lag.** Pose-ahead + one-tick-in-flight gives 0 frames at full
   speed, but a guest slower than the host drops to "latest frame" and
-  in-place composition slides. Sync options: the same-origin synchronous
-  path (above), or tagging frames with their pose and having the host
-  draw its stencil shell for the guest's pose rather than its own.
+  in-place composition slides. For overlays in the host's clip space
+  (deck's globe) host reprojection now corrects it (above). Door portals
+  still lag: options are the same-origin synchronous path (above), or
+  having the host draw its stencil shell for the guest's pose rather than
+  its own.
 
 - **Extension-object methods.** Calls on objects returned by
   `getExtension` (`WEBGL_multi_draw`, `OVR_multiview2`, ...) bypass the
@@ -1267,9 +1362,10 @@ unchanged.
   projects in a shader the host supplies, or the host sends a local
   tangent-plane frame per tile.
 
-- **View-tagged frames.** `netgl:frame-end` should carry the view id the
-  frame was drawn for, so an async host can compose it for that view and
-  measure lag.
+- **View-tagged frames in celestiary.** `netgl:frame-end` can carry the
+  view id now (`endFrame({ viewId })`), but celestiary's layer page doesn't
+  pass it yet; the deck adapter infers it from the view in flight, which is
+  wrong only for a frame that arrives after its view timed out.
 
 ## Layout / where things live
 

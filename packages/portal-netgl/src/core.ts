@@ -17,7 +17,14 @@ export {
   type NetGLRecorderSession,
   type NetGLRecorderSessionOptions
 } from './recorder'
-export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
+export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig, type NetGLReprojectStats } from './replay'
+export {
+  reprojectVertexShader,
+  reprojection,
+  mat4Invert,
+  NETGL_REPROJECT_UNIFORM,
+  NETGL_REPROJECT_MAIN
+} from './reproject'
 export type { NetGLScreenPolicy } from './screen-policy'
 export {
   captureCheckpoint,
@@ -44,6 +51,7 @@ export {
   makeNetGLHostReceiver,
   type NetGLHostReceiver,
   type NetGLHostReceiverConfig,
+  type NetGLReceiverReprojectConfig,
   type NetGLHostWire
 } from './host-receiver'
 export {
@@ -96,6 +104,7 @@ export {
   type NetGLDeckLayer,
   type NetGLDeckLayerConfig,
   type NetGLDeckLayerStats,
+  type NetGLDeckReprojection,
   type DeckImmediateLayerConfig,
   type DeckReceiverLayerConfig
 } from './frameworks/luma'

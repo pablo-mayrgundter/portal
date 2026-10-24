@@ -24,6 +24,7 @@ opaque (`'null'`), which is cross-origin to the host all the same.
 | `?guest=<url>` | the guest page (default: port 5191 in dev, `./guest.html` sandboxed in a build) |
 | `?sandbox=1` / `0` | force the opaque-origin sandbox on or off |
 | `?t=<ISO date>` | pin the host's clock (default: now, running; the white dot moves along the orbit) |
+| `?reproject=0` | turn host reprojection off: the guest's frame is drawn for the view it was rendered for, a frame behind deck while the camera moves (default on) |
 | `#lon=&lat=&zoom=&pitch=&bearing=` | the camera |
 
 What to look for: each coloured dot centred in its white ring (deck's own

@@ -6,6 +6,8 @@
 //                  cross-origin even on one static host, e.g. GitHub Pages).
 //   ?sandbox=1|0   force the sandboxed (opaque-origin) iframe on or off.
 //   ?t=<ISO date>  pin the host clock (default: now, running).
+//   ?reproject=0   draw the guest's frames for the view they were rendered
+//                  for (default: host reprojection on, for deck's current view).
 //   #lon=&lat=&zoom=&pitch=&bearing=   the camera.
 
 import { Deck, _GlobeView as GlobeView } from '@deck.gl/core'
@@ -28,6 +30,7 @@ const params = new URLSearchParams(location.search)
 const hash = new URLSearchParams(location.hash.slice(1))
 const num = (k: string, d: number): number => Number(hash.get(k) ?? d)
 const tPin = params.get('t') ? Date.parse(params.get('t')!) : null
+const reproject = params.get('reproject') !== '0'
 
 const defaultGuest = (): string => {
   const url = new URL('guest.html', location.href)
@@ -97,6 +100,7 @@ const deck = new Deck({
       device: device as unknown as LumaDeviceLike,
       transport: iframeTransport(iframe, { origin: guestOrigin, onReject: (r) => rejects.push(r) }),
       time: () => tPin ?? Date.now(),
+      reproject,
       onError: (err) => console.error('[netgl-deck] replay error', err)
     })
   }
@@ -109,6 +113,7 @@ const showStatus = (): void => {
     `guest ${guestOrigin}${sandboxed ? ' (sandboxed iframe)' : ''}`,
     `guest ready: ${layer?.receiver?.ready ? 'yes' : 'no'}`,
     s ? `frames: deck ${s.hostFrames}, guest ${s.guestFrames}, views sent ${s.viewsSent}` : 'waiting for deck',
+    s ? `reprojection ${reproject ? `on: ${s.reprojectedFrames} frames corrected` : 'off'}` : '',
     rejects.length ? `rejected messages: ${rejects.length}` : ''
   ].filter(Boolean).join('\n')
 }

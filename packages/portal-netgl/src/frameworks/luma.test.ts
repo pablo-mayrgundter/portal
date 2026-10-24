@@ -314,3 +314,135 @@ describe('attachNetGLDeckLayer — luma state is restored after the guest', () =
     }
   })
 })
+
+// --- Host reprojection on headless-gl ----------------------------------
+
+// A transport pair that queues: nothing arrives until `flush`, as with
+// postMessage, so a frame can be rendered for one view and drained after
+// the camera has moved. `strip` drops the frame-end's viewId, as a guest
+// on an older portal-netgl sends it.
+const queuedPair = (strip = false) => {
+  const toHost: unknown[] = []
+  const toGuest: unknown[] = []
+  const hostL = new Set<(m: unknown) => void>()
+  const guestL = new Set<(m: unknown) => void>()
+  const on = (s: Set<(m: unknown) => void>) => (l: (m: unknown) => void) => {
+    s.add(l)
+    return () => {
+      s.delete(l)
+    }
+  }
+  const unTag = (m: unknown): unknown => {
+    const t = m as { type?: string; batch?: unknown[]; viewId?: unknown }
+    if (t?.type === 'netgl:frame-end') return { type: 'netgl:frame-end' }
+    if (t?.type === 'netgl:batch') return { ...t, batch: t.batch!.map(unTag) }
+    return m
+  }
+  const deliver = (q: unknown[], ls: Set<(m: unknown) => void>) => {
+    while (q.length) {
+      const m = q.shift()
+      for (const l of ls) l(m)
+    }
+  }
+  return {
+    guest: { post: (m: unknown) => toHost.push(structuredClone(strip ? unTag(m) : m)), onMessage: on(guestL) } as NetGLTransport,
+    host: { post: (m: unknown) => toGuest.push(structuredClone(m)), onMessage: on(hostL) } as NetGLTransport,
+    flush() {
+      for (let i = 0; i < 4 && (toHost.length || toGuest.length); i += 1) {
+        deliver(toHost, hostL)
+        deliver(toGuest, guestL)
+      }
+    }
+  }
+}
+
+describe('attachNetGLDeckLayer({ reproject }) — the guest frame follows deck\'s camera', () => {
+  let dom: JSDOM
+  beforeAll(() => {
+    dom = initDom()
+  })
+
+  const GREEN = [0, 255, 0]
+  const isGreen = (px: Uint8Array, x: number, y: number): boolean => {
+    const i = (Math.floor(y) * W + Math.floor(x)) * 4
+    return px[i] === GREEN[0] && px[i + 1] === GREEN[1] && px[i + 2] === GREEN[2]
+  }
+
+  const run = async (reproject: boolean, strip = false) => {
+    const host = await makeLumaHost(dom)
+    let viewport = makeGlobe({ longitude: 0, latitude: 0, zoom: 0.3, pitch: 0, bearing: 0 })
+    const deck = makeFakeDeck(host, viewport)
+    deck.getViewports = () => [viewport]
+    const pair = queuedPair(strip)
+    const layer = attachNetGLDeckLayer(deck, { device: host.device, transport: pair.host, time: () => 0, reproject })
+    const scene = new THREE.Scene()
+    const R = 6370972
+    const target = sphereToEcef(4, 3, 1e6, R)
+    const points = new THREE.Points(
+      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(target, 3)),
+      new THREE.PointsMaterial({ color: 0x00ff00, size: 3, sizeAttenuation: false, depthTest: false, depthWrite: false })
+    )
+    points.frustumCulled = false
+    scene.add(points)
+    const shadowCanvas = { getContext: () => makeCtx(), style: {}, width: 1, height: 1 } as unknown as HTMLCanvasElement
+    const guest = makeNetGLThreeOverlayGuest({ WebGLRenderer: THREE.WebGLRenderer, scene, camera: new THREE.PerspectiveCamera(), transport: pair.guest, canvas: shadowCanvas })
+    guest.start()
+    pair.flush() // ready, hello, acks
+
+    deck.frame() // view A goes out
+    pair.flush() // the guest's first frame (it deletes its shaders: never re-run)
+    deck.frame() // drains it, and asks for A again
+    const viewA = layer.lastView!
+    pair.flush() // the guest renders A; its frame lands, undrained
+    // The camera moves before deck draws again: a pan and a zoom.
+    viewport = makeGlobe({ longitude: 9, latitude: 6, zoom: 0.45, pitch: 0, bearing: 0 })
+    deck.frame() // drains the frame drawn for A into deck's view B
+    const atB = host.read()
+    const viewB = layer.lastView!
+    const rB = layer.lastReprojection
+    // No new frame: the next draw re-runs A's frame, at view C.
+    viewport = makeGlobe({ longitude: -3, latitude: -2, zoom: 0.35, pitch: 0, bearing: 0 })
+    deck.frame()
+    const atC = host.read()
+    const viewC = layer.lastView!
+    layer.detach()
+    guest.stop()
+    return { target, viewA, viewB, viewC, atB, atC, rB, layer, receiver: layer.receiver! }
+  }
+
+  it('drains a frame drawn for the old view where deck\'s new view puts its points (and re-runs it at the next)', async () => {
+    const { target, viewA, viewB, viewC, atB, atC, rB, layer, receiver } = await run(true)
+    const [ax, ay] = projectToPixels(viewA, target)
+    const [bx, by] = projectToPixels(viewB, target)
+    const [cx, cy] = projectToPixels(viewC, target)
+    // The moves are big enough to tell apart (more than the 3 px dot).
+    expect(Math.hypot(bx - ax, by - ay)).toBeGreaterThan(6)
+    expect(Math.hypot(cx - ax, cy - ay)).toBeGreaterThan(6)
+    expect(isGreen(atB, bx, by)).toBe(true)
+    expect(isGreen(atB, ax, ay)).toBe(false)
+    expect(isGreen(atC, cx, cy)).toBe(true)
+    expect(isGreen(atC, ax, ay)).toBe(false)
+    // The guest tagged its frame: view 2 (1 was the warm-up).
+    expect(receiver.drainedViews).toEqual([2])
+    expect(rB?.viewId).toBe(2)
+    expect(rB?.correction).not.toBeNull()
+    expect(layer.stats.reprojectedFrames).toBe(2)
+  })
+
+  it('without the frame-end\'s viewId, the view in flight is the frame\'s', async () => {
+    const { target, viewB, atB, receiver } = await run(true, true)
+    const [bx, by] = projectToPixels(viewB, target)
+    expect(isGreen(atB, bx, by)).toBe(true)
+    expect(receiver.drainedViews).toEqual([2])
+  })
+
+  it('control: without reproject the frame stays at the old view\'s pixels', async () => {
+    const { target, viewA, viewB, atB, layer } = await run(false)
+    const [ax, ay] = projectToPixels(viewA, target)
+    const [bx, by] = projectToPixels(viewB, target)
+    expect(isGreen(atB, ax, ay)).toBe(true)
+    expect(isGreen(atB, bx, by)).toBe(false)
+    expect(layer.lastReprojection).toBeNull()
+    expect(layer.stats.reprojectedFrames).toBe(0)
+  })
+})

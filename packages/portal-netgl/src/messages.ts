@@ -49,7 +49,16 @@ export type NetGLCall = {
  * otherwise interleave calls between the sender's useProgram and uniform
  * sets, breaking program-location associations.
  */
-export type NetGLFrameEnd = { type: 'netgl:frame-end' }
+export type NetGLFrameEnd = {
+  type: 'netgl:frame-end'
+  /**
+   * The `layer:view` (its `viewId`) the frame was drawn for, when the
+   * guest draws for a host's views. Lets an asynchronous host compose the
+   * frame for that view (host reprojection) and measure its lag. Optional:
+   * a host that reads it falls back to the view it had in flight.
+   */
+  viewId?: number
+}
 
 /** Union of every stream message kind the NetGL protocol sends on the wire. */
 export type NetGLWireMessage = NetGLCall | NetGLFrameEnd | NetGLBatch

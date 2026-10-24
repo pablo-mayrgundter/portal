@@ -51,8 +51,8 @@ export type NetGLThreeOverlayGuest = {
   readonly view: NetGLLayerView | null
   /** Apply a view to the camera and renderer, without rendering. */
   applyView(view: NetGLLayerView): void
-  /** Render one frame and end it. */
-  render(): void
+  /** Render one frame and end it; `viewId` (the `layer:view`'s) rides its frame-end. */
+  render(viewId?: number): void
   /**
    * Announce readiness to the host and render one frame per inbound
    * `layer:view` (no requestAnimationFrame: a cross-origin iframe's rAF can
@@ -106,9 +106,9 @@ export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig)
     renderer.setViewport(x, y, w, h)
   }
 
-  const render = (): void => {
+  const render = (viewId?: number): void => {
     renderer.render(scene, camera)
-    core.endFrame()
+    core.endFrame(typeof viewId === 'number' ? { viewId } : {})
   }
 
   return {
@@ -125,7 +125,7 @@ export const makeNetGLThreeOverlayGuest = (config: NetGLThreeOverlayGuestConfig)
         if (!isNetGLLayerViewMessage(msg)) return
         config.onView?.(msg.view)
         applyView(msg.view)
-        render()
+        render(msg.viewId)
       })
       core.announce({ position: [0, 0, 0], normal: [0, 0, 1], up: [0, 1, 0] })
     },

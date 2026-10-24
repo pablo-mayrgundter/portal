@@ -254,6 +254,40 @@ old guest frame and again when the new one lands: call
 `layer.requestGuestFrame()`, which sends the current view at the new time
 without drawing, and deck draws once when the frame comes back.
 
+**Host reprojection** (`reproject: true`, receiver only, 0.6.3). An
+iframe guest's frame is rendered for the view the adapter sent, and lands
+a deck frame or more later: while the camera moves, the globe is drawn at
+the new view and the guest's frame is still the old one's, one frame
+behind. With `reproject` the adapter draws each guest frame for deck's
+*current* view instead. It keeps each view it sends under its `viewId`;
+the replay rewrites the guest's vertex shaders as they arrive (`main` →
+`netgl_main`, plus a new `main` that multiplies `gl_Position` by
+`uniform mat4 netgl_reproject`) and, before each of the guest's screen
+draws, sets C = VP_now · VP_frame⁻¹, which maps the guest's old clip
+space onto deck's current one. It's exact for geometry placed in the
+view's frame (positions, depth, clipping); re-runs of the last frame are
+corrected too, so a guest slower than deck stays on the globe.
+
+```js
+const layer = attachNetGLDeckLayer(deck, { device, transport, time, reproject: true })
+layer.lastReprojection // { viewId, from, to, correction } of the last guest replay
+layer.stats.reprojectedFrames
+layer.receiver.replay.reprojectStats // { shaders, skipped, fallbacks, correctedDraws }
+```
+
+Which view a frame was drawn for: its frame-end's `viewId`
+(`guest.endFrame({ viewId })`; the three.js overlay guest sends it), else
+the view in flight when it arrived (one in flight at a time). What it
+can't correct: screen-space extrusion (wide lines, sprites built in clip
+space: scaled slightly during the lag), choices the guest made from the
+old eye (a far-side cull), depth written in the fragment shader
+(logarithmic depth), a resize, and a guest that composites a full-screen
+pass to the screen (its quad would be moved; leave `reproject` off). A
+vertex outside the old clip volume on every axis, in front of the camera
+(the `gl_Position = vec4(2.0, 2.0, 2.0, 1.0)` "hide this one" idiom), is
+left alone. A rewrite that doesn't compile on the host falls back to the
+guest's own source. Off by default. DESIGN.md, "Host reprojection".
+
 The adapter also speaks the rest of the layer control plane (shapes from
 RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):
 
@@ -390,8 +424,9 @@ NetGL is two streams over a single transport (or, in wire 2, the stream
 over a MessageChannel the host hands the guest):
 
 - **Calls** (sender → receiver): `NetGLCall { name, args, returnId? }`
-  for every GL call, plus `NetGLFrameEnd { type: 'netgl:frame-end' }`
-  markers after each frame. Guests built on `makeNetGLGuestContext`
+  for every GL call, plus `NetGLFrameEnd { type: 'netgl:frame-end',
+  viewId? }` markers after each frame (`viewId`: the `layer:view` the
+  frame was drawn for, from `endFrame({ viewId })`). Guests built on `makeNetGLGuestContext`
   follow each frame-end with a state checkpoint — ordinary calls that
   restore the guest's GL state — so framework state caches survive the
   host sharing the context (after `subFrame()`, the checkpoint comes just
