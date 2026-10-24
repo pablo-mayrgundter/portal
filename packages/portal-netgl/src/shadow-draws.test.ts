@@ -13,6 +13,7 @@ import url from 'node:url'
 import { makeNetGLRecorderSession } from './recorder'
 import { makeNetGLGuestContext } from './guest-context'
 import { makeNetGLImmediateLink } from './immediate-link'
+import { makeNetGLCesiumGuest } from './frameworks/cesium'
 import type { NetGLCall } from './messages'
 
 const DRAWS = ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements',
@@ -166,6 +167,25 @@ const run = (shadowDraws: boolean): { host: Uint8Array; shadow: Uint8Array; link
   const linked = programs.length > 0 && programs.every((p) => shadow.getProgramParameter(p.program, shadow.LINK_STATUS) === true)
   return { host: pixels(host), shadow: pixels(shadow), linked, viewport: Array.from(shadow.getParameter(shadow.VIEWPORT) as Int32Array) }
 }
+
+describe('shadowDraws: false (Cesium guest shim)', () => {
+  const cesiumRan = (shadowDraws?: boolean): string[] => {
+    const { shadow, ran } = loggingShadow()
+    const guest = makeNetGLCesiumGuest({
+      transport: { post: () => {}, onMessage: () => () => {} },
+      ...(shadowDraws === undefined ? {} : { shadowDraws })
+    })
+    const canvas = { getContext: () => shadow } as unknown as HTMLCanvasElement
+    frame(guest.contextOptions.getWebGLStub(canvas, guest.contextOptions.webgl))
+    return ran
+  }
+
+  it('passes the option to the guest context', () => {
+    expect(cesiumRan(false).filter((n) => DRAWS.includes(n))).toEqual([])
+    expect(cesiumRan(true).filter((n) => DRAWS.includes(n)).sort()).toEqual([...DRAWS].sort())
+    expect(cesiumRan().filter((n) => DRAWS.includes(n)).sort()).toEqual([...DRAWS].sort())
+  })
+})
 
 describe('shadowDraws: false (three.js guest, headless-gl)', () => {
   beforeAll(() => initDom())

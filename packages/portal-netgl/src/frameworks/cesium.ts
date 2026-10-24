@@ -69,6 +69,16 @@ export type NetGLCesiumGuestConfig = {
    * sets GL state on `core.shadow` directly. See `makeNetGLGuestContext`.
    */
   scalarState?: 'tracked' | 'queried'
+  /**
+   * Default true. `false` keeps Cesium's draws and clears off the shadow
+   * (they still ship), so the globe is drawn once, by the host's replay.
+   * Only for an app that never reads Cesium's pixels back: picking,
+   * `pickPosition` and the default inputs' depth-picked camera collision
+   * read the shadow, and would get nothing. CPU picks on loaded tiles
+   * (`globe.getHeight`, `tileset.getHeight`) don't read it. See
+   * `makeNetGLGuestContext`.
+   */
+  shadowDraws?: boolean
 }
 
 export type NetGLCesiumGuest = {
@@ -116,7 +126,8 @@ export const makeNetGLCesiumGuest = (config: NetGLCesiumGuestConfig = {}): NetGL
         canvas,
         contextAttributes: webglOptions,
         transport,
-        scalarState: config.scalarState
+        scalarState: config.scalarState,
+        shadowDraws: config.shadowDraws
       })
       return core.gl
     }
