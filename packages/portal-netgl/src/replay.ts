@@ -126,6 +126,10 @@ const DRAW_CALLS = new Set<string>([
   ...CLEAR_CALLS
 ])
 
+// Methods every object inherits. The replay dispatches by name on the
+// receiver, so these are refused rather than called.
+const OBJECT_PROTO_NAMES = new Set<string>(Object.getOwnPropertyNames(Object.prototype))
+
 export const makeNetGLReplay = (
   receiver: WebGL2RenderingContext,
   config: NetGLReplayConfig = {}
@@ -201,7 +205,7 @@ export const makeNetGLReplay = (
     }
     if ('__netgl_typedarray' in obj) {
       const name = obj.__netgl_typedarray as string
-      const ctor = TYPED_ARRAY_CTORS[name]
+      const ctor = Object.prototype.hasOwnProperty.call(TYPED_ARRAY_CTORS, name) ? TYPED_ARRAY_CTORS[name] : undefined
       if (!ctor) throw new Error(`NetGL replay: unknown typed-array ${name}`)
       return new ctor(
         obj.buffer as ArrayBuffer,
@@ -376,6 +380,11 @@ export const makeNetGLReplay = (
       }
     }
 
+    // Only GL entry points: never Object.prototype's (`constructor`,
+    // `__defineGetter__`, ...), which a hostile sender could otherwise name.
+    if (OBJECT_PROTO_NAMES.has(call.name)) {
+      throw new Error(`NetGL replay: refusing non-GL method '${call.name}'`)
+    }
     const method = (receiver as unknown as Record<string, (...a: unknown[]) => unknown>)[
       call.name
     ]

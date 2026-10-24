@@ -61,6 +61,7 @@ Live demos (GitHub Pages; WebGL2 required):
 | [NetGL + celestiary](https://pablo-mayrgundter.github.io/portal/netgl-celestiary/) | a real, GL-heavy app (the [celestiary](https://github.com/celestiary/web) solar system) through a door |
 | [NetGL + Cesium, door](https://pablo-mayrgundter.github.io/portal/netgl-cesium/) | an unmodified Cesium globe through a door, with real parallax |
 | [NetGL + Cesium, in place](https://pablo-mayrgundter.github.io/portal/netgl-cesium/?mode=earth) | Cesium's globe in place of a three.js Earth: the moon occludes it and is occluded by it |
+| [NetGL + deck.gl](https://pablo-mayrgundter.github.io/portal/netgl-deck/) | a three.js guest from another origin (a sandboxed iframe) drawn over a deck.gl globe, in deck's clip space, occluded by the Earth |
 
 In production, [celestiary](https://celestiary.github.io/) shows Cesium's
 Earth, Moon and Mars in place of its own bodies. It uses portal-netgl's
@@ -83,14 +84,20 @@ Works:
     redirecting the guest into a host render target.
 - **Transports:**
   - same page, synchronous, zero lag (`makeNetGLImmediateLink`);
-  - `postMessage` to same-origin iframes, with flow control and
-    ready/ack handshakes.
-- **Guests:** three.js, and Cesium unmodified through its
-  `getWebGLStub` hook.
+  - `postMessage` to iframes, with flow control and ready/ack
+    handshakes; cross-origin iframes with both ends pinned by origin
+    (`iframeTransport`, `parentTransport`).
+- **Guests:** three.js (including an overlay guest driven by the host's
+  view), and Cesium unmodified through its `getWebGLStub` hook.
+- **Hosts:** three.js, and deck.gl / luma.gl (`attachNetGLDeckLayer`:
+  replay after deck's layers, luma's state restored, a GlobeView's camera
+  as ECEF metres).
 - **Composition:**
   - *door* mode, where the host's camera is carried through the door;
   - *in place* mode, where a camera-coupled guest fills a shape
-    stencil, depth-tested against the host scene.
+    stencil, depth-tested against the host scene;
+  - *overlay* mode, where the guest draws in the host's own clip space
+    and depth-tests against the host's depth buffer (deck.gl globe).
 - **Frame-RPC portals** (colour and depth bitmaps) for local, iframe,
   Worker and server-side (Node, headless-gl) endpoints, including
   recursive portals.
@@ -98,9 +105,13 @@ Works:
 Not yet:
 
 - **Untrusted guests.** Guest GL executes in the host's context, and
-  there's no sandbox, so today's guests must be trusted and same-origin.
-- **Cross-origin iframes, WebRTC and remote transports:** designed, not
-  built.
+  there's no sandbox, so today's guests must be trusted, cross-origin ones
+  included: origin pinning stops other pages from talking to either end,
+  not a hostile guest. What's open is listed in
+  [DESIGN.md](./packages/portal-netgl/DESIGN.md#cross-origin-iframes).
+- **WebRTC and remote transports:** designed, not built.
+- **Non-affine host views:** a guest takes a 4×4 view, so deck.gl's Web
+  Mercator map (and GlobeView above zoom 12) can't host one.
 - **Resource lifecycle:** handle tables only grow, so very long sessions
   leak.
 - **Extension-object methods** (`WEBGL_multi_draw` and friends) bypass
@@ -116,7 +127,7 @@ The open problems are itemised in
 
 | Package | What | Status |
 |---|---|---|
-| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, Cesium shim | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.4.x, pre-1.0: pin an exact version |
+| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, cross-origin transports, Cesium shim, deck.gl host adapter, three.js overlay guest | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.5.x, pre-1.0: pin an exact version |
 | `portal-layers` | host/guest shim for in-place layers: compositor, lifecycle, transport bindings, contracts | design, [0.1 draft](./docs/portal-layers.md) |
 | [`portal-core`](./packages/portal-core) | engine-agnostic portal geometry, pose coupling, wire types | workspace only |
 | [`portal-three`](./packages/portal-three) | three.js bindings: stencil mask, coupled camera, local endpoint | workspace only |
@@ -175,6 +186,7 @@ npm run dev:worker             # Web Worker portal
 npm run dev:netgl              # NetGL portal (three.js guest)
 npm run setup:celestiary && npm run dev:netgl-celestiary   # NetGL + celestiary
 npm run dev:netgl-cesium       # NetGL + Cesium (?mode=door | ?mode=earth)
+npm run dev:netgl-deck         # NetGL + deck.gl: host on :5190, cross-origin guest on :5191
 npm test                       # vitest
 npm run check                  # type-check all workspaces
 npm run build                  # production build of all workspaces

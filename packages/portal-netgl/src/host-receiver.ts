@@ -86,6 +86,13 @@ export type NetGLHostReceiver = {
   /** Whether at least one complete guest frame has arrived. */
   readonly hasFrame: boolean
   /**
+   * Whether `drain()` with nothing pending would re-run the last frame.
+   * False before the first frame and after one that deleted a GL object
+   * (a three.js guest's first frame deletes its shaders): a host that
+   * renders on demand should then ask the guest for another frame.
+   */
+  readonly canRerun: boolean
+  /**
    * Replay the pending guest frame(s), or re-run the last one if none is
    * pending and the last one is safe to re-run (see the buffering rules
    * above). Returns true if anything was replayed.
@@ -93,6 +100,14 @@ export type NetGLHostReceiver = {
   drain(): boolean
   /** The underlying replay (for its `invalidate()` or direct use). */
   replay: NetGLReplay
+  /** Post a control message to the guest (e.g. `layer:view`). */
+  post(msg: unknown): void
+  /**
+   * Call `listener` whenever a complete guest frame arrives (on its
+   * frame-end). For hosts that render on demand (deck.gl), which must ask
+   * for a redraw to drain it. Returns an unsubscribe.
+   */
+  onFrame(listener: () => void): () => void
   /** Stop listening to the transport. Idempotent. */
   stop(): void
 }
@@ -108,6 +123,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
   let last: NetGLCall[] | null = null
   // Whether `last` may be re-run: false if it deleted any GL object.
   let lastRerunnable = false
+  const frameListeners = new Set<() => void>()
 
   let unsubscribe: (() => void) | null = config.transport.onMessage((msg) => {
     if (isNetGLCall(msg)) {
@@ -118,6 +134,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       if (pending) pending.push(...inFlight)
       else pending = inFlight
       inFlight = []
+      for (const l of frameListeners) l()
       return
     }
     const typed = msg as { type?: unknown }
@@ -159,7 +176,19 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     get hasFrame() {
       return last !== null || pending !== null
     },
+    get canRerun() {
+      return last !== null && lastRerunnable
+    },
     replay,
+    post(msg) {
+      config.transport.post(msg)
+    },
+    onFrame(listener) {
+      frameListeners.add(listener)
+      return () => {
+        frameListeners.delete(listener)
+      }
+    },
     drain() {
       if (pending) {
         const batch = pending
@@ -178,6 +207,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     stop() {
       unsubscribe?.()
       unsubscribe = null
+      frameListeners.clear()
     }
   }
 }

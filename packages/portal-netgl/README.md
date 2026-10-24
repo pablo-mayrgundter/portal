@@ -20,6 +20,9 @@ Adoption modes:
 - **Portal-aware target with a scene + anchor**: use
   `makeNetGLPortalTarget`. The factory drives rendering in response to
   inbound `setPose` messages from the host.
+- **A deck.gl host** (see [deck.gl host](#attachnetgldecklayer--deckgl--lumagl-host)):
+  `attachNetGLDeckLayer(deck, …)` draws a guest over deck's frame, in
+  deck's clip space, from the same page or a cross-origin iframe.
 
 ## Install
 
@@ -27,8 +30,18 @@ Adoption modes:
 npm install three @pablo-mayrgundter/portal-netgl
 ```
 
-`three` is a peer dependency — your version of three.js is used.
-Supported range: `three@>=0.171.0 <1.0.0`.
+`three` is an optional peer dependency — your version of three.js is used.
+Supported range: `three@>=0.171.0 <1.0.0`. A host without three (a deck.gl
+app) imports the three-free entry instead, which has everything but
+`createNetGLRenderer`, `makeNetGLPortalTarget`, `makeNetGLPortalGuest` and
+the stencil helpers:
+
+```js
+import { attachNetGLDeckLayer, iframeTransport } from '@pablo-mayrgundter/portal-netgl/core'
+```
+
+The main entry imports three at runtime, so a bundler fails on it when
+three isn't installed.
 
 ## `makeNetGLPortalGuest` — embedded-app integration
 
@@ -114,11 +127,11 @@ not a dependency — the shim is typed structurally. Worked example:
 ## `makeNetGLHostReceiver` — host side
 
 ```js
-import { makeNetGLHostReceiver, windowTransport } from '@pablo-mayrgundter/portal-netgl'
+import { makeNetGLHostReceiver, iframeTransport } from '@pablo-mayrgundter/portal-netgl'
 
 const receiver = makeNetGLHostReceiver({
   gl: renderer.getContext(),
-  transport: windowTransport({ output: iframe.contentWindow, inputFilter: iframe.contentWindow }),
+  transport: iframeTransport(iframe, { origin: 'https://guest.example' }),
   replay: {
     remapScreenViewport: (x, y, w, h) => doorRect,   // where guest screen draws land
     screen: { stencil: { ref: 1 }, clear: 'depth-only' }
@@ -154,6 +167,123 @@ Options:
 
 Plus `screenFramebuffer` to land the guest in one of your render targets
 instead of the canvas. See DESIGN.md.
+
+`receiver.onFrame(cb)` calls back when a guest frame completes (for hosts
+that render on demand), `receiver.post(msg)` sends the guest a control
+message, and `receiver.canRerun` says whether `drain()` would re-run the
+last frame when nothing new has arrived.
+
+## Cross-origin iframes
+
+Pin both ends to each other's origin. The allow-lists are your own
+constants: never read them from a URL parameter.
+
+```js
+// Host: post with the guest's exact origin, accept only its window and origin.
+const transport = iframeTransport(iframe, { origin: 'https://celestiary.org' })
+
+// Guest: post to the embedding page's origin (resolved from
+// location.ancestorOrigins or document.referrer), accept only those origins.
+const transport = parentTransport({ hostOrigins: ['https://pablo-mayrgundter.github.io', 'http://localhost:5190'] })
+```
+
+`windowTransport({ output, inputFilter, allowedOrigins, outputOrigin,
+onReject })` is the general form; without `allowedOrigins` it keeps its old
+same-origin defaults (`'*'`, any origin). A sandboxed iframe without
+`allow-same-origin` has the opaque origin `'null'`: pass `origin: 'null'`,
+and the host then posts with `'*'` and accepts that frame's window only.
+
+Origin pinning is not a sandbox: the guest's GL still executes in your
+context, so a cross-origin guest must still be one you trust. DESIGN.md
+["Cross-origin iframes"](./DESIGN.md#cross-origin-iframes) lists what
+remains open.
+
+## `attachNetGLDeckLayer` — deck.gl / luma.gl host
+
+Composites a guest after deck's layers, in deck's WebGL2 context, with
+deck's depth still valid. It brackets the guest with luma's
+`device.pushState()` / `popState()`, so deck's next frame is unchanged by
+whatever state the guest left, and builds the guest's view from deck's
+viewport: for a `GlobeView`, ECEF metres and deck's own projection.
+
+```js
+import { Deck, _GlobeView as GlobeView } from '@deck.gl/core'
+import { attachNetGLDeckLayer, iframeTransport } from '@pablo-mayrgundter/portal-netgl/core'
+
+const deck = new Deck({
+  views: new GlobeView({ farZMultiplier: 4 }), // room for the guest's orbits
+  // ...
+  onDeviceInitialized: (device) => {
+    const layer = attachNetGLDeckLayer(deck, {
+      device,
+      transport: iframeTransport(iframe, { origin: 'https://celestiary.org' }),
+      time: () => Date.now() // the host owns the clock
+    })
+  }
+})
+```
+
+With `transport`, the guest is in another window: after each deck frame
+whose view changed, the adapter posts a `layer:view` (at most one
+unanswered), and redraws deck when the guest's frame arrives. With
+`render: (view) => …` instead, the guest is in the same page: give it
+`layer.transport`, and it renders synchronously in each deck frame. The
+replay's screen policy defaults to `clear: 'none'`, so a guest that clears
+its canvas can't wipe deck's colour or depth.
+
+The adapter also speaks the rest of the layer control plane (shapes from
+RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):
+
+- **`layer:invalidate {reason?}`** (guest → host): the guest's scene changed
+  while the camera and clock didn't (data arrived). The host re-sends the
+  current view with a new `viewId` and redraws, still one view in flight.
+  Guests post it with `postLayerInvalidate(transport, reason)` or the
+  overlay guest's `guest.invalidate(reason)`.
+- **`layer:hello`** (guest → host, repeated until acked): exposed as
+  `layer.hello` and `onHello`, answered with `layer:hello-ack` from
+  `acceptHello(hello)` (default `{ accepted: true }`). A hello also counts
+  as the guest being ready for views.
+- **Anchors:** `layer.subscribeAnchors(patterns)` posts
+  `layer:anchors-subscribe {patterns}` once the guest is live, and again on
+  each later hello, so it can be called early; `layer.onAnchors(cb)` / `onAnchors` deliver
+  each `layer:anchors {viewId, timeMs, anchors}`, and `layer.anchors` holds
+  the last.
+- Anything else reaches `onControl`; `layer.postToGuest(msg)` sends
+  anything else. For an iframe guest, control posts wait until it is live
+  (`layer.live`: its first `layer:hello` or `netgl:ready`), then go in
+  order: before that the iframe may not be on the guest's origin yet, and
+  a post targeted at it would be dropped.
+
+The view (`NetGLLayerView`): `viewMatrix` (ECEF metres → eye metres,
+rigid, column-major), `projectionMatrix` (deck's, scale folded back in,
+so clip space and depth are deck's), `viewport` (drawing-buffer pixels),
+`pixelRatio`, `timeMs` (Unix ms, UTC) and `earth` (deck's sphere,
+6,370,972 m). `globeLayerView(viewport, opts)` builds one on its own; it
+returns null for a viewport that isn't a globe, including GlobeView's Web
+Mercator mode above zoom 12, and the guest is skipped. `withLumaState(device,
+fn)` is the bracket on its own. deck.gl and luma.gl aren't dependencies;
+the adapter is typed structurally. Worked example: `apps/host-netgl-deck/`.
+
+## `makeNetGLThreeOverlayGuest` — three.js overlay guest
+
+A three.js scene drawn from the host's `layer:view`: no clears, a
+transparent frame, the host's camera and projection (with the
+`matrixWorldNeedsUpdate` a host-set camera matrix needs), and one frame per
+view.
+
+```js
+import * as THREE from 'three'
+import { makeNetGLThreeOverlayGuest, parentTransport } from '@pablo-mayrgundter/portal-netgl'
+
+const guest = makeNetGLThreeOverlayGuest({
+  WebGLRenderer: THREE.WebGLRenderer,
+  scene, // ECEF metres; materials with depthWrite: false
+  camera: new THREE.PerspectiveCamera(),
+  transport: parentTransport({ hostOrigins: ['https://netmap.example'] }),
+  onView: (view) => updateSatellites(view.timeMs)
+})
+guest.start() // announce, then render on each layer:view
+```
 
 ## `makeNetGLImmediateLink` — same page, no iframe
 
@@ -250,7 +380,8 @@ NetGL is two streams over a single transport:
   frame end instead.
 - **Control** (host ↔ guest): `netgl:ready` handshake announcing the
   guest's anchor + background; `netgl:setPose` from the host with the
-  coupled camera state.
+  coupled camera state (door portals), or `layer:view` with the host's
+  exact view (overlays, `attachNetGLDeckLayer`).
 
 See [`DESIGN.md`](./DESIGN.md) for the architecture, the adoption
 findings that surfaced building celestiary integration, and the open

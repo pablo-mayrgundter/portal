@@ -1,6 +1,6 @@
 {
   "name": "@pablo-mayrgundter/portal-netgl",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "NetGL: link WebGL renderers at the GL layer. Record a guest renderer's WebGL2 calls (three.js, Cesium) and replay them into a host's context, same page or over postMessage, composited through a stencil with no bitmap round-trip.",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
     }
   },
   "files": [
@@ -35,11 +39,21 @@
   "peerDependencies": {
     "three": ">=0.171.0 <1.0.0"
   },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@deck.gl/core": "^9.4.0",
+    "@luma.gl/core": "^9.4.2",
+    "@luma.gl/engine": "^9.4.2",
+    "@luma.gl/shadertools": "^9.4.2",
+    "@luma.gl/webgl": "^9.4.2",
+    "@portal/portal-iframe": "0.1.0",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^25.6.0",
     "@types/three": "^0.184.0",
-    "@portal/portal-iframe": "0.1.0",
     "gl": "9.0.0-rc.10",
     "jsdom": "^26.1.0",
     "three": "^0.180.0",
