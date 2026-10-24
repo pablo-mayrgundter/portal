@@ -713,6 +713,39 @@ because the guest delivers more frames per second in the same window.)
   context drawing everything a second time) is now most of input →
   shown on SwiftShader; see "No-draw shadow" in the open problems.
 
+**On a real GPU (Apple M2, ANGLE Metal, Chrome 151, DPR 1.8; netmap's
+`?orbits_perf=1` on netmap#8, 0.6.0 on the host, production celestiary on
+wire 1, ~505 KB and 187 messages a frame).** The guest answered a view in
+15.5 ms (median), yet a camera move took ~166 ms to show it, and the guest
+content drawn while moving was one deck draw, ~152 ms, behind. It looked
+like the adapter folding away the redraw a new frame needs (only 38 of
+600 draws were the adapter's), but the capture says otherwise:
+
+- **The browser gave no animation frame for ~150 ms after a composite.**
+  Each draw was followed by a long animation frame of 140–170 ms with no
+  script over 5 ms and ~2 ms of rendering; the wheel events, which
+  Chromium aligns to frames, came exactly 150.0 or 166.7 ms apart (9 or
+  10 vsyncs); and of the adapter's own redraws for a frame that landed
+  within 25 ms of a draw, with no input pending, 6 of 8 ran 95–170 ms
+  later when that draw had replayed a new guest frame, and 5 of 8 ran 2–6
+  ms later when it had only re-run one (no uploads). The redraw was
+  queued and ran at the next animation
+  frame; the next one came late, and deck's input draw took it first
+  (so the adapter's was folded, correctly). That is back-pressure from
+  the GPU process, not the host's main thread (16.6% busy, deck's draw
+  1 ms of CPU). The suspect is the 32 `bufferSubData` calls a frame
+  (~500 KB, the old guest's unsliced uploads) into buffers the GPU may
+  still be reading; wire 2's slices take a frame to ~51 KB, so the next
+  capture should be against a guest on 0.6.x.
+- **A real fold bug, found on the way (0.6.1).** A request made while
+  one was already queued didn't restart the fold window: if deck drew in
+  between (a host's `deck.redraw()` from a timer, a draw outside the
+  animation frame), a guest frame landing after that draw was folded into
+  it and waited for the next draw of any kind. Now each request restarts
+  the window, and only a draw after the latest request folds it; still one
+  queued redraw, at most one draw a frame (`luma-control.test.ts`, "a
+  frame that lands after a draw ...").
+
 ## Celestiary × Cesium: the plan
 
 *Shipped.* Celestiary's Earth, Moon and Mars layers (celestiary/web
