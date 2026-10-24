@@ -224,9 +224,12 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       base.post(item, transfer)
       return
     }
+    // An app object that must be serialised before the call returns (an
+    // ImageBitmap the app may close): it goes now, in a batch of its own,
+    // so if it can't be cloned (a tainted bitmap) only that call is lost.
+    if (urgent) flush()
     queue.push(item)
     if (transfer) queueTransfer.push(...transfer)
-    // An app object that must be serialised before the call returns.
     if (urgent) flush()
   }
 
