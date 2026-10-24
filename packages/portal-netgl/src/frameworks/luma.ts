@@ -292,14 +292,23 @@ export type NetGLDeckLayer = {
   readonly anchors: NetGLLayerAnchorsMessage | null
   /**
    * Ask the guest to publish these anchors (`layer:anchors-subscribe`;
-   * replaces the subscription). Re-sent when the guest says hello, so it
-   * can be called before the guest has loaded.
+   * replaces the subscription). Held until the guest is live (see
+   * `postToGuest`) and re-sent on each later `layer:hello`, so it can be
+   * called before the guest has loaded.
    */
   subscribeAnchors(patterns: string[], opts?: Omit<NetGLLayerAnchorsSubscribeMessage, 'type' | 'patterns'>): void
   /** Call `listener` with each `layer:anchors`. Returns an unsubscribe. */
   onAnchors(listener: (msg: NetGLLayerAnchorsMessage) => void): () => void
-  /** Post any control message to the guest. */
+  /**
+   * Post any control message to the guest. For an iframe guest, messages
+   * are queued until it is live (its first `layer:hello` or `netgl:ready`)
+   * and then sent in order: before that the iframe may not have navigated
+   * to the guest's origin yet, and a post with its origin as target would
+   * be dropped (Chromium logs "target origin does not match").
+   */
   postToGuest(msg: unknown): void
+  /** Whether the guest has said `layer:hello` or `netgl:ready`. */
+  readonly live: boolean
   /** Restore deck's previous `onAfterRender` and stop listening. */
   detach(): void
 }
@@ -361,9 +370,24 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
   if (config.onAnchors) anchorListeners.add(config.onAnchors)
   // Set by `layer:invalidate`: send the next view even if it's unchanged.
   let forceView = false
-  const postToGuest = (msg: unknown): void => {
+  const send = (msg: unknown): void => {
     if (link) link.postToGuest(msg)
     else receiver?.post(msg)
+  }
+  // An iframe guest is live once it has said hello or ready: until then
+  // its window may still be on about:blank (or mid-navigation), and posts
+  // targeted at its origin are dropped. A same-page guest is always live.
+  let live = isImmediate
+  const queued: unknown[] = []
+  const postToGuest = (msg: unknown): void => {
+    if (live) send(msg)
+    else queued.push(msg)
+  }
+  const goLive = (): void => {
+    if (live) return
+    live = true
+    for (const msg of queued.splice(0)) send(msg)
+    if (subscription) send(subscription)
   }
   const onControl = (msg: unknown): void => {
     if (isNetGLLayerInvalidateMessage(msg)) {
@@ -374,15 +398,17 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     if (isNetGLLayerHelloMessage(msg)) {
       const answer: NetGLLayerHelloAnswer = config.acceptHello ? config.acceptHello(msg) : { accepted: true }
       const ack: NetGLLayerHelloAckMessage = { ...answer, type: 'layer:hello-ack' }
-      postToGuest(ack)
+      send(ack) // answers a message from the guest, so it's live
       // The guest repeats hello until acked; a hello after that is a reload.
       const first = hello === null
       hello = msg
+      const wasLive = live
+      goLive()
       if (first) {
         config.onHello?.(msg)
         requestRedraw('netgl guest hello')
       }
-      if (subscription) postToGuest(subscription)
+      if (wasLive && subscription) send(subscription)
       return
     }
     if (isNetGLLayerAnchorsMessage(msg)) {
@@ -397,6 +423,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     gl,
     replay: { ...config.replay, screen: { clear: 'none' as const, ...config.replay?.screen } },
     onReady: (msg: NetGLReadyMessage) => {
+      goLive()
       config.onReady?.(msg)
       requestRedraw('netgl guest ready')
     },
@@ -503,7 +530,8 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     },
     subscribeAnchors(patterns, opts = {}) {
       subscription = { ...opts, type: 'layer:anchors-subscribe', patterns: [...patterns] }
-      postToGuest(subscription)
+      // Not live yet: goLive sends the latest subscription, not each one.
+      if (live) send(subscription)
     },
     onAnchors(listener) {
       anchorListeners.add(listener)
@@ -512,6 +540,9 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
       }
     },
     postToGuest,
+    get live() {
+      return live
+    },
     detach() {
       if (detached) return
       detached = true

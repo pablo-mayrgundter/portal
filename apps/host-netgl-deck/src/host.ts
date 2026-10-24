@@ -19,7 +19,7 @@ import {
   iframeTransport,
   type LumaDeviceLike,
   type NetGLDeckLayer
-} from '@pablo-mayrgundter/portal-netgl'
+} from '@pablo-mayrgundter/portal-netgl/core'
 import { MARKERS } from './points'
 
 attachNavDrawer('netgl-deck')

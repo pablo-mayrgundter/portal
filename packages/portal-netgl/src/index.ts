@@ -1,4 +1,9 @@
-export { makeNetGLProxy, type NetGLProxyConfig } from './proxy'
+// The main entry: everything in `./core`, plus the helpers that import
+// three.js at runtime (createNetGLRenderer, makeNetGLPortalTarget,
+// makeNetGLPortalGuest, the stencil helpers). A host without three (a
+// deck.gl app) imports `@pablo-mayrgundter/portal-netgl/core` instead.
+
+export * from './core'
 export {
   makeNetGLPortalTarget,
   type NetGLPortalTargetConfig,
@@ -11,124 +16,14 @@ export {
   type NetGLSetPoseMessage
 } from './guest'
 export {
-  makeNetGLRecorder,
-  makeNetGLRecorderSession,
-  type NetGLRecorderSession,
-  type NetGLRecorderSessionOptions
-} from './recorder'
-export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
-export type { NetGLScreenPolicy } from './screen-policy'
-export {
-  captureCheckpoint,
-  makeBindingTracker,
-  makeScalarStateTracker,
-  type BindingTracker,
-  type ScalarStateTracker
-} from './checkpoint'
-export {
-  makeNetGLGuestContext,
-  type NetGLGuestContext,
-  type NetGLGuestContextConfig,
-  type NetGLEndFrameOptions,
-  type NetGLReadyMessage,
-  type NetGLReadyAckMessage
-} from './guest-context'
-export {
-  makeNetGLImmediateLink,
-  type NetGLImmediateLink,
-  type NetGLImmediateLinkConfig
-} from './immediate-link'
-export {
-  makeNetGLHostReceiver,
-  type NetGLHostReceiver,
-  type NetGLHostReceiverConfig
-} from './host-receiver'
-export {
-  makeNetGLCesiumGuest,
-  type NetGLCesiumGuest,
-  type NetGLCesiumGuestConfig,
-  type CesiumContextOptions,
-  type CesiumSceneLike
-} from './frameworks/cesium'
-export {
   createNetGLRenderer,
   attachNetGLReceiver,
   type NetGLRendererConfig,
   type NetGLReceiverConfig,
-  type NetGLReceiverHandle,
-  type NetGLTransport
+  type NetGLReceiverHandle
 } from './renderer'
-export type {
-  NetGLCall,
-  NetGLEncodedValue,
-  NetGLFrameEnd,
-  NetGLWireMessage
-} from './messages'
-export { isNetGLCall, isNetGLFrameEnd } from './messages'
-export type {
-  ColorRGB,
-  Mat4,
-  PortalAnchor,
-  PortalPose,
-  Vec3,
-  Viewport
-} from './portal-types'
 export {
   applyPortalStencilTest,
   applyObliqueClipFromAnchor,
   PORTAL_STENCIL_REF
 } from './three-helpers'
-export {
-  windowTransport,
-  iframeTransport,
-  parentTransport,
-  resolveParentOrigin,
-  isSerializedOrigin,
-  type WindowTransport,
-  type WindowTransportOptions,
-  type IframeTransportOptions,
-  type ParentTransportOptions
-} from './window-transport'
-export {
-  attachNetGLDeckLayer,
-  globeLayerView,
-  globeFrameOfViewport,
-  withLumaState,
-  type DeckLike,
-  type DeckViewportLike,
-  type LumaDeviceLike,
-  type GlobeFrame,
-  type GlobeLayerViewOptions,
-  type NetGLDeckLayer,
-  type NetGLDeckLayerConfig,
-  type NetGLDeckLayerStats,
-  type DeckImmediateLayerConfig,
-  type DeckReceiverLayerConfig
-} from './frameworks/luma'
-export {
-  makeNetGLThreeOverlayGuest,
-  type NetGLThreeOverlayGuest,
-  type NetGLThreeOverlayGuestConfig
-} from './frameworks/three-overlay'
-export {
-  isNetGLLayerViewMessage,
-  isNetGLLayerInvalidateMessage,
-  isNetGLLayerHelloMessage,
-  isNetGLLayerAnchorsMessage,
-  postLayerInvalidate,
-  type NetGLAnchor,
-  type NetGLLayerAnchorsMessage,
-  type NetGLLayerAnchorsSubscribeMessage,
-  type NetGLLayerHelloMessage,
-  type NetGLLayerHelloAckMessage,
-  type NetGLLayerHelloAnswer,
-  type NetGLLayerInvalidateMessage,
-  mat4Multiply,
-  mat4InvertRigid,
-  mat4TransformVec4,
-  projectToPixels,
-  sphereToEcef,
-  type NetGLLayerView,
-  type NetGLLayerViewMessage,
-  type NetGLMat4
-} from './layer-view'

@@ -132,14 +132,22 @@ describe('attachNetGLDeckLayer — anchors', () => {
   it('subscribes (again on hello), and delivers layer:anchors', async () => {
     const { guest, host, received } = memoryPair()
     const layer = attachNetGLDeckLayer(fakeDeck(), { device: mockDevice(), transport: host, time: () => 0 })
+    layer.subscribeAnchors(['norad:*'])
     layer.subscribeAnchors(['norad:25544', 'dsn:*'])
-    expect(received.filter((m) => m.type === 'layer:anchors-subscribe')).toEqual([
-      { type: 'layer:anchors-subscribe', patterns: ['norad:25544', 'dsn:*'] }
-    ])
-    // A guest that loaded after the subscription gets it on its hello.
+    // Nothing goes out before the guest is live.
+    expect(received.filter((m) => m.type === 'layer:anchors-subscribe')).toEqual([])
+    // On its hello it gets the latest subscription, once, after the ack.
     guest.post({ type: 'layer:hello', version: 1 })
     await settle()
+    const control = received.filter((m) => m.type !== 'layer:view')
+    expect(control.map((m) => m.type)).toEqual(['layer:hello-ack', 'layer:anchors-subscribe'])
+    expect(control[1]).toEqual({ type: 'layer:anchors-subscribe', patterns: ['norad:25544', 'dsn:*'] })
+    // Live: sent at once, and again on a later hello.
+    layer.subscribeAnchors(['dsn:*'])
     expect(received.filter((m) => m.type === 'layer:anchors-subscribe')).toHaveLength(2)
+    guest.post({ type: 'layer:hello', version: 1 })
+    await settle()
+    expect(received.filter((m) => m.type === 'layer:anchors-subscribe')).toHaveLength(3)
 
     const got: unknown[] = []
     const off = layer.onAnchors((m) => got.push(m))
@@ -189,5 +197,28 @@ describe('attachNetGLDeckLayer — the guest never clears deck\'s frame', () => 
       else expect(calls).not.toContain('clear')
       layer.detach()
     }
+  })
+})
+
+describe('attachNetGLDeckLayer — control posts wait for a live guest', () => {
+  it('queues postToGuest until netgl:ready, then flushes in order', async () => {
+    const { guest, host, received } = memoryPair()
+    const layer = attachNetGLDeckLayer(fakeDeck(), { device: mockDevice(), transport: host, time: () => 0 })
+    layer.postToGuest({ type: 'layer:visibility', state: 'shown' })
+    layer.subscribeAnchors(['dsn:*'])
+    layer.postToGuest({ type: 'layer:time', timeMs: 0 })
+    expect(layer.live).toBe(false)
+    expect(received).toEqual([])
+    guest.post({ type: 'netgl:ready', anchor: { position: [0, 0, 0], normal: [0, 0, 1], up: [0, 1, 0] }, background: { r: 0, g: 0, b: 0 } })
+    await settle()
+    expect(layer.live).toBe(true)
+    expect(received.filter((m) => m.type !== 'layer:view' && m.type !== 'netgl:ready-ack')).toEqual([
+      { type: 'layer:visibility', state: 'shown' },
+      { type: 'layer:time', timeMs: 0 },
+      { type: 'layer:anchors-subscribe', patterns: ['dsn:*'] }
+    ])
+    layer.postToGuest({ type: 'layer:visibility', state: 'hidden' })
+    expect(received[received.length - 1]).toEqual({ type: 'layer:visibility', state: 'hidden' })
+    layer.detach()
   })
 })

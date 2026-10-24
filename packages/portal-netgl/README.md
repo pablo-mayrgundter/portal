@@ -30,8 +30,18 @@ Adoption modes:
 npm install three @pablo-mayrgundter/portal-netgl
 ```
 
-`three` is a peer dependency — your version of three.js is used.
-Supported range: `three@>=0.171.0 <1.0.0`.
+`three` is an optional peer dependency — your version of three.js is used.
+Supported range: `three@>=0.171.0 <1.0.0`. A host without three (a deck.gl
+app) imports the three-free entry instead, which has everything but
+`createNetGLRenderer`, `makeNetGLPortalTarget`, `makeNetGLPortalGuest` and
+the stencil helpers:
+
+```js
+import { attachNetGLDeckLayer, iframeTransport } from '@pablo-mayrgundter/portal-netgl/core'
+```
+
+The main entry imports three at runtime, so a bundler fails on it when
+three isn't installed.
 
 ## `makeNetGLPortalGuest` — embedded-app integration
 
@@ -198,7 +208,7 @@ viewport: for a `GlobeView`, ECEF metres and deck's own projection.
 
 ```js
 import { Deck, _GlobeView as GlobeView } from '@deck.gl/core'
-import { attachNetGLDeckLayer, iframeTransport } from '@pablo-mayrgundter/portal-netgl'
+import { attachNetGLDeckLayer, iframeTransport } from '@pablo-mayrgundter/portal-netgl/core'
 
 const deck = new Deck({
   views: new GlobeView({ farZMultiplier: 4 }), // room for the guest's orbits
@@ -234,12 +244,15 @@ RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):
   `acceptHello(hello)` (default `{ accepted: true }`). A hello also counts
   as the guest being ready for views.
 - **Anchors:** `layer.subscribeAnchors(patterns)` posts
-  `layer:anchors-subscribe {patterns}` (re-sent when the guest says hello,
-  so it can be called early); `layer.onAnchors(cb)` / `onAnchors` deliver
+  `layer:anchors-subscribe {patterns}` once the guest is live, and again on
+  each later hello, so it can be called early; `layer.onAnchors(cb)` / `onAnchors` deliver
   each `layer:anchors {viewId, timeMs, anchors}`, and `layer.anchors` holds
   the last.
 - Anything else reaches `onControl`; `layer.postToGuest(msg)` sends
-  anything else.
+  anything else. For an iframe guest, control posts wait until it is live
+  (`layer.live`: its first `layer:hello` or `netgl:ready`), then go in
+  order: before that the iframe may not be on the guest's origin yet, and
+  a post targeted at it would be dropped.
 
 The view (`NetGLLayerView`): `viewMatrix` (ECEF metres → eye metres,
 rigid, column-major), `projectionMatrix` (deck's, scale folded back in,

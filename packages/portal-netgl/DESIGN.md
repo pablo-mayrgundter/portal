@@ -421,7 +421,13 @@ satellites) and `frameworks/luma.ts` (`attachNetGLDeckLayer`).
   web#296) handshakes with `layer:hello` and publishes `layer:anchors`; the
   adapter acks the hello (`acceptHello`, default `{accepted: true}`), takes
   it as readiness, and gives anchors an API (`subscribeAnchors`,
-  `onAnchors`), in RFC 0001's shapes. The nonce and MessagePort of RFC
+  `onAnchors`), in RFC 0001's shapes. Control posts to an iframe guest wait
+  until it has said hello or ready: netmap's first subscription went out
+  while the iframe was still on `about:blank`, and Chromium dropped it
+  ("target origin does not match").
+- **three is optional.** A deck host needs no three.js, but the main entry
+  imports it at runtime (the three renderer helpers), so a bundle without
+  three fails. Hosts import `@pablo-mayrgundter/portal-netgl/core`. The nonce and MessagePort of RFC
   §10.2, and `viewId` on `netgl:frame-end` (its open question 18), aren't
   built.
 - **The camera contract.** deck's globe "common" space is a sphere of 256
@@ -1077,6 +1083,9 @@ unchanged.
   adapter: `attachNetGLDeckLayer`, `globeLayerView`, `withLumaState`.
 - `packages/portal-netgl/src/frameworks/three-overlay.ts` — three.js
   overlay guest driven by `layer:view`.
+- `packages/portal-netgl/src/core.ts` — the three-free entry
+  (`@pablo-mayrgundter/portal-netgl/core`); `index.ts` adds the helpers
+  that import three.
 - `packages/portal-netgl/src/layer-view.ts` — the `layer:view` message and
   its matrix helpers.
 - `packages/portal-netgl/src/window-transport.ts` — postMessage transport,
