@@ -528,6 +528,16 @@ the case that matters most: while the camera moves and the guest is slower
 than deck, every deck frame re-runs the last guest frame, and now each one
 lands at deck's view.
 
+**Checked in a browser.** `apps/host-netgl-deck` (`?reproject=0` turns it
+off) in headless Chromium on SwiftShader, 800×500, its three.js guest in a
+cross-site iframe, the clock pinned: after a settled frame at one view, the
+camera moved 4° and 2° and 0.3 zoom and deck drew once, re-running the
+guest's old frame. Corrected, that composite was pixel-identical to the
+guest's own frame for the new view once it landed (0 pixels differed); with
+the correction forced off, 2,837 pixels differed and the guest's pixels
+overlapped the truth's not at all (several dots hid behind the globe's
+depth at their old positions).
+
 **Limits.**
 - Only the position is corrected. Screen-space extrusion done in the
   vertex shader against the old view (wide lines, clip-space sprites,
