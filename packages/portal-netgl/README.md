@@ -254,7 +254,7 @@ old guest frame and again when the new one lands: call
 `layer.requestGuestFrame()`, which sends the current view at the new time
 without drawing, and deck draws once when the frame comes back.
 
-**Host reprojection** (`reproject: true`, receiver only, 0.6.2). An
+**Host reprojection** (`reproject: true`, receiver only, 0.6.3). An
 iframe guest's frame is rendered for the view the adapter sent, and lands
 a deck frame or more later: while the camera moves, the globe is drawn at
 the new view and the guest's frame is still the old one's, one frame
