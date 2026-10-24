@@ -66,13 +66,31 @@ void main() {
 }
 `
 
+// A guest's own declaration of the correction (the opt-in convention):
+// `uniform [precision] mat4 netgl_reproject;`, outside comments.
+const DECLARES = new RegExp(`\\buniform\\s+(?:(?:highp|mediump|lowp)\\s+)?mat4\\s+${NETGL_REPROJECT_UNIFORM}\\s*;`)
+
+/**
+ * Whether a vertex shader applies the correction itself: it declares
+ * `uniform mat4 netgl_reproject;` (the opt-in convention for guests whose
+ * shaders extrude in screen space, such as wide lines). The replay then
+ * doesn't wrap its `main`, and sets the uniform before its draws as for a
+ * wrapped one. The shader must multiply each clip position it derives from
+ * the view by `netgl_reproject` before any screen-space offset, and the
+ * guest should set it to the identity itself (three: a `Matrix4()` in the
+ * material's `uniforms`) so it draws on a host that doesn't reproject; a
+ * reprojecting host drops the guest's own sets of it.
+ */
+export const declaresReprojection = (src: string): boolean => DECLARES.test(src.replace(COMMENTS, ' '))
+
 /**
  * Rewrite a vertex shader so the host can correct its `gl_Position`: the
  * guest's `main` becomes `netgl_main`, and a new `main` calls it and
  * multiplies `gl_Position` by `uniform mat4 netgl_reproject`. GLSL ES 1.00
  * and 3.00 alike; preprocessor lines and declarations are left where they
- * are. Returns null when the source has no `void main()` definition, or is
- * already rewritten: use it unchanged then.
+ * are. Returns null when the source has no `void main()` definition, is
+ * already rewritten, or declares the uniform itself (`declaresReprojection`):
+ * use it unchanged then.
  */
 export const reprojectVertexShader = (src: string): string | null => {
   if (src.includes(NETGL_REPROJECT_UNIFORM)) return null
