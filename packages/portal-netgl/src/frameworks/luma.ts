@@ -24,6 +24,8 @@
 //    asks for one in the next animation frame and drops it if deck drew in
 //    the meantime (the controller moving the camera, or the host's own
 //    `deck.redraw()` from a clock): that draw already drained the frame.
+//    Only a draw after the latest request counts: a frame that lands after
+//    a draw, while an earlier request is still queued, gets its own draw.
 //    deck 9 has no public "needs redraw" flag (`layerManager` is
 //    protected), so this is the adapter's own folding.
 //
@@ -376,11 +378,19 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
   // (deck's animation-loop callback runs ahead of ours in that frame, and
   // a host's forced redraw may come sooner): that draw ran onAfterRender,
   // which drained whatever this redraw was for.
+  //
+  // Only a draw after the *latest* request drained it. A request made
+  // while one is queued joins it (one draw a frame, at most), but restarts
+  // the fold window: a draw between the two showed what the first was for,
+  // not the guest frame that has landed since, so it can't fold the second.
   let drewSinceRequest = false
+  let redrawReason = ''
   const requestRedraw = (reason: string): void => {
-    if (redrawQueued || detached) return
-    redrawQueued = true
+    if (detached) return
     drewSinceRequest = false
+    redrawReason = reason
+    if (redrawQueued) return
+    redrawQueued = true
     nextFrame(() => {
       redrawQueued = false
       if (detached) return
@@ -389,7 +399,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
         return
       }
       stats.redrawsForced += 1
-      deck.redraw(reason)
+      deck.redraw(redrawReason)
     })
   }
 

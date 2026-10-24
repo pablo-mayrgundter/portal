@@ -247,7 +247,8 @@ its canvas can't wipe deck's colour or depth.
 a guest frame arrives, in the next animation frame, and drops it if deck
 has drawn in the meantime (the camera moving, or your own
 `deck.redraw()`): that draw already showed the frame (`stats.redrawsForced`,
-`stats.redrawsFolded`). A clock that moves only the guest's content
+`stats.redrawsFolded`). Only a draw after the latest request counts, so a
+frame that lands after a draw still gets its own (0.6.1). A clock that moves only the guest's content
 shouldn't call `deck.redraw()` each tick, which draws deck once with the
 old guest frame and again when the new one lands: call
 `layer.requestGuestFrame()`, which sends the current view at the new time

@@ -252,6 +252,88 @@ describe('attachNetGLDeckLayer — redraws', () => {
     layer.detach()
   })
 
+  it('a frame that lands after a draw, while an earlier redraw is queued, is drawn at the next animation frame', async () => {
+    // A hand-run animation frame, so the order of draws, landings and the
+    // adapter's callback is the test's.
+    const g = globalThis as { requestAnimationFrame?: (cb: () => void) => number }
+    const saved = g.requestAnimationFrame
+    let rafs: Array<() => void> = []
+    g.requestAnimationFrame = (cb) => {
+      rafs.push(cb)
+      return rafs.length
+    }
+    const vsync = () => {
+      const run = rafs
+      rafs = []
+      for (const cb of run) cb()
+    }
+    try {
+      const deck = fakeDeck()
+      const reasons: string[] = []
+      const redraw = deck.redraw
+      deck.redraw = (reason?: string) => {
+        reasons.push(reason ?? '')
+        redraw()
+      }
+      let now = 1000
+      const { guest, host, received } = memoryPair()
+      const layer = attachNetGLDeckLayer(deck, { device: mockDevice(), transport: host, time: () => now })
+      vsync() // 'netgl layer attached'
+      guest.post(ready)
+      await settle()
+      vsync() // 'netgl guest ready': the first view goes out
+      expect(views(received)).toHaveLength(1)
+      guest.post({ type: 'netgl:frame-end' })
+      await settle()
+      vsync() // its frame: one draw, which drains it
+      expect(layer.receiver!.hasFrame).toBe(true)
+
+      // The clock asks for a new frame; the guest invalidates meanwhile,
+      // so a redraw is queued...
+      now = 1250
+      expect(layer.requestGuestFrame()).toBe(true)
+      postLayerInvalidate(guest)
+      await settle()
+      // ...and the host draws before that redraw comes due (a camera move,
+      // its own deck.redraw()): that draw ran before the new frame.
+      const draws = deck.redraws
+      const forced = layer.stats.redrawsForced
+      deck.redraw('host input')
+      // Now the frame for the 1250 view lands, still in the same frame
+      // interval: the queued redraw must not fold it into the draw above.
+      guest.post({ type: 'netgl:frame-end' })
+      await new Promise((r) => setTimeout(r, 0))
+      vsync()
+      expect(deck.redraws).toBe(draws + 2)
+      expect(layer.stats.redrawsForced).toBe(forced + 1)
+      expect(reasons[reasons.length - 1]).toBe('netgl guest frame')
+      // Still at most one draw a frame: nothing more is queued.
+      vsync()
+      expect(deck.redraws).toBe(draws + 2)
+      // (That draw re-sent the view the guest invalidated: answer it.)
+      guest.post({ type: 'netgl:frame-end' })
+      await settle()
+      vsync()
+      expect(deck.redraws).toBe(draws + 3)
+
+      // Folding still holds: a frame drained by a draw after it lands asks
+      // for nothing more.
+      now = 1500
+      expect(layer.requestGuestFrame()).toBe(true)
+      await settle()
+      guest.post({ type: 'netgl:frame-end' })
+      await new Promise((r) => setTimeout(r, 0))
+      const folded = layer.stats.redrawsFolded
+      deck.redraw('host input')
+      vsync()
+      expect(deck.redraws).toBe(draws + 4)
+      expect(layer.stats.redrawsFolded).toBe(folded + 1)
+      layer.detach()
+    } finally {
+      g.requestAnimationFrame = saved
+    }
+  })
+
   it('requestGuestFrame sends the new time without drawing deck; deck draws once when it lands', async () => {
     const deck = fakeDeck()
     let now = 1000
