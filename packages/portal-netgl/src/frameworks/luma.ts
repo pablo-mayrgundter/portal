@@ -61,6 +61,7 @@ import {
 } from '../layer-view'
 import type { NetGLTransport } from '../renderer'
 import type { NetGLReplayConfig } from '../replay'
+import { isIdentity, reprojection } from '../reproject'
 
 /** The slice of a luma.gl `WebGLDevice` the adapter uses. */
 export type LumaDeviceLike = {
@@ -267,6 +268,17 @@ export type DeckReceiverLayerConfig = DeckLayerBase & {
    * anyway. Default 1000 ms.
    */
   viewTimeoutMs?: number
+  /**
+   * Host reprojection: draw each guest frame for deck's current view, not
+   * the one it was rendered for, so the guest doesn't lag the globe while
+   * the camera moves. The adapter keeps the view it sent under each
+   * `viewId`, and the replay corrects the guest's `gl_Position` by
+   * C = VP_now · VP_frame⁻¹ (its vertex shaders are rewritten; see
+   * `reproject.ts` for what that can't correct). The frame's view is its
+   * frame-end's `viewId`, else the view in flight when it arrived. Default
+   * false.
+   */
+  reproject?: boolean
 }
 
 export type NetGLDeckLayerConfig = DeckImmediateLayerConfig | DeckReceiverLayerConfig
@@ -284,6 +296,19 @@ export type NetGLDeckLayerStats = {
   redrawsForced: number
   /** Redraws the adapter wanted but dropped, deck having drawn already. */
   redrawsFolded: number
+  /** Receiver with `reproject`: guest frames replayed with a correction other than the identity (re-runs included). */
+  reprojectedFrames: number
+}
+
+/** What the last guest replay was composed for (receiver with `reproject`). */
+export type NetGLDeckReprojection = {
+  /** The view the guest frame was drawn for, and its id (null: unknown, drawn uncorrected). */
+  viewId: number | null
+  from: NetGLLayerView | null
+  /** deck's view this time. */
+  to: NetGLLayerView
+  /** C = VP_to · VP_from⁻¹, column-major; null when no correction was applied. */
+  correction: NetGLMat4 | null
 }
 
 export type NetGLDeckLayer = {
@@ -293,6 +318,11 @@ export type NetGLDeckLayer = {
   readonly receiver: NetGLHostReceiver | null
   /** The view of the last deck frame the guest was drawn into. */
   readonly lastView: NetGLLayerView | null
+  /**
+   * Receiver with `reproject`: the correction of the last guest frame
+   * replayed (the last of the batch, if several drained at once), or null.
+   */
+  readonly lastReprojection: NetGLDeckReprojection | null
   readonly stats: NetGLDeckLayerStats
   /** Skip the guest while false. Setting it asks deck for a redraw. */
   enabled: boolean
@@ -367,7 +397,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
   const time = config.time ?? Date.now
   const toView = config.view ?? globeLayerView
   const restore = config.restore ?? 'luma-stack'
-  const stats: NetGLDeckLayerStats = { hostFrames: 0, guestFrames: 0, viewsSent: 0, lastMs: 0, redrawsForced: 0, redrawsFolded: 0 }
+  const stats: NetGLDeckLayerStats = { hostFrames: 0, guestFrames: 0, viewsSent: 0, lastMs: 0, redrawsForced: 0, redrawsFolded: 0, reprojectedFrames: 0 }
   const isImmediate = 'render' in config
   let enabled = true
   let lastView: NetGLLayerView | null = null
@@ -471,8 +501,46 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     onControl,
     onError: config.onError
   }
+  // Host reprojection (receiver only: a same-page guest draws for deck's
+  // own view, with no lag). The views sent, by id, while a frame for one
+  // may still be replayed; the view of this deck frame, set before the
+  // guest's replay; and the last view sent, for a frame-end without an id.
+  const reprojecting = !isImmediate && (config as DeckReceiverLayerConfig).reproject === true
+  const sentViews = new Map<number, NetGLLayerView>()
+  const SENT_VIEWS_KEPT = 16
+  let viewNow: NetGLLayerView | null = null
+  let lastReprojection: NetGLDeckReprojection | null = null
+  let lastSentId: number | null = null
+  const correctionFor = (id: number | null): NetGLMat4 | null => {
+    const to = viewNow
+    if (!to) return null
+    const from = id === null ? null : sentViews.get(id) ?? null
+    let correction: NetGLMat4 | null = null
+    if (from && from.frame === to.frame) {
+      const c = reprojection(from, to)
+      if (c && !isIdentity(c)) correction = c
+    }
+    if (correction) stats.reprojectedFrames += 1
+    lastReprojection = { viewId: from ? id : null, from, to, correction }
+    return correction
+  }
+
   const link = isImmediate ? makeNetGLImmediateLink(common) : null
-  const receiver = isImmediate ? null : makeNetGLHostReceiver({ ...common, transport: (config as DeckReceiverLayerConfig).transport })
+  const receiver = isImmediate
+    ? null
+    : makeNetGLHostReceiver({
+        ...common,
+        transport: (config as DeckReceiverLayerConfig).transport,
+        reproject: reprojecting
+          ? {
+              // The guest's own tag if it sends one; else, one view in
+              // flight at a time, the frame answers that one (or, if it
+              // timed out, the last sent).
+              frameView: (end) => (typeof end.viewId === 'number' ? end.viewId : inFlight ? viewId : lastSentId),
+              correction: correctionFor
+            }
+          : undefined
+      })
   const transport = link ? link.transport : (config as DeckReceiverLayerConfig).transport
 
   // Receiver: one `layer:view` in flight at a time.
@@ -496,6 +564,12 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     if (!forceView && lastSent && sameView(lastSent, view) && receiver.canRerun) return
     forceView = false
     const msg: NetGLLayerViewMessage = { type: 'layer:view', viewId: ++viewId, view }
+    // Kept before the post: a same-thread transport answers inside it.
+    lastSentId = viewId
+    if (reprojecting) {
+      sentViews.set(viewId, view)
+      if (sentViews.size > SENT_VIEWS_KEPT) sentViews.delete(sentViews.keys().next().value as number)
+    }
     receiver.post(msg)
     stats.viewsSent += 1
     lastSent = view
@@ -535,6 +609,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     // Same page: the guest renders every deck frame, so an invalidate only
     // needed the redraw.
     if (link) forceView = false
+    viewNow = view
     const t0 = performance.now()
     const run = (): void => {
       if (link) {
@@ -563,6 +638,9 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     stats,
     get lastView() {
       return lastView
+    },
+    get lastReprojection() {
+      return lastReprojection
     },
     get enabled() {
       return enabled

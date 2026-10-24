@@ -5,6 +5,7 @@
 // etc. on this side of the wire.
 
 import type { NetGLCall, NetGLEncodedValue } from './messages'
+import { NETGL_REPROJECT_UNIFORM, reprojectVertexShader } from './reproject'
 import { makeScreenPolicyState, type NetGLScreenPolicy } from './screen-policy'
 
 type TypedArrayCtor = new (
@@ -34,6 +35,27 @@ export type NetGLReplay = ((call: NetGLCall) => void) & {
    * draining each batch. Cheap; no GL calls.
    */
   invalidate(): void
+  /**
+   * With `reproject` on: the correction C (column-major 4×4, the guest's
+   * old clip space → the host's current one) for the guest's screen draws
+   * from here on, or null for none (identity). Draws into the guest's own
+   * framebuffers always get the identity. No GL calls: the uniform is set
+   * lazily, before each draw whose program doesn't have it yet.
+   */
+  setReprojection(correction: ArrayLike<number> | null): void
+  /** With `reproject` on: what the rewrite has done so far. */
+  readonly reprojectStats: NetGLReprojectStats
+}
+
+export type NetGLReprojectStats = {
+  /** Vertex shaders rewritten (and compiled) with the correction. */
+  shaders: number
+  /** Vertex shaders left as they were: no `void main()` found, or the rewrite didn't compile (then `fallbacks` too). */
+  skipped: number
+  /** Rewritten shaders that failed to compile here and were compiled again from the guest's own source. */
+  fallbacks: number
+  /** Screen draws made with a correction other than the identity. */
+  correctedDraws: number
 }
 
 export type NetGLReplayConfig = {
@@ -93,6 +115,17 @@ export type NetGLReplayConfig = {
    * across releases. Production code should leave this unset.
    */
   __debugTraceViewport?: (line: string) => void
+
+  /**
+   * Host reprojection (see `reproject.ts`): rewrite the guest's vertex
+   * shaders as they're sourced so that `gl_Position` is multiplied by a
+   * host-set correction, and apply `setReprojection`'s matrix to the
+   * guest's draws to the screen. Fragment shaders are untouched. Off by
+   * default: it changes the guest's shaders, and is only right for a guest
+   * whose screen draws are world-space geometry in the host's clip space
+   * (an overlay layer), not one that composites a full-screen pass.
+   */
+  reproject?: boolean
 }
 
 // WebGL constants we need at decode time. Hardcoded because we don't always
@@ -106,6 +139,8 @@ const GL_DEPTH = 0x1801
 const GL_DEPTH_STENCIL = 0x84F9
 const GL_BACK = 0x0405
 const GL_COLOR_ATTACHMENT0 = 0x8CE0
+const GL_VERTEX_SHADER = 0x8B31
+const GL_COMPILE_STATUS = 0x8B81
 
 type Rect = readonly [number, number, number, number]
 
@@ -124,6 +159,14 @@ const DRAW_CALLS = new Set<string>([
   'drawElementsInstanced',
   'drawRangeElements',
   ...CLEAR_CALLS
+])
+
+const GEOMETRY_DRAWS = new Set<string>([
+  'drawArrays',
+  'drawElements',
+  'drawArraysInstanced',
+  'drawElementsInstanced',
+  'drawRangeElements'
 ])
 
 // Methods every object inherits. The replay dispatches by name on the
@@ -163,6 +206,41 @@ export const makeNetGLReplay = (
 
   const policy = config.screen ? makeScreenPolicyState(receiver, config.screen) : null
   const clearMode = config.screen?.clear ?? 'pass'
+
+  // Host reprojection. The shader's type comes from createShader; a
+  // rewritten vertex shader keeps the guest's own source for the fallback.
+  // The uniform's location and the matrix version it holds are per
+  // program, and forgotten on each link (a link resets uniforms).
+  const reproject = config.reproject === true
+  const shaderTypes = new WeakMap<object, number>()
+  const rewritten = new WeakMap<object, string>()
+  const programVertex = new WeakMap<object, object>()
+  const programUniform = new WeakMap<object, { loc: WebGLUniformLocation | null; version: number }>()
+  let currentProgram: object | null = null
+  // Version 0 is the identity; each setReprojection with a matrix is new.
+  let correction: Float32Array | null = null
+  let correctionVersion = 0
+  let versions = 0
+  const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+  const reprojectStats: NetGLReprojectStats = { shaders: 0, skipped: 0, fallbacks: 0, correctedDraws: 0 }
+
+  // Before a geometry draw: give the current program the matrix this draw
+  // needs (C for the screen, identity for the guest's own targets).
+  const applyReprojection = (toScreen: boolean): void => {
+    const program = currentProgram
+    if (!program || !programVertex.has(program)) return
+    let u = programUniform.get(program)
+    if (!u) {
+      u = { loc: receiver.getUniformLocation(program as WebGLProgram, NETGL_REPROJECT_UNIFORM), version: -1 }
+      programUniform.set(program, u)
+    }
+    if (!u.loc) return
+    const version = toScreen && correction ? correctionVersion : 0
+    if (version !== 0) reprojectStats.correctedDraws += 1
+    if (u.version === version) return
+    receiver.uniformMatrix4fv(u.loc, false, version === 0 ? IDENTITY : correction!)
+    u.version = version
+  }
 
   // Map a rect in the sender's intended-viewport space into the applied
   // (remapped) viewport. Identity when no remap is in effect.
@@ -353,6 +431,31 @@ export const makeNetGLReplay = (
       scissorTestEnabled = call.name === 'enable'
     }
 
+    if (reproject) {
+      if (call.name === 'shaderSource') {
+        const shader = decodedArgs[0] as object | null
+        const src = decodedArgs[1] as string
+        const patched = shader && shaderTypes.get(shader) === GL_VERTEX_SHADER ? reprojectVertexShader(src) : null
+        if (shader && patched !== null) {
+          rewritten.set(shader, src)
+          decodedArgs = [shader, patched]
+        } else if (shader) {
+          if (shaderTypes.get(shader) === GL_VERTEX_SHADER) reprojectStats.skipped += 1
+          rewritten.delete(shader)
+        }
+      } else if (call.name === 'useProgram') {
+        currentProgram = decodedArgs[0] as object | null
+      } else if (call.name === 'attachShader') {
+        const [program, shader] = decodedArgs as [object, object]
+        if (program && shader && shaderTypes.get(shader) === GL_VERTEX_SHADER) {
+          if (rewritten.has(shader)) programVertex.set(program, shader)
+          else programVertex.delete(program)
+        }
+      } else if (GEOMETRY_DRAWS.has(call.name)) {
+        applyReprojection(currentDrawFb === null)
+      }
+    }
+
     if (policy && policy.intercept(call.name, decodedArgs)) return
 
     if (DRAW_CALLS.has(call.name)) {
@@ -392,6 +495,30 @@ export const makeNetGLReplay = (
       throw new Error(`NetGL replay: receiver has no method '${call.name}'`)
     }
     const result = method.apply(receiver, decodedArgs)
+
+    if (reproject) {
+      if (call.name === 'createShader' && result) {
+        shaderTypes.set(result as object, decodedArgs[0] as number)
+      } else if (call.name === 'compileShader') {
+        const shader = decodedArgs[0] as WebGLShader | null
+        const original = shader ? rewritten.get(shader) : undefined
+        if (shader && original !== undefined) {
+          // Once per shader: a rewrite that doesn't compile here goes back
+          // to the guest's own source, uncorrected but drawn.
+          if (receiver.getShaderParameter(shader, GL_COMPILE_STATUS)) {
+            reprojectStats.shaders += 1
+          } else {
+            rewritten.delete(shader)
+            reprojectStats.fallbacks += 1
+            reprojectStats.skipped += 1
+            receiver.shaderSource(shader, original)
+            receiver.compileShader(shader)
+          }
+        }
+      } else if (call.name === 'linkProgram') {
+        programUniform.delete(decodedArgs[0] as object)
+      }
+    }
 
     // A remapped screen viewport moves the scissor mapping with it.
     if (call.name === 'viewport' && currentDrawFb === null && config.remapScreenViewport) {
@@ -435,6 +562,19 @@ export const makeNetGLReplay = (
   return Object.assign(replay, {
     invalidate() {
       policy?.invalidate()
+    },
+    setReprojection(m: ArrayLike<number> | null) {
+      if (!m) {
+        correction = null
+        return
+      }
+      correction = new Float32Array(16)
+      for (let i = 0; i < 16; i += 1) correction[i] = m[i]
+      versions += 1
+      correctionVersion = versions
+    },
+    get reprojectStats() {
+      return reprojectStats
     }
   })
 }

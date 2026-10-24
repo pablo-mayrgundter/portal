@@ -164,7 +164,7 @@ export type NetGLGuestContext = {
    * rather than being cloned into the link's queue. Works across host
    * frames too: a guest drawn only in sub-frames can call it every time.
    */
-  subFrame(): void
+  subFrame(options?: Pick<NetGLEndFrameOptions, 'viewId'>): void
   /** Post the `netgl:ready` handshake. */
   announce(anchor: PortalAnchor, background?: ColorRGB): void
 }
@@ -175,6 +175,11 @@ export type NetGLEndFrameOptions = {
    * context has `checkpoints`).
    */
   checkpoint?: boolean
+  /**
+   * The `layer:view` this frame was drawn for (its `viewId`), carried on
+   * the frame-end so the host knows which view to compose it for.
+   */
+  viewId?: number
 }
 
 /** Host → guest: the `netgl:ready` handshake arrived. */
@@ -334,15 +339,15 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       }
     },
     endFrame(options = {}) {
-      const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
+      const frameEnd: NetGLFrameEnd = typeof options.viewId === 'number' ? { type: 'netgl:frame-end', viewId: options.viewId } : { type: 'netgl:frame-end' }
       postItem(frameEnd)
       flush()
       // The checkpoint starts the next frame: in wire 2 it waits in the
       // queue and leads the next batch.
       if (checkpoints && options.checkpoint !== false) recorder.checkpoint()
     },
-    subFrame() {
-      const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
+    subFrame(options = {}) {
+      const frameEnd: NetGLFrameEnd = typeof options.viewId === 'number' ? { type: 'netgl:frame-end', viewId: options.viewId } : { type: 'netgl:frame-end' }
       postItem(frameEnd)
       flush()
       if (checkpoints) recorder.deferCheckpoint()
