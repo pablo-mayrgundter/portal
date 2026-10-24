@@ -541,8 +541,9 @@ origin, posting NetGL into an allowed host is dropped by the source check.
   process in Chromium (site isolation), not on the host's main thread as
   the Cesium findings assume. Messages cross processes, so each guest
   frame costs serialisation on both sides plus IPC; the flow control (one
-  view in flight) still holds, but the latency isn't measured on a real
-  GPU yet.
+  view in flight) still holds. Per message, that cost was the whole
+  story under wire 1 (see "Wire protocol" below); it isn't measured on a
+  real GPU yet.
 - **Frames aren't tagged with their view.** `netgl:frame-end` carries no
   view id, so the host can't tell which view a frame was drawn for, and
   can't compose it pose-tagged (docs/portal-layers.md). While the camera
@@ -561,6 +562,156 @@ origin, posting NetGL into an allowed host is dropped by the source check.
   goes through a 2D canvas whose `getImageData` throws when tainted. Not a
   hole: a guest that uploads such images fails embedded even where WebGL
   would have refused them anyway. Its images must be CORS-enabled.
+
+## Wire protocol
+
+### Versions
+
+- **Wire 1** (0.5.0 and before): one `postMessage` per GL call and per
+  `netgl:frame-end`, everything structured-cloned.
+- **Wire 2** (0.6.0): a frame's stream items in one `netgl:batch`, over a
+  `MessageChannel` port where the host can hand one out, with only the
+  bytes each call reads, and the recorder's copies transferred.
+
+Negotiation rides the existing ready handshake, so mixed versions
+negotiate down and nothing new is needed to start:
+
+| guest → host | host → guest |
+|---|---|
+| `netgl:ready {anchor, background, wire: 2, port: 'stream' \| 'all', seq, session}` | `netgl:ready-ack {wire: min(2, guest's), seq, port?}` (the port transferred) |
+| first port message: `netgl:port {seq, after}` | |
+
+- A guest batches only after an ack that says `wire: 2`. A 0.5 host acks
+  without it, so a 0.6 guest talks wire 1 there. A 0.6 host reads a 0.5
+  guest's per-call messages as before. The same-page link
+  (`makeNetGLImmediateLink`) acks without a version, so its calls still
+  replay the moment they're recorded: zero lag, no copies.
+- `seq` is how many stream items the guest had posted on the window when
+  it sent that ready; `session` is random per page load, so a repeated
+  announcement (sent before the ack landed) gets an ack without a second
+  port, and a reload gets a new one.
+
+### Batches
+
+`{ type: 'netgl:batch', batch: [items...] }`, where an item is a
+`NetGLCall` or a `netgl:frame-end`. The guest context queues every item
+once wire 2 is agreed and posts the queue at each `endFrame()` /
+`subFrame()`, so a batch is: the checkpoint the last frame-end queued,
+any calls made between frames (async uploads), the frame's calls, its
+frame-end. The receiver hands each item to the same code a lone message
+went to, so every buffering rule above holds unchanged: frames concatenate
+between drains, a stale frame re-runs without uploads or handle-minting
+calls, a frame that deleted anything is never re-run, `onFrame` fires per
+frame-end (a batch with several sub-frames fires several times).
+
+What changes for the guest is lifetime: a queued call outlives the GL call
+that made it, and frameworks reuse scratch typed arrays (three.js's
+uniform uploads), so a held reference would ship the last values written.
+In wire 2 the recorder therefore copies every typed-array and ArrayBuffer
+argument when the call is recorded (`session.snapshot`), as the immediate
+link's closed path clones. The one argument it can't copy is an app's
+`ImageBitmap`, which the app may `close()` right after the upload: that
+call is posted at once, in a batch of its own (the recorder flags it
+`urgent`).
+
+### The port
+
+Each window message costs its receiver a fixed price whatever its size
+(below), and window messages to another process are routed through the
+browser; a `MessageChannel` is a direct pipe between the two renderers.
+On a wire-2 `netgl:ready` that asks for a port, the host creates a channel
+and transfers `port2` in the ack, posted with the guest's exact origin
+(`iframeTransport`'s `outputOrigin`). It never offers one with `'*'` (a
+sandboxed, opaque-origin guest, or a plain `windowTransport`): the port
+would go to whatever document is in the frame. Messages on the port need
+no origin check; only the verified origin ever held it.
+
+Ordering across the switch. Window messages and port messages are two
+queues, and nothing orders one against the other: calls the guest posted
+on the window just before it switched can arrive after its first batch on
+the port. The guest's first port message, `netgl:port {seq, after}`, says
+how many window items precede the switch; the host counts items it has
+read on the window since the ready numbered `seq`, and holds port messages
+until it has them all. Host to guest needs no count: a guest that asked
+for `'all'` gets the host's control over the port, and the host holds its
+own posts between offering the port and seeing it open (1 s, then the
+window), so none overtakes another.
+
+`'stream'` (the default) is for guests whose app listens on its own
+transport, as celestiary's layer page does: their stream and whatever
+they post through `guest.transport` go over the port, and the host keeps
+posting its views on the window. `'all'` is for guests that listen
+through `guest.transport` (the three.js overlay guest).
+
+### Slices and transfer
+
+The recorder ships only what a call reads (`trimSource`):
+
+- WebGL2's source-offset overloads become their plain form over the
+  referenced elements: `bufferData` / `bufferSubData` with `srcOffset` and
+  `length`, the `compressedTex*` uploads with `srcOffset` and
+  `srcLengthOverride`, `uniform*v` / `uniformMatrix*fv` with `srcOffset`
+  and `srcLength`, `tex(Sub)Image2D/3D` with `srcOffset`.
+- Uncompressed texture uploads from a typed array are cut after the last
+  byte they read, from the dimensions, format, type and the unpack state
+  (`UNPACK_ALIGNMENT`, `ROW_LENGTH`, `IMAGE_HEIGHT`, the skips), which the
+  recorder reads once from the shadow and then follows through
+  `pixelStorei`.
+- `vertexAttrib*v` keeps the 1 to 4 elements it reads.
+- An offset or length out of range is left as it was, so the receiver
+  rejects the same call the shadow did.
+
+Every buffer the recorder makes for a call (a slice, a snapshot copy, the
+pixels read from a DOM image) is listed with it, and the guest transfers
+it rather than cloning it. The app's own buffers are never transferred
+(they would be detached under the app); in wire 1 a whole-array argument
+is still cloned at post time, as before.
+
+### Findings (celestiary's orbits in a deck.gl globe, portal #39 Q29)
+
+Measured with the light deck.gl host of the orbits perf harness:
+celestiary's layer page (satellites, Starlink, Iridium, DSN) as a
+cross-site iframe, an 800×500 viewport, a 4 Hz clock, 15 s at rest and 15
+s of mouse drag, headless Chromium on SwiftShader, on a shared 4-core
+machine (load ~10, so absolute times are inflated; compare within a row).
+"Before" is portal-netgl 0.5.0 on the host with the guest on 0.3.0 (wire
+1); "after" is 0.6.0 on both.
+
+Two runs of each; ranges are the two medians.
+
+| | before | after, clock calls `deck.redraw()` | after, clock calls `requestGuestFrame()` |
+|---|---|---|---|
+| messages per guest frame | 187–188 | 1 | 1 |
+| KB per guest frame | 494 | 51 | 51 |
+| host deserialisation, ms per frame | 210–237 | 0.2 | 0.2 |
+| host main thread, ms/s at rest | 820–868 | 36–54 | 57–67 |
+| host main thread, ms/s dragging | 716–911 | 55–72 | 66–115 |
+| view → shown, ms at rest | 257–312 | 124–214 | 21–23 |
+| input → shown, ms dragging | 445–906 | 419–474 | 241–262 |
+| deck draws per guest frame, at rest | 1.9–2.0 | 2.0–2.2 | 1.0 |
+| deck draws per guest frame, dragging | 2.7–2.9 | 1.9 | 0.8–1.0 |
+
+(The host main thread at rest is a little higher with `requestGuestFrame`
+because the guest delivers more frames per second in the same window.)
+
+- **The per-message cost was the whole problem.** A wire-1 frame was ~187
+  messages (one per call, plus ~80 for the checkpoint), each about a
+  millisecond to deserialise on the host's main thread whatever its size:
+  ~240 ms of deserialisation per guest frame, the host main thread busy
+  80–99% of the time. One message per frame takes that to under half a
+  millisecond.
+- **Slices.** three.js asks for ranged uploads (`updateRanges` →
+  `bufferSubData(target, dst, src, srcOffset, count)`), but the recorder
+  shipped `src` whole. Trimming took a frame from ~494 KB to ~51 KB with
+  no change in the guest.
+- **Draws per guest frame.** With the host's clock calling `deck.redraw()`
+  each tick, deck draws twice per guest frame at rest: once for the tick
+  (the guest's last frame re-run) and once when the new frame lands.
+  Folding the adapter's redraw into one already done doesn't change that
+  at rest; `requestGuestFrame()` does, by not drawing for the tick at all.
+- **Still open:** the guest's own frame cost (its render, and the shadow
+  context drawing everything a second time) is now most of input →
+  shown on SwiftShader; see "No-draw shadow" in the open problems.
 
 ## Celestiary × Cesium: the plan
 
@@ -1063,7 +1214,11 @@ unchanged.
 ## Layout / where things live
 
 - `packages/portal-netgl/src/recorder.ts` — sender-side recorder Proxy
-  with encoder for handles, typed arrays, ArrayBuffers, image sources.
+  with encoder for handles, typed arrays, ArrayBuffers, image sources;
+  `trimSource` (only the bytes a call reads), snapshots and transfer
+  lists.
+- `packages/portal-netgl/src/messages.ts` — the wire's shapes: calls,
+  frame-ends, wire-2 batches and the port opener.
 - `packages/portal-netgl/src/replay.ts` — receiver-side replay engine,
   draw-FB tracking, viewport remap + post-bind re-issue.
 - `packages/portal-netgl/src/renderer.ts` — `createNetGLRenderer`:
@@ -1075,9 +1230,10 @@ unchanged.
 - `packages/portal-netgl/src/screen-policy.ts` — host-side stencil /
   blend / clear overrides for screen draws.
 - `packages/portal-netgl/src/guest-context.ts` — framework-agnostic guest
-  core.
+  core; the guest's side of wire 2 (queue, batches, the port).
 - `packages/portal-netgl/src/host-receiver.ts` — host frame buffering +
-  drain.
+  drain; the host's side of wire 2 (the port offer, ordering across the
+  switch).
 - `packages/portal-netgl/src/frameworks/cesium.ts` — Cesium shim.
 - `packages/portal-netgl/src/frameworks/luma.ts` — deck.gl / luma.gl host
   adapter: `attachNetGLDeckLayer`, `globeLayerView`, `withLumaState`.
