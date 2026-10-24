@@ -538,11 +538,32 @@ the correction forced off, 2,837 pixels differed and the guest's pixels
 overlapped the truth's not at all (several dots hid behind the globe's
 depth at their old positions).
 
+**Screen-space shaders opt in.** Wrapping corrects the shader's final
+`gl_Position`, so a vertex the shader moved by a pixel offset in the old
+clip space (a wide line's quad, a clip-space sprite) has the offset
+transformed too: under a zoom the line gets wider during the lag, and its
+quad isn't quite where the line is (the user saw it on the M2: the
+satellites co-moved with the globe and the DSN's line glyphs lagged
+slightly). Only the shader knows which of its clip positions are the
+view's and which are offsets, so the fix is a convention, not a smarter
+rewrite: a vertex shader that declares `uniform mat4 netgl_reproject;`
+isn't wrapped, the replay looks the uniform up and sets it before draws as
+for a wrapped one, and the shader multiplies each clip position it derives
+from the view by it before extruding. The guest gives the uniform the
+identity itself (three's `Matrix4()`), so the shader is unchanged standalone
+and on hosts that don't reproject; a reprojecting host records the guest's
+own lookups of the name (`getUniformLocation`) and drops its sets of it, so
+three's one upload of the identity can't overwrite C. `luma.test.ts` draws a
+6 px wide line for one view, composes it at another (a pan and a zoom in)
+and compares it with the guest's own frame for that view: opted in, 0 of
+202 pixels differ; wrapped, 25 do and the line is a pixel wider.
+
 **Limits.**
-- Only the position is corrected. Screen-space extrusion done in the
-  vertex shader against the old view (wide lines, clip-space sprites,
-  labels) is scaled slightly by C during the lag; point sizes are pixels
-  and are unaffected (celestiary's satellites are points). Choices the
+- Only the position is corrected, unless the shader opts in (above).
+  Screen-space extrusion done in a wrapped vertex shader against the old
+  view (wide lines, clip-space sprites, labels) is scaled slightly by C
+  during the lag; point sizes are pixels and are unaffected (celestiary's
+  satellites are points). Choices the
   guest made from the old eye stay (celestiary culls far-side dishes by
   the old view), and objects moving in time aren't moved: C is the
   camera's change only.

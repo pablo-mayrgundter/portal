@@ -5,7 +5,7 @@
 // etc. on this side of the wire.
 
 import type { NetGLCall, NetGLEncodedValue } from './messages'
-import { NETGL_REPROJECT_UNIFORM, reprojectVertexShader } from './reproject'
+import { NETGL_REPROJECT_UNIFORM, declaresReprojection, reprojectVertexShader } from './reproject'
 import { makeScreenPolicyState, type NetGLScreenPolicy } from './screen-policy'
 
 type TypedArrayCtor = new (
@@ -50,6 +50,10 @@ export type NetGLReplay = ((call: NetGLCall) => void) & {
 export type NetGLReprojectStats = {
   /** Vertex shaders rewritten (and compiled) with the correction. */
   shaders: number
+  /** Vertex shaders that declare `netgl_reproject` themselves and apply it (left unwrapped). */
+  optIn: number
+  /** The guest's own sets of `netgl_reproject` dropped (the host sets it). */
+  guestSetsDropped: number
   /** Vertex shaders left as they were: no `void main()` found, or the rewrite didn't compile (then `fallbacks` too). */
   skipped: number
   /** Rewritten shaders that failed to compile here and were compiled again from the guest's own source. */
@@ -214,6 +218,10 @@ export const makeNetGLReplay = (
   const reproject = config.reproject === true
   const shaderTypes = new WeakMap<object, number>()
   const rewritten = new WeakMap<object, string>()
+  // Vertex shaders that apply the correction themselves (the opt-in
+  // convention), and the locations the guest looked the uniform up at.
+  const optedIn = new WeakSet<object>()
+  const guestReprojectLocs = new WeakSet<object>()
   const programVertex = new WeakMap<object, object>()
   const programUniform = new WeakMap<object, { loc: WebGLUniformLocation | null; version: number }>()
   let currentProgram: object | null = null
@@ -222,7 +230,7 @@ export const makeNetGLReplay = (
   let correctionVersion = 0
   let versions = 0
   const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
-  const reprojectStats: NetGLReprojectStats = { shaders: 0, skipped: 0, fallbacks: 0, correctedDraws: 0 }
+  const reprojectStats: NetGLReprojectStats = { shaders: 0, optIn: 0, guestSetsDropped: 0, skipped: 0, fallbacks: 0, correctedDraws: 0 }
 
   // Before a geometry draw: give the current program the matrix this draw
   // needs (C for the screen, identity for the guest's own targets).
@@ -435,24 +443,35 @@ export const makeNetGLReplay = (
       if (call.name === 'shaderSource') {
         const shader = decodedArgs[0] as object | null
         const src = decodedArgs[1] as string
-        const patched = shader && shaderTypes.get(shader) === GL_VERTEX_SHADER ? reprojectVertexShader(src) : null
-        if (shader && patched !== null) {
+        const vertex = !!shader && shaderTypes.get(shader) === GL_VERTEX_SHADER
+        const optIn = vertex && declaresReprojection(src)
+        const patched = vertex && !optIn ? reprojectVertexShader(src) : null
+        rewritten.delete(shader as object)
+        optedIn.delete(shader as object)
+        if (shader && optIn) {
+          optedIn.add(shader)
+          reprojectStats.optIn += 1
+        } else if (shader && patched !== null) {
           rewritten.set(shader, src)
           decodedArgs = [shader, patched]
-        } else if (shader) {
-          if (shaderTypes.get(shader) === GL_VERTEX_SHADER) reprojectStats.skipped += 1
-          rewritten.delete(shader)
+        } else if (vertex) {
+          reprojectStats.skipped += 1
         }
       } else if (call.name === 'useProgram') {
         currentProgram = decodedArgs[0] as object | null
       } else if (call.name === 'attachShader') {
         const [program, shader] = decodedArgs as [object, object]
         if (program && shader && shaderTypes.get(shader) === GL_VERTEX_SHADER) {
-          if (rewritten.has(shader)) programVertex.set(program, shader)
+          if (rewritten.has(shader) || optedIn.has(shader)) programVertex.set(program, shader)
           else programVertex.delete(program)
         }
       } else if (GEOMETRY_DRAWS.has(call.name)) {
         applyReprojection(currentDrawFb === null)
+      } else if (call.name === 'uniformMatrix4fv' && decodedArgs[0] && guestReprojectLocs.has(decodedArgs[0] as object)) {
+        // An opted-in guest sets its own identity (for hosts that don't
+        // reproject); here the host owns the value.
+        reprojectStats.guestSetsDropped += 1
+        return
       }
     }
 
@@ -499,6 +518,8 @@ export const makeNetGLReplay = (
     if (reproject) {
       if (call.name === 'createShader' && result) {
         shaderTypes.set(result as object, decodedArgs[0] as number)
+      } else if (call.name === 'getUniformLocation' && result && decodedArgs[1] === NETGL_REPROJECT_UNIFORM) {
+        guestReprojectLocs.add(result as object)
       } else if (call.name === 'compileShader') {
         const shader = decodedArgs[0] as WebGLShader | null
         const original = shader ? rewritten.get(shader) : undefined

@@ -288,6 +288,26 @@ vertex outside the old clip volume on every axis, in front of the camera
 left alone. A rewrite that doesn't compile on the host falls back to the
 guest's own source. Off by default. DESIGN.md, "Host reprojection".
 
+**Screen-space shaders opt in** (0.6.4). A vertex shader that declares
+`uniform mat4 netgl_reproject;` itself isn't wrapped: the replay sets the
+uniform before its draws as for any other (C for the screen, the identity
+for the guest's own targets), and the shader applies it where it belongs,
+to each clip position it derives from the view, *before* any pixel offset:
+
+```glsl
+uniform mat4 netgl_reproject; // identity unless a host reprojects
+vec4 a = netgl_reproject * (projectionMatrix * modelViewMatrix * vec4(start, 1.0));
+vec4 b = netgl_reproject * (projectionMatrix * modelViewMatrix * vec4(end, 1.0));
+// ... extrude a and b by the line's width in pixels, as before
+```
+
+Give it the identity yourself (three: `netgl_reproject: { value: new
+Matrix4() }` in the material's `uniforms`), so the shader draws as before
+standalone and on a host that doesn't reproject; a reprojecting host drops
+the guest's own sets of it (`reprojectStats.guestSetsDropped`). A wide line
+written this way keeps its width and position through the lag; wrapped, its
+width is scaled by C's zoom.
+
 The adapter also speaks the rest of the layer control plane (shapes from
 RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):
 

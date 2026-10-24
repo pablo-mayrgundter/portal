@@ -10,7 +10,7 @@ import { globeLayerView, type DeckViewportLike } from './frameworks/luma'
 import { mat4Multiply, mat4TransformVec4, projectToPixels, sphereToEcef, type NetGLLayerView } from './layer-view'
 import type { NetGLCall } from './messages'
 import { makeNetGLReplay } from './replay'
-import { NETGL_REPROJECT_UNIFORM, isIdentity, mat4Invert, reprojectVertexShader, reprojection } from './reproject'
+import { NETGL_REPROJECT_UNIFORM, declaresReprojection, isIdentity, mat4Invert, reprojectVertexShader, reprojection } from './reproject'
 
 const VS_100 = `precision mediump float;
 attribute vec3 position;
@@ -274,5 +274,96 @@ describe('makeNetGLReplay({ reproject: true })', () => {
     for (const c of draws) replay(c)
     expect(log.filter((l) => l.name === 'shaderSource').map((l) => l.args[1])).toEqual([VS_100, 'void main() { gl_FragColor = vec4(1.0); }'])
     expect(log.filter((l) => l.name === 'uniformMatrix4fv' || l.name === 'getShaderParameter')).toHaveLength(0)
+  })
+})
+
+// --- The opt-in convention ------------------------------------------------
+
+const VS_OPT_IN = `uniform highp mat4 netgl_reproject;
+uniform mat4 mvp;
+attribute vec3 position;
+attribute vec3 aEnd;
+void main() {
+  vec4 a = netgl_reproject * (mvp * vec4(position, 1.0));
+  vec4 b = netgl_reproject * (mvp * vec4(aEnd, 1.0));
+  gl_Position = a + vec4(normalize(b.xy - a.xy) * 0.01 * a.w, 0.0, 0.0);
+}`
+
+describe('declaresReprojection — a guest that applies netgl_reproject itself', () => {
+  it('recognises the declaration, with or without a precision, and not in a comment or another name', () => {
+    expect(declaresReprojection(VS_OPT_IN)).toBe(true)
+    expect(declaresReprojection('uniform mat4 netgl_reproject;\nvoid main() {}')).toBe(true)
+    expect(declaresReprojection('uniform  mediump  mat4  netgl_reproject ;')).toBe(true)
+    expect(declaresReprojection('// uniform mat4 netgl_reproject;\nvoid main() {}')).toBe(false)
+    expect(declaresReprojection('uniform mat4 netgl_reproject2;')).toBe(false)
+    expect(declaresReprojection(VS_100)).toBe(false)
+    expect(reprojectVertexShader(VS_OPT_IN)).toBeNull()
+  })
+})
+
+describe('makeNetGLReplay({ reproject: true }) — opted-in shaders', () => {
+  const C = [1.01, 0, 0, 0, 0, 0.99, 0, 0, 0, 0, 1, 0, 0.02, -0.01, 0, 1]
+  const optInSetup: NetGLCall[] = [
+    { name: 'createShader', args: [VERTEX], returnId: 11 },
+    { name: 'shaderSource', args: [h(11), VS_OPT_IN] },
+    { name: 'compileShader', args: [h(11)] },
+    { name: 'createShader', args: [FRAGMENT], returnId: 12 },
+    { name: 'shaderSource', args: [h(12), 'void main() { gl_FragColor = vec4(1.0); }'] },
+    { name: 'compileShader', args: [h(12)] },
+    { name: 'createProgram', args: [], returnId: 13 },
+    { name: 'attachShader', args: [h(13), h(11)] },
+    { name: 'attachShader', args: [h(13), h(12)] },
+    { name: 'linkProgram', args: [h(13)] },
+    // The guest's own lookup and its identity (three's Matrix4 default).
+    { name: 'getUniformLocation', args: [h(13), NETGL_REPROJECT_UNIFORM], returnId: 14 }
+  ]
+  const guestIdentity: NetGLCall = { name: 'uniformMatrix4fv', args: [h(14), false, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]] }
+  const optInDraw: NetGLCall[] = [{ name: 'useProgram', args: [h(13)] }, guestIdentity, { name: 'drawArrays', args: [0, 0, 6] }]
+
+  it('is left unwrapped, gets C before its screen draws, and the guest\'s own set is dropped', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of optInSetup) replay(c)
+    expect(log.filter((l) => l.name === 'shaderSource').map((l) => l.args[1])[0]).toBe(VS_OPT_IN)
+    // No compile check for a source the replay didn't change.
+    expect(log.filter((l) => l.name === 'getShaderParameter')).toHaveLength(0)
+    replay.setReprojection(C)
+    log.length = 0
+    for (const c of optInDraw) replay(c)
+    const sets = log.filter((l) => l.name === 'uniformMatrix4fv')
+    expect(sets).toHaveLength(1)
+    expect(sets[0].args[0]).toEqual({ loc: 'netgl' }) // the replay's own lookup
+    expect(Array.from(sets[0].args[2] as Float32Array)).toEqual(Array.from(Float32Array.from(C)))
+    expect(replay.reprojectStats).toMatchObject({ shaders: 0, optIn: 1, guestSetsDropped: 1, correctedDraws: 1 })
+  })
+
+  it('gets the identity when there is no correction', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of optInSetup) replay(c)
+    for (const c of optInDraw) replay(c)
+    const sets = log.filter((l) => l.name === 'uniformMatrix4fv')
+    expect(sets).toHaveLength(1)
+    expect(isIdentity(Array.from(sets[0].args[2] as Float32Array))).toBe(true)
+  })
+
+  it('an ordinary shader beside it is still wrapped', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of [...setup, ...optInSetup]) replay(c)
+    const sources = log.filter((l) => l.name === 'shaderSource').map((l) => l.args[1] as string)
+    expect(sources[0]).toContain('netgl_main')
+    expect(sources[2]).toBe(VS_OPT_IN)
+    expect(replay.reprojectStats).toMatchObject({ shaders: 1, optIn: 1 })
+  })
+
+  it('without reproject, the guest\'s own identity goes through', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl)
+    for (const c of [...optInSetup, ...optInDraw]) replay(c)
+    const sets = log.filter((l) => l.name === 'uniformMatrix4fv')
+    expect(sets).toHaveLength(1)
+    // The guest's own call, as it made it (a plain array, not the replay's Float32Array).
+    expect(Array.isArray(sets[0].args[2])).toBe(true)
   })
 })

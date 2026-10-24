@@ -446,3 +446,135 @@ describe('attachNetGLDeckLayer({ reproject }) — the guest frame follows deck\'
     expect(layer.stats.reprojectedFrames).toBe(0)
   })
 })
+
+// --- The opt-in convention: a screen-space wide line --------------------
+
+// A wide line as three's ShaderMaterial draws one: both endpoints to clip
+// space, then a quad extruded by a width in pixels, perpendicular to the
+// segment on screen. With `optIn` the shader declares `netgl_reproject`
+// and corrects each endpoint before the extrusion; without, the replay
+// wraps its main and corrects the extruded corners instead.
+const wideLineVS = (optIn: boolean): string => `
+${optIn ? 'uniform mat4 netgl_reproject;' : ''}
+uniform float uWidth;
+uniform vec2 uResolution;
+attribute vec3 aEnd;
+attribute vec2 aSide;
+void main() {
+  vec4 a = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 b = projectionMatrix * modelViewMatrix * vec4(aEnd, 1.0);
+  ${optIn ? 'a = netgl_reproject * a; b = netgl_reproject * b;' : ''}
+  vec2 sa = a.xy / a.w * uResolution * 0.5;
+  vec2 sb = b.xy / b.w * uResolution * 0.5;
+  vec2 dir = normalize(sb - sa);
+  vec2 n = vec2(-dir.y, dir.x);
+  vec4 p = aSide.x < 0.5 ? a : b;
+  p.xy += n * aSide.y * uWidth / uResolution * p.w;
+  gl_Position = p;
+}`
+
+describe('attachNetGLDeckLayer({ reproject }) — a guest shader that applies netgl_reproject itself', () => {
+  let dom: JSDOM
+  beforeAll(() => {
+    dom = initDom()
+  })
+
+  const run = async (optIn: boolean) => {
+    const host = await makeLumaHost(dom)
+    let viewport = makeGlobe({ longitude: 0, latitude: 0, zoom: 0.3, pitch: 0, bearing: 0 })
+    const deck = makeFakeDeck(host, viewport)
+    deck.getViewports = () => [viewport]
+    const pair = queuedPair()
+    const layer = attachNetGLDeckLayer(deck, { device: host.device, transport: pair.host, time: () => 0, reproject: true })
+    const R = 6370972
+    const p0 = sphereToEcef(-1, -4, 2e5, R)
+    const p1 = sphereToEcef(9, 6, 2e5, R)
+    // Every vertex carries both endpoints; aSide picks the end (x) and the side (y).
+    const starts = [...p0, ...p0, ...p0, ...p0]
+    const ends = [...p1, ...p1, ...p1, ...p1]
+    const geometry = new THREE.BufferGeometry()
+      .setAttribute('position', new THREE.Float32BufferAttribute(starts, 3))
+      .setAttribute('aEnd', new THREE.Float32BufferAttribute(ends, 3))
+      .setAttribute('aSide', new THREE.Float32BufferAttribute([0, -1, 0, 1, 1, 1, 1, -1], 2))
+      .setIndex([0, 1, 2, 0, 2, 3])
+    const uniforms: Record<string, THREE.IUniform> = { uWidth: { value: 6 }, uResolution: { value: new THREE.Vector2(W, H) } }
+    // The guest's own identity, so it draws on a host that doesn't reproject.
+    if (optIn) uniforms.netgl_reproject = { value: new THREE.Matrix4() }
+    const material = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: wideLineVS(optIn),
+      fragmentShader: 'void main() { gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); }',
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    })
+    const line = new THREE.Mesh(geometry, material)
+    line.frustumCulled = false
+    const scene = new THREE.Scene()
+    scene.add(line)
+    const shadowCanvas = { getContext: () => makeCtx(), style: {}, width: 1, height: 1 } as unknown as HTMLCanvasElement
+    const guest = makeNetGLThreeOverlayGuest({ WebGLRenderer: THREE.WebGLRenderer, scene, camera: new THREE.PerspectiveCamera(), transport: pair.guest, canvas: shadowCanvas })
+    guest.start()
+    pair.flush()
+    deck.frame()
+    pair.flush() // the first frame (never re-run)
+    deck.frame()
+    pair.flush() // the frame for A, undrained
+    // A pan and a zoom in: the line moves and gets longer, its width doesn't.
+    viewport = makeGlobe({ longitude: 4, latitude: 2, zoom: 0.55, pitch: 0, bearing: 0 })
+    deck.frame() // A's frame, composed at B
+    const lagged = host.read()
+    const corrected = layer.lastReprojection?.correction !== null
+    pair.flush() // the guest's own frame for B
+    deck.frame()
+    const truth = host.read()
+    const rs = layer.receiver!.replay.reprojectStats
+    layer.detach()
+    guest.stop()
+    return { lagged, truth, corrected, rs }
+  }
+
+  const magenta = (px: Uint8Array, i: number): boolean => px[i] === 255 && px[i + 1] === 0 && px[i + 2] === 255
+  const compare = (a: Uint8Array, b: Uint8Array) => {
+    let onA = 0, onB = 0, both = 0
+    for (let i = 0; i < a.length; i += 4) {
+      const x = magenta(a, i)
+      const y = magenta(b, i)
+      onA += x ? 1 : 0
+      onB += y ? 1 : 0
+      both += x && y ? 1 : 0
+    }
+    return { onA, onB, both, differ: onA + onB - 2 * both }
+  }
+  // The line's width across, in pixels: the run of line pixels in the
+  // middle column, measured perpendicular to the line by its slope.
+  const columnRun = (px: Uint8Array): number => {
+    const x = W / 2
+    let n = 0
+    for (let y = 0; y < H; y += 1) if (magenta(px, (y * W + x) * 4)) n += 1
+    return n
+  }
+
+  it('opted in: the shader is left unwrapped, gets C, and its frame composed at the new view matches the guest\'s own', async () => {
+    const { lagged, truth, corrected, rs } = await run(true)
+    expect(corrected).toBe(true)
+    expect(rs.optIn).toBeGreaterThan(0)
+    // The guest's own identity was dropped, not drawn with.
+    expect(rs.guestSetsDropped).toBeGreaterThan(0)
+    const c = compare(lagged, truth)
+    expect(c.onB).toBeGreaterThan(40)
+    // Same pixels to within the edges' rounding, and the same width.
+    expect(c.differ).toBeLessThanOrEqual(Math.ceil(c.onB * 0.03))
+    expect(Math.abs(columnRun(lagged) - columnRun(truth))).toBeLessThanOrEqual(1)
+  })
+
+  it('control: wrapped, C after the extrusion scales the width', async () => {
+    const { lagged, truth, corrected, rs } = await run(false)
+    expect(corrected).toBe(true)
+    expect(rs.optIn).toBe(0)
+    const c = compare(lagged, truth)
+    // Centred right but too wide (C's zoom applied to the pixel offset too).
+    expect(columnRun(lagged)).toBeGreaterThan(columnRun(truth))
+    expect(c.differ).toBeGreaterThan(Math.ceil(c.onB * 0.03))
+  })
+})
