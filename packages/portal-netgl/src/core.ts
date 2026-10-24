@@ -9,6 +9,11 @@ export { makeNetGLProxy, type NetGLProxyConfig } from './proxy'
 export {
   makeNetGLRecorder,
   makeNetGLRecorderSession,
+  trimSource,
+  unpackExtent,
+  DEFAULT_UNPACK,
+  type NetGLRecorderPost,
+  type NetGLUnpackState,
   type NetGLRecorderSession,
   type NetGLRecorderSessionOptions
 } from './recorder'
@@ -26,6 +31,7 @@ export {
   type NetGLGuestContext,
   type NetGLGuestContextConfig,
   type NetGLEndFrameOptions,
+  type NetGLGuestWire,
   type NetGLReadyMessage,
   type NetGLReadyAckMessage
 } from './guest-context'
@@ -37,7 +43,8 @@ export {
 export {
   makeNetGLHostReceiver,
   type NetGLHostReceiver,
-  type NetGLHostReceiverConfig
+  type NetGLHostReceiverConfig,
+  type NetGLHostWire
 } from './host-receiver'
 export {
   makeNetGLCesiumGuest,
@@ -51,9 +58,12 @@ export type {
   NetGLCall,
   NetGLEncodedValue,
   NetGLFrameEnd,
-  NetGLWireMessage
+  NetGLWireMessage,
+  NetGLBatch,
+  NetGLStreamItem,
+  NetGLPortOpenMessage
 } from './messages'
-export { isNetGLCall, isNetGLFrameEnd } from './messages'
+export { isNetGLCall, isNetGLFrameEnd, isNetGLBatch, NETGL_WIRE_VERSION } from './messages'
 export type {
   ColorRGB,
   Mat4,
