@@ -58,7 +58,7 @@ import {
 } from './messages'
 import type { NetGLReadyAckMessage, NetGLReadyMessage } from './guest-context'
 import type { NetGLTransport } from './renderer'
-import { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig } from './replay'
+import { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig, type NetGLViewportRemap } from './replay'
 
 // Skipped when re-running a stale frame: the data is already resident.
 const UPLOADS = new Set<string>([
@@ -133,6 +133,15 @@ export type NetGLReceiverReprojectConfig = {
    * Called at drain time, once per frame in the batch.
    */
   correction: (viewId: number | null) => ArrayLike<number> | null
+  /**
+   * The viewport a frame drawn for `viewId` was drawn at, and the host's
+   * current one, when they differ (the drawing buffer was resized, or its
+   * pixel ratio changed, since): the frame's screen viewport and scissor
+   * rects are mapped from one onto the other (`replay.setViewportRemap`).
+   * Null, or omitted, for none. Called at drain time after `correction`,
+   * once per frame in the batch.
+   */
+  viewport?: (viewId: number | null) => NetGLViewportRemap | null
 }
 
 /** The wire the receiver and its guest agreed on. */
@@ -393,6 +402,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       // Each frame's correction, before its first call.
       while (reprojectConfig && m < marks.length && marks[m].at <= i) {
         replay.setReprojection(reprojectConfig.correction(marks[m].viewId))
+        if (reprojectConfig.viewport) replay.setViewportRemap(reprojectConfig.viewport(marks[m].viewId))
         m += 1
       }
       const call = batch[i]
@@ -407,7 +417,10 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
         }
       }
     }
-    if (reprojectConfig) replay.setReprojection(null)
+    if (reprojectConfig) {
+      replay.setReprojection(null)
+      replay.setViewportRemap(null)
+    }
   }
 
   return {

@@ -152,3 +152,127 @@ describe('makeNetGLReplay viewport remap', () => {
     expect(received).toEqual([[50, 60, 700, 800]])
   })
 })
+
+// A frame drawn for one viewport composed into another (a reprojecting
+// host whose drawing buffer changed size since the guest drew: a resize,
+// a pixel-ratio change). `setViewportRemap` maps the frame's screen rects.
+describe('makeNetGLReplay setViewportRemap', () => {
+  const GL_FRAMEBUFFER = 0x8D40
+  const GL_SCISSOR_TEST = 0x0C11
+  const rects = (calls: CallLog[], name: string) => calls.filter((c) => c.name === name).map((c) => c.args)
+  const lastRect = (calls: CallLog[], name: string) => rects(calls, name).slice(-1)[0]
+  const fbo = (replay: ReturnType<typeof makeNetGLReplay>) => replay({ name: 'createFramebuffer', args: [], returnId: 1 } as NetGLCall)
+
+  it('maps screen viewport and scissor rects from the frame\'s viewport onto the current one', () => {
+    const { gl, calls } = makeMockGl()
+    const replay = makeNetGLReplay(gl as unknown as WebGL2RenderingContext)
+    replay.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 100, 50] })
+    replay({ name: 'viewport', args: [0, 0, 200, 100] } as NetGLCall)
+    replay({ name: 'enable', args: [GL_SCISSOR_TEST] } as NetGLCall)
+    replay({ name: 'scissor', args: [20, 10, 40, 20] } as NetGLCall)
+    // A sub-viewport (three's setViewport for one view of several).
+    replay({ name: 'viewport', args: [100, 50, 100, 50] } as NetGLCall)
+    expect(rects(calls, 'viewport')).toEqual([[0, 0, 100, 50], [50, 25, 50, 25]])
+    expect(rects(calls, 'scissor')[0]).toEqual([10, 5, 20, 10])
+    // The scissor is re-issued after each mapped viewport, still mapped.
+    expect(lastRect(calls, 'scissor')).toEqual([10, 5, 20, 10])
+  })
+
+  it('an offset viewport: the frame\'s rect lands on the current one exactly', () => {
+    const { gl, calls } = makeMockGl()
+    const replay = makeNetGLReplay(gl as unknown as WebGL2RenderingContext)
+    replay.setViewportRemap({ from: [20, 10, 1600, 1000], to: [10, 5, 800, 500] })
+    replay({ name: 'viewport', args: [20, 10, 1600, 1000] } as NetGLCall)
+    expect(rects(calls, 'viewport')).toEqual([[10, 5, 800, 500]])
+  })
+
+  it('leaves the guest\'s own framebuffers alone, and maps the screen again on the bind back', () => {
+    const { gl, calls } = makeMockGl()
+    const replay = makeNetGLReplay(gl as unknown as WebGL2RenderingContext)
+    replay.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 100, 50] })
+    fbo(replay)
+    replay({ name: 'bindFramebuffer', args: [GL_FRAMEBUFFER, { __netgl_handle: 1 }] } as NetGLCall)
+    replay({ name: 'viewport', args: [0, 0, 256, 256] } as NetGLCall)
+    replay({ name: 'scissor', args: [0, 0, 128, 128] } as NetGLCall)
+    replay({ name: 'drawArrays', args: [4, 0, 3] } as NetGLCall)
+    expect(rects(calls, 'viewport')).toEqual([[0, 0, 256, 256]])
+    expect(rects(calls, 'scissor')).toEqual([[0, 0, 128, 128]])
+    replay({ name: 'bindFramebuffer', args: [GL_FRAMEBUFFER, null] } as NetGLCall)
+    replay({ name: 'viewport', args: [0, 0, 200, 100] } as NetGLCall)
+    // The bind back to the screen re-issues the (RT-sized) intended
+    // viewport, mapped; then the guest's own, mapped.
+    expect(rects(calls, 'viewport').slice(1)).toEqual([[0, 0, 128, 128], [0, 0, 100, 50]])
+    // ... and back into the target: its own rect again.
+    replay({ name: 'bindFramebuffer', args: [GL_FRAMEBUFFER, { __netgl_handle: 1 }] } as NetGLCall)
+    expect(lastRect(calls, 'viewport')).toEqual([0, 0, 200, 100])
+  })
+
+  it('the same size, or none: the calls are exactly those of a replay without it', () => {
+    const stream: NetGLCall[] = [
+      { name: 'viewport', args: [0, 0, 200, 100] },
+      { name: 'enable', args: [GL_SCISSOR_TEST] },
+      { name: 'scissor', args: [20, 10, 40, 20] },
+      { name: 'drawArrays', args: [4, 0, 3] },
+      { name: 'createFramebuffer', args: [], returnId: 1 },
+      { name: 'bindFramebuffer', args: [GL_FRAMEBUFFER, { __netgl_handle: 1 }] },
+      { name: 'viewport', args: [0, 0, 64, 64] },
+      { name: 'drawArrays', args: [4, 0, 3] },
+      { name: 'bindFramebuffer', args: [GL_FRAMEBUFFER, null] },
+      { name: 'viewport', args: [0, 0, 200, 100] },
+      { name: 'drawArrays', args: [4, 0, 3] }
+    ] as NetGLCall[]
+    const runWith = (set: (r: ReturnType<typeof makeNetGLReplay>) => void) => {
+      const { gl, calls } = makeMockGl()
+      const replay = makeNetGLReplay(gl as unknown as WebGL2RenderingContext)
+      set(replay)
+      for (const c of stream) replay(c)
+      replay.setViewportRemap(null)
+      replay({ name: 'drawArrays', args: [4, 0, 3] } as NetGLCall)
+      return calls
+    }
+    const plain = runWith(() => {})
+    expect(runWith((r) => r.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 200, 100] }))).toEqual(plain)
+    expect(runWith((r) => r.setViewportRemap(null))).toEqual(plain)
+  })
+
+  it('a frame that sets no viewport of its own is mapped too, and the next frame unmapped', () => {
+    const { gl, calls } = makeMockGl()
+    const replay = makeNetGLReplay(gl as unknown as WebGL2RenderingContext)
+    replay({ name: 'viewport', args: [0, 0, 200, 100] } as NetGLCall)
+    replay({ name: 'enable', args: [GL_SCISSOR_TEST] } as NetGLCall)
+    replay({ name: 'scissor', args: [20, 10, 40, 20] } as NetGLCall)
+    const before = calls.length
+    // The next frame was drawn at 200x100 and lands in a 100x50 buffer;
+    // the guest's state cache sends no viewport.
+    replay.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 100, 50] })
+    replay({ name: 'drawArrays', args: [4, 0, 3] } as NetGLCall)
+    expect(calls.slice(before).map((c) => [c.name, ...c.args])).toEqual([
+      ['viewport', 0, 0, 100, 50],
+      ['scissor', 10, 5, 20, 10],
+      ['drawArrays', 4, 0, 3]
+    ])
+    const mid = calls.length
+    replay.setViewportRemap(null)
+    replay({ name: 'drawArrays', args: [4, 0, 3] } as NetGLCall)
+    expect(calls.slice(mid).map((c) => [c.name, ...c.args])).toEqual([
+      ['viewport', 0, 0, 200, 100],
+      ['scissor', 20, 10, 40, 20],
+      ['drawArrays', 4, 0, 3]
+    ])
+  })
+
+  it('a door-fit remap sees the frame-mapped rect', () => {
+    const { gl, calls } = makeMockGl()
+    const received: Array<[number, number, number, number]> = []
+    const replay = makeNetGLReplay(gl as unknown as WebGL2RenderingContext, {
+      remapScreenViewport: (x, y, w, h) => {
+        received.push([x, y, w, h])
+        return [x + 1, y + 1, w, h]
+      }
+    })
+    replay.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 100, 50] })
+    replay({ name: 'viewport', args: [0, 0, 200, 100] } as NetGLCall)
+    expect(received).toEqual([[0, 0, 100, 50]])
+    expect(rects(calls, 'viewport')).toEqual([[1, 1, 100, 50]])
+  })
+})

@@ -60,7 +60,7 @@ import {
   type NetGLMat4
 } from '../layer-view'
 import type { NetGLTransport } from '../renderer'
-import type { NetGLReplayConfig } from '../replay'
+import type { NetGLReplayConfig, NetGLViewportRemap } from '../replay'
 import { isIdentity, reprojection } from '../reproject'
 
 /** The slice of a luma.gl `WebGLDevice` the adapter uses. */
@@ -275,8 +275,12 @@ export type DeckReceiverLayerConfig = DeckLayerBase & {
    * `viewId`, and the replay corrects the guest's `gl_Position` by
    * C = VP_now · VP_frame⁻¹ (its vertex shaders are rewritten; see
    * `reproject.ts` for what that can't correct). The frame's view is its
-   * frame-end's `viewId`, else the view in flight when it arrived. Default
-   * false.
+   * frame-end's `viewId`, else the view in flight when it arrived. When
+   * the frame's view had another viewport than deck's now (the drawing
+   * buffer was resized, or its pixel ratio changed, since: netmap drops to
+   * `useDevicePixels: 1` while the camera moves), the guest's screen
+   * viewport and scissor are mapped from that one onto deck's, so the
+   * frame isn't drawn magnified from a corner. Default false.
    */
   reproject?: boolean
 }
@@ -298,6 +302,8 @@ export type NetGLDeckLayerStats = {
   redrawsFolded: number
   /** Receiver with `reproject`: guest frames replayed with a correction other than the identity (re-runs included). */
   reprojectedFrames: number
+  /** Receiver with `reproject`: guest frames replayed into a viewport other than the one they were drawn at (re-runs included). */
+  remappedFrames: number
 }
 
 /** What the last guest replay was composed for (receiver with `reproject`). */
@@ -309,6 +315,11 @@ export type NetGLDeckReprojection = {
   to: NetGLLayerView
   /** C = VP_to · VP_from⁻¹, column-major; null when no correction was applied. */
   correction: NetGLMat4 | null
+  /**
+   * The frame's viewport and deck's, when they differed and the guest's
+   * screen rects were mapped from one onto the other; else null.
+   */
+  viewport: { from: NetGLLayerView['viewport']; to: NetGLLayerView['viewport'] } | null
 }
 
 export type NetGLDeckLayer = {
@@ -397,7 +408,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
   const time = config.time ?? Date.now
   const toView = config.view ?? globeLayerView
   const restore = config.restore ?? 'luma-stack'
-  const stats: NetGLDeckLayerStats = { hostFrames: 0, guestFrames: 0, viewsSent: 0, lastMs: 0, redrawsForced: 0, redrawsFolded: 0, reprojectedFrames: 0 }
+  const stats: NetGLDeckLayerStats = { hostFrames: 0, guestFrames: 0, viewsSent: 0, lastMs: 0, redrawsForced: 0, redrawsFolded: 0, reprojectedFrames: 0, remappedFrames: 0 }
   const isImmediate = 'render' in config
   let enabled = true
   let lastView: NetGLLayerView | null = null
@@ -521,8 +532,21 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
       if (c && !isIdentity(c)) correction = c
     }
     if (correction) stats.reprojectedFrames += 1
-    lastReprojection = { viewId: from ? id : null, from, to, correction }
+    lastReprojection = { viewId: from ? id : null, from, to, correction, viewport: null }
     return correction
+  }
+  // A frame drawn at another viewport than deck's now (a resize, a pixel
+  // ratio change): its screen rects map from that one onto this one. C
+  // covers clip space, not the viewport the guest's gl.viewport names.
+  const viewportFor = (id: number | null): NetGLViewportRemap | null => {
+    const to = viewNow
+    const from = id === null ? null : sentViews.get(id) ?? null
+    if (!to || !from || !(from.viewport[2] > 0 && from.viewport[3] > 0)) return null
+    const [a, b] = [from.viewport, to.viewport]
+    if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3]) return null
+    stats.remappedFrames += 1
+    if (lastReprojection && lastReprojection.to === to) lastReprojection.viewport = { from: a, to: b }
+    return { from: a, to: b }
   }
 
   const link = isImmediate ? makeNetGLImmediateLink(common) : null
@@ -537,7 +561,8 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
               // flight at a time, the frame answers that one (or, if it
               // timed out, the last sent).
               frameView: (end) => (typeof end.viewId === 'number' ? end.viewId : inFlight ? viewId : lastSentId),
-              correction: correctionFor
+              correction: correctionFor,
+              viewport: viewportFor
             }
           : undefined
       })

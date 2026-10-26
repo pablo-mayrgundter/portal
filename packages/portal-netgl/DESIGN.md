@@ -558,6 +558,38 @@ three's one upload of the identity can't overwrite C. `luma.test.ts` draws a
 and compares it with the guest's own frame for that view: opted in, 0 of
 202 pixels differ; wrapped, 25 do and the line is a pixel wider.
 
+**A resize or a pixel-ratio change** (0.6.5). C is clip space; the
+pixels a frame lands on are its `gl.viewport`, which the guest set from
+the view it drew for (`view.viewport`, in the host's drawing-buffer pixels
+at send time). netmap's `?movedpr=1` drops deck to `useDevicePixels: 1`
+while the camera moves (the M2's ratio is 2) and back 180 ms after it
+stops, so the drawing buffer halves during a move; the guest's frames for
+the old, bigger view (and the re-runs of the last one) replayed their
+2W×2H viewport into the W×H buffer, drawn twice the size from the
+bottom-left corner: the satellites "jumped far off the globe during the
+move, then landed back". A window resize with the layer on did the same
+for a frame or two. Now, when the view a frame was drawn for (by `viewId`,
+as for C) has another viewport than deck's now, the adapter tells the
+replay (`setViewportRemap({ from, to })`, through the receiver's
+`reproject.viewport`) and each of the frame's screen viewport and scissor
+rects is mapped by the scale (to.w/from.w, to.h/from.h) and offset that
+take `from` onto `to`, edges rounded, before any door-fit remap sees it.
+That is the same seam as door-fit and goes through the same rules: rects
+for the guest's own framebuffers pass through (as C is the identity
+there), and a bind back to the screen re-issues the viewport mapped. When
+the mapping changes between two frames of a batch, the replay issues the
+screen viewport and scissor again before the next frame's first call, so a
+frame whose state cache sends no viewport is mapped too. With the same
+viewport nothing is mapped and the calls are exactly 0.6.4's. It needs the
+frame-to-view mapping, so only with `reproject`. On headless-gl
+(`luma.test.ts`) a quad drawn for a 2× view and composed into a 1× buffer
+is pixel-identical to the guest's own 1× frame (0 of 1,385 pixels differ;
+unmapped, 1,215 differ and its box runs off the top-right), with a pan as
+well (0 of 1,362), and a 1× frame into a 2× buffer (0 of 5,720); rasterising
+the same clip coordinates in the same viewport gives the same pixels.
+`stats.remappedFrames` counts them and `lastReprojection.viewport` names
+the two rects.
+
 **Limits.**
 - Only the position is corrected, unless the shader opts in (above).
   Screen-space extrusion done in a wrapped vertex shader against the old
@@ -569,7 +601,11 @@ and compares it with the guest's own frame for that view: opted in, 0 of
   camera's change only.
 - Depth written in the fragment shader (`gl_FragDepth`, logarithmic depth)
   isn't corrected. celestiary's layer page uses three's default depth.
-- A resize isn't followed: the guest's frame keeps its own `gl.viewport`.
+- After a resize or a pixel-ratio change, positions are mapped (above) but
+  pixel sizes aren't: points (`gl_PointSize`) and line widths in a frame
+  drawn at ratio 2 are twice as big composed at 1, for the frames until
+  the guest's own lands. `gl.blitFramebuffer` and `readPixels` rects aren't
+  mapped either.
 - A guest that composites a full-screen pass to the screen would have its
   quad moved and its offscreen image left as it was: leave `reproject` off.
 - The "hide this vertex" idiom (`gl_Position = vec4(2.0, 2.0, 2.0, 1.0)`)
@@ -1285,6 +1321,11 @@ returns the rect to actually apply on the host. The replay engine handles:
 - Pass-through for RT-targeted viewport calls (current draw FB != null).
 - Tracking the sender's intended viewport across calls.
 - Re-issuing viewport on every `bindFramebuffer` transition (see above).
+
+A reprojecting host also sets a per-frame remap (`setViewportRemap({ from,
+to })`, 0.6.5: a frame drawn at another viewport than the host's now, see
+"Host reprojection"); it applies first, and the callback gets the mapped
+rect.
 
 Hosts compute their door rect with `portalScreenRect(anchor, camera,
 viewport)` from `@portal/portal-three` (projects the anchor mesh's corners,
