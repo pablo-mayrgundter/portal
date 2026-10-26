@@ -43,8 +43,26 @@ export type NetGLReplay = ((call: NetGLCall) => void) & {
    * lazily, before each draw whose program doesn't have it yet.
    */
   setReprojection(correction: ArrayLike<number> | null): void
+  /**
+   * Replay the guest's screen viewport and scissor rects as if `from` were
+   * `to`: each rect is mapped by the scale (to.w / from.w, to.h / from.h)
+   * and offset that takes `from` onto `to`, before any door-fit remap
+   * (`remapScreenViewport`) sees it. For a frame drawn for a viewport other
+   * than the host's current one: a reprojecting host whose drawing buffer
+   * changed size (a resize, a pixel-ratio change) since the guest drew.
+   * Rects for the guest's own framebuffers pass through. Null, or `from`
+   * equal to `to`, for none. No GL calls here: the next replayed call
+   * re-issues the screen viewport and scissor under the new mapping first.
+   */
+  setViewportRemap(remap: NetGLViewportRemap | null): void
   /** With `reproject` on: what the rewrite has done so far. */
   readonly reprojectStats: NetGLReprojectStats
+}
+
+/** A frame's screen rects, drawn for `from`, composed into `to` (pixels, `[x, y, w, h]`, GL's bottom-left origin). */
+export type NetGLViewportRemap = {
+  from: readonly [number, number, number, number]
+  to: readonly [number, number, number, number]
 }
 
 export type NetGLReprojectStats = {
@@ -148,6 +166,24 @@ const GL_COMPILE_STATUS = 0x8B81
 
 type Rect = readonly [number, number, number, number]
 
+const sameRect = (a: Rect, b: Rect): boolean => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3]
+
+const sameRemap = (a: NetGLViewportRemap | null, b: NetGLViewportRemap | null): boolean =>
+  a === b || (!!a && !!b && sameRect(a.from, b.from) && sameRect(a.to, b.to))
+
+// A rect in `from`'s pixels → the same place in `to`'s: scale and offset,
+// edges rounded, so `from` itself lands on `to` exactly.
+const remapRect = (m: NetGLViewportRemap, r: Rect): Rect => {
+  const { from, to } = m
+  const sx = to[2] / from[2]
+  const sy = to[3] / from[3]
+  const x0 = Math.round(to[0] + (r[0] - from[0]) * sx)
+  const y0 = Math.round(to[1] + (r[1] - from[1]) * sy)
+  const x1 = Math.round(to[0] + (r[0] + r[2] - from[0]) * sx)
+  const y1 = Math.round(to[1] + (r[1] + r[3] - from[1]) * sy)
+  return [x0, y0, x1 - x0, y1 - y0]
+}
+
 const CLEAR_CALLS = new Set<string>([
   'clear',
   'clearBufferfv',
@@ -207,6 +243,24 @@ export const makeNetGLReplay = (
   // has SCISSOR_TEST enabled.
   let lastIntendedScissor: Rect | null = null
   let scissorTestEnabled = false
+  // The frame's viewport remap (`setViewportRemap`), and the one the
+  // screen viewport on the receiver was last issued under: when they
+  // differ, the next call re-issues it.
+  let viewportRemap: NetGLViewportRemap | null = null
+  let issuedRemap: NetGLViewportRemap | null = null
+
+  // The rect to apply for a screen viewport the sender asked for: the
+  // frame's remap, then the door-fit one. Null: the sender's own.
+  const remapScreen = (x: number, y: number, w: number, h: number): Rect | null => {
+    const framed = viewportRemap ? remapRect(viewportRemap, [x, y, w, h]) : null
+    if (!config.remapScreenViewport) return framed
+    const base = framed ?? [x, y, w, h]
+    return config.remapScreenViewport(base[0], base[1], base[2], base[3]) ?? framed
+  }
+  // Whether the applied viewport differs from the sender's, so scissors
+  // map through it.
+  const mapped = (): boolean =>
+    !!lastIntendedViewport && !!appliedViewport && !sameRect(lastIntendedViewport, appliedViewport)
 
   const policy = config.screen ? makeScreenPolicyState(receiver, config.screen) : null
   const clearMode = config.screen?.clear ?? 'pass'
@@ -256,7 +310,7 @@ export const makeNetGLReplay = (
     const iv = lastIntendedViewport
     const av = appliedViewport
     if (currentDrawFb !== null || !iv || !av || iv[2] === 0 || iv[3] === 0) return r
-    if (iv[0] === av[0] && iv[1] === av[1] && iv[2] === av[2] && iv[3] === av[3]) return r
+    if (sameRect(iv, av)) return r
     const sx = av[2] / iv[2]
     const sy = av[3] / iv[3]
     const x0 = av[0] + (r[0] - iv[0]) * sx
@@ -379,6 +433,20 @@ export const makeNetGLReplay = (
       throw new Error(`NetGL replay (decoding ${call.name}): ${msg}`)
     }
 
+    // The frame's viewport remap changed since the screen viewport was
+    // issued (a new frame, drawn for another view): issue it again under
+    // the new one, so a frame that sets no viewport of its own is still
+    // mapped. Into the guest's own framebuffer, the next bind to the
+    // screen re-issues it.
+    if (!sameRemap(viewportRemap, issuedRemap) && currentDrawFb === null && lastIntendedViewport && call.name !== 'viewport') {
+      const [x, y, w, h] = lastIntendedViewport
+      const r = remapScreen(x, y, w, h) ?? lastIntendedViewport
+      receiver.viewport(r[0], r[1], r[2], r[3])
+      appliedViewport = [r[0], r[1], r[2], r[3]]
+      issuedRemap = viewportRemap
+      reissueScissor()
+    }
+
     // Track framebuffer binding so we know when subsequent viewport calls
     // target the host canvas (currentDrawFb === null) vs an offscreen RT.
     // Note that we update `currentDrawFb` BEFORE applying the original
@@ -418,14 +486,18 @@ export const makeNetGLReplay = (
     // viewports pass through unchanged. Either way, capture the sender's
     // INTENDED (pre-remap) viewport so we can re-apply it across bind
     // transitions.
+    // Scissors were mapped before this viewport call (they map with it).
+    let wasMapped = false
     if (call.name === 'viewport') {
       const [x, y, w, h] = decodedArgs as [number, number, number, number]
+      wasMapped = mapped()
       lastIntendedViewport = [x, y, w, h]
-      if (currentDrawFb === null && config.remapScreenViewport) {
-        const remapped = config.remapScreenViewport(x, y, w, h)
+      if (currentDrawFb === null) {
+        const remapped = remapScreen(x, y, w, h)
         if (remapped !== null) {
           decodedArgs = [remapped[0], remapped[1], remapped[2], remapped[3]]
         }
+        issuedRemap = viewportRemap
       }
       appliedViewport = decodedArgs as unknown as Rect
     } else if (call.name === 'scissor') {
@@ -541,8 +613,9 @@ export const makeNetGLReplay = (
       }
     }
 
-    // A remapped screen viewport moves the scissor mapping with it.
-    if (call.name === 'viewport' && currentDrawFb === null && config.remapScreenViewport) {
+    // A remapped screen viewport moves the scissor mapping with it (and
+    // one that no longer is, back).
+    if (call.name === 'viewport' && currentDrawFb === null && (config.remapScreenViewport || wasMapped || mapped())) {
       reissueScissor()
     }
 
@@ -554,9 +627,8 @@ export const makeNetGLReplay = (
       // Compute the rect once (the remap callback may have side effects /
       // be non-trivial work like projecting the door corners through the
       // host camera) so we don't call it twice for the same transition.
-      const remapped = currentDrawFb === null && config.remapScreenViewport
-        ? config.remapScreenViewport(x, y, w, h)
-        : null
+      const remapped = currentDrawFb === null ? remapScreen(x, y, w, h) : null
+      if (currentDrawFb === null) issuedRemap = viewportRemap
       const rx = remapped ? remapped[0] : x
       const ry = remapped ? remapped[1] : y
       const rw = remapped ? remapped[2] : w
@@ -583,6 +655,12 @@ export const makeNetGLReplay = (
   return Object.assign(replay, {
     invalidate() {
       policy?.invalidate()
+    },
+    setViewportRemap(m: NetGLViewportRemap | null) {
+      viewportRemap =
+        m && m.from[2] > 0 && m.from[3] > 0 && !sameRect(m.from, m.to)
+          ? { from: [m.from[0], m.from[1], m.from[2], m.from[3]], to: [m.to[0], m.to[1], m.to[2], m.to[3]] }
+          : null
     },
     setReprojection(m: ArrayLike<number> | null) {
       if (!m) {

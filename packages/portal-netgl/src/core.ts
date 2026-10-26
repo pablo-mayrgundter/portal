@@ -17,7 +17,7 @@ export {
   type NetGLRecorderSession,
   type NetGLRecorderSessionOptions
 } from './recorder'
-export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig, type NetGLReprojectStats } from './replay'
+export { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig, type NetGLReprojectStats, type NetGLViewportRemap } from './replay'
 export {
   reprojectVertexShader,
   reprojection,
