@@ -52,8 +52,8 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="../">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../rfcs/0001-globe-orbit-layers.html">RFC 0001</a><a href="../rfcs/0002-nested-in-place-guests.html">RFC 0002</a><a href="../rfcs/0003-late-frames.html">RFC 0003</a><a href="../rfcs/evolution.html">Evolution</a></nav>
+  <a class="brand" href="../">Portal <small>NetGL</small></a>
+  <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../rfcs/index.html">Responses</a><a href="../rfcs/0001-globe-orbit-layers.html">RFC 0001</a><a href="../rfcs/0002-nested-in-place-guests.html">RFC 0002</a><a href="../rfcs/0003-late-frames.html">RFC 0003</a><a href="../rfcs/evolution.html">Evolution</a></nav>
   <a class="demos" href="/portal/v/0.4.0/" target="_blank" rel="noopener" title="The demos of v0.4.0, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="0.4.0" data-snapshots-root="/portal/" aria-label="Version"><option value="0.4.0" selected>portal-netgl 0.4.0</option></select></span>
@@ -114,9 +114,9 @@ frustum, on its terrain, through <code>scene.externalRenderers</code>.</li>
     // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
     // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
     var toDocs = function (base, m) {
-      // The summary is the site root from 0.6.9 on; in a 0.6.8 snapshot it is rfcs/index.html.
+      // The overview is the site root from 0.6.9 on; a 0.6.8 snapshot's root is a demo, its docs at rfcs/.
       var summaryAtRoot = !m || m.layout !== 'demo-root';
-      return (atRoot || page === 'index.html') && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+      return (atRoot || onVersionPage) && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
     };
     if (v === 'latest') location.href = toDocs(siteRoot, null);
     else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
