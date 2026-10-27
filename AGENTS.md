@@ -114,6 +114,14 @@ were tried and dropped.
   `gh workflow run` fails, since it looks the default branch up over
   GraphQL, which the session's proxy refuses. `gh run list` and `gh run
   view` work for watching it.
+- **The main deploy must never ship a `v/` directory.** The deploy action
+  turns `clean-exclude` entries into rsync `P` (protect) filters, which
+  shield `v` only while the deployed tree has no `v/` of its own; with one,
+  rsync descends into it and `--delete` removes every snapshot (it happened
+  once; the snapshots came back from the *Snapshot a version* workflow,
+  dispatched with the JSON array of all versions). `pages.yml` removes
+  `dist/v` (the preview's versions list) before deploying and also protects
+  `v/**`. The same holds for anything else that must survive a deploy.
 - **Static servers and rebuilds.** A build that deletes and recreates
   its output directory leaves a server started inside it serving
   nothing. Restart the server after rebuilding.

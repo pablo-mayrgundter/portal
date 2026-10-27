@@ -58,6 +58,16 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
+      # The build writes a v/versions.json for previews. It must not reach the
+      # main deploy: the deploy action protects the clean-exclude paths with
+      # rsync "P" filters, which shield the v directory only while the deployed
+      # tree has no v/ of its own. With one, rsync descends into v/ and its
+      # --delete removes every snapshot (that happened on 2026-10-27; the
+      # snapshots were rebuilt from the *Snapshot a version* workflow). The
+      # versions list is published separately below, and v/** is protected too.
+      - name: Keep the snapshots out of the deploy's reach
+        run: rm -rf dist/v
+
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
@@ -66,7 +76,9 @@ jobs:
           clean: true
           clean-exclude: |
             pr-preview
+            pr-preview/**
             v
+            v/**
 
       - name: Publish the versions list
         uses: JamesIves/github-pages-deploy-action@v4
