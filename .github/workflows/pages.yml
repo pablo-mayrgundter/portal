@@ -1,7 +1,7 @@
 name: Deploy demos to GitHub Pages
 
-# Build all demo apps under /portal/<demo>/, a landing nav at /portal/ and
-# the RFC responses site at /portal/rfcs/. Deploys to the gh-pages branch
+# Build all demo apps under /portal/<demo>/, the overview page at /portal/
+# and the RFC responses site at /portal/rfcs/. Deploys to the gh-pages branch
 # with clean-exclude=pr-preview and v so that PR preview directories
 # (managed by .github/workflows/pr-preview.yml) and the version snapshots
 # survive main-branch deploys.

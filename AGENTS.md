@@ -91,8 +91,12 @@ were tried and dropped.
 - **Known SwiftShader quirk:** `gl_PointCoord` flips in point shaders
   that `discard` or sample a depth texture. Use depth state instead.
 - **The docs site and the version snapshots.** `scripts/build-rfc-site.mjs`
-  turns `docs/rfcs/responses/*.md` into `dist/rfcs/` (the build action runs
-  it; `--out` anywhere to try it). The Pages workflow writes
+  turns `docs/rfcs/responses/*.md` into `dist/rfcs/`, with the overview
+  infographic as the site's root `index.html` and the responses' synthesis
+  at `rfcs/index.html` (the build action runs it; `--out` anywhere to try
+  it). The demos are `/<key>/` siblings, the Local portal at
+  `three/`; up to 0.6.8 it was the root (`layout: 'demo-root'` in
+  `history.json`, which the pulldowns and banner read). The Pages workflow writes
   `v/versions.json` and, when portal-netgl's version changes, builds the
   site a second time under `v/<version>/` and keeps it. Bumping the version
   is therefore also what takes a snapshot of the demos and docs. A past
@@ -100,7 +104,16 @@ were tried and dropped.
   (`.github/workflows/snapshot.yml`, run from the Actions tab with the
   version); its commit, date and demos come from
   `docs/rfcs/responses/history.json`, which also feeds the pulldowns'
-  labels and the Evolution page's timeline. A new release gets a row there.
+  labels and the Evolution page's timeline. A new release gets a row there,
+  and a `## <version>: ...` section in CHANGELOG.md: the site renders that
+  section as `versions/<version>.html` at the site root, the page the docs' pulldown
+  shows for a version that predates the responses (they start at 0.6.8).
+  The workflow takes one version or a JSON array of them (built one after
+  another in one run). From a cloud session, dispatch it through the REST
+  endpoint: `gh api -X POST repos/<owner>/portal/actions/workflows/snapshot.yml/dispatches -f ref=main -f 'inputs[version]=0.2.0'`;
+  `gh workflow run` fails, since it looks the default branch up over
+  GraphQL, which the session's proxy refuses. `gh run list` and `gh run
+  view` work for watching it.
 - **Static servers and rebuilds.** A build that deletes and recreates
   its output directory leaves a server started inside it serving
   nothing. Restart the server after rebuilding.

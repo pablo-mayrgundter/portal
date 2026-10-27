@@ -94,6 +94,8 @@ class Svg {
       this.circle(cx + 6, y - 4, 5.5, col); this.text(cx + 17, y, label, { size: 12, fill: C.ink2 }); cx += 17 + label.length * 6.6 + 18
     }
   }
+  /** Wraps what `draw` adds in a link (SVG 2 `<a href>`, which browsers honour inline and as an image's own document). */
+  link(href, draw) { this.add(`<a href="${esc(href)}">`); draw(); this.add('</a>') }
   toString() {
     const defs = [...this.markers].map((c) => `<marker id="arr-${c.slice(1)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="${c}"/></marker>`).join('')
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.w}" height="${this.h}" viewBox="0 0 ${this.w} ${this.h}" ${FONT}>\n<defs>${defs}</defs>\n<rect width="${this.w}" height="${this.h}" fill="${C.bg}"/>\n${this.parts.join('\n')}\n</svg>\n`
@@ -108,10 +110,13 @@ function header(s, title, sub, tag) {
 function footer(s, text) { s.text(40, s.h - 18, text, { size: 11, fill: C.ink3 }) }
 
 // ───────────────────────────── 1. overview ─────────────────────────────
-{
+// Written twice: portal-netgl.svg, with the version tag, for the docs and the README;
+// portal-netgl-inline.svg, without the tag and with links (relative to the site root),
+// which the site's root page embeds inline so its text is selectable.
+const overview = ({ tag, links }) => {
   const s = new Svg(1200, 890)
   header(s, 'Portal / NetGL: link independent 3D web renderers at the GL layer',
-    'Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.', 'portal-netgl ' + VERSION)
+    'Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.', tag ? 'portal-netgl ' + VERSION : null)
 
   // problem
   let p = s.panel(40, 100, 340, 300, 'The problem')
@@ -165,10 +170,22 @@ function footer(s, text) { s.text(40, s.h - 18, text, { size: 11, fill: C.ink3 }
     ['RFC 0002 · Nested in-place guests', 'celestiary → Cesium → Slop New York on one page. Flat chains, in-frame contract, light, ground, the enu frame, lean, staging.', 'shipped composed · library pieces for 0.7'],
     ['RFC 0003 · Late frames', 'celestiary\'s Cesium from a guest page. Deferred deletes, reprojecting a guest\'s own targets, its projection on the frame-end.', 'proposed for 0.6.9–0.6.10'],
   ]
-  rf.forEach(([t, d, st], i) => { const x = p.x + i * 372; s.text(x, p.y + 4, t, { size: 14, bold: true, fill: C.open }); const yy = s.para(x, p.y + 24, d, 340, { size: 12, fill: C.ink2 }); s.text(x, yy + 6, st, { size: 11.5, bold: true, fill: C.ink3 }) })
+  const rfcHref = ['rfcs/0001-globe-orbit-layers.html', 'rfcs/0002-nested-in-place-guests.html', 'rfcs/0003-late-frames.html']
+  rf.forEach(([t, d, st], i) => {
+    const x = p.x + i * 372
+    const title = () => s.text(x, p.y + 4, t, { size: 14, bold: true, fill: C.open })
+    if (links) s.link(rfcHref[i], title); else title()
+    const yy = s.para(x, p.y + 24, d, 340, { size: 12, fill: C.ink2 }); s.text(x, yy + 6, st, { size: 11.5, bold: true, fill: C.ink3 })
+  })
+  if (links) {
+    const more = () => s.text(p.x + p.w, p.y + 4, 'the responses →', { size: 13, bold: true, fill: C.open, anchor: 'end' })
+    s.link('rfcs/index.html', more)
+  }
   footer(s, 'docs/rfcs/responses · the README, DESIGN.md and portal-layers.md have the detail · github.com/pablo-mayrgundter/portal')
-  writeFileSync(OUT + 'portal-netgl.svg', s.toString())
+  return s.toString()
 }
+writeFileSync(OUT + 'portal-netgl.svg', overview({ tag: true, links: false }))
+writeFileSync(OUT + 'portal-netgl-inline.svg', overview({ tag: false, links: true }))
 
 // ───────────────────────────── 2. RFC 0001 ─────────────────────────────
 {

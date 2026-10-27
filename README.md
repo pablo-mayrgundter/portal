@@ -2,40 +2,33 @@
 
 **Link independent 3D web renderers at the GL layer.**
 
-This repo does two things:
-
 - **Portals:** doors from one 3D web world into another.
 - **In-place layers:** one engine's content drawn where another engine's
   object was, such as Cesium's Earth in place of a three.js Earth.
 
-Both run on **NetGL**, a transport for WebGL command streams. A guest
-renderer's GL calls are recorded, sent over a transport, and replayed into
-the host's own WebGL context. There, a stencil decides which pixels they
-may touch.
+Both run on **NetGL**: a guest renderer's WebGL calls are recorded, sent
+over a transport, and replayed into the host's own context, where the host
+decides which pixels they may touch.
 
-> **Status: early prototype.** NetGL runs in production:
-> [celestiary](https://celestiary.github.io/) uses it to composite Cesium's
-> Earth, Moon and Mars in place of its own. But the APIs and the wire
-> format will change before 1.0, and the security model only covers
-> trusted guests so far.
->
-> **We're looking for testers, RFCs and early adopters.** See
+> **Status: early prototype.** [celestiary](https://celestiary.github.io/)
+> uses NetGL in production for Cesium's Earth, Moon and Mars. The APIs and
+> wire format will change before 1.0, and only trusted guests are safe.
+> We're looking for testers, RFCs and adopters: see
 > [Get involved](#get-involved).
+
+![Cesium's globe drawn in place of a three.js Earth, with the host's moon in front of it](./docs/img/netgl-cesium-earth.png)
+
+*Cesium's globe replayed into a three.js scene, depth-tested against the
+host's moon ([live](https://pablo-mayrgundter.github.io/portal/netgl-cesium/?mode=earth)).*
 
 ## Why
 
-3D on the web is split across engines that don't compose: three.js,
-CesiumJS, Babylon.js, Unity WebGL, custom WebGPU renderers, splat and
-neural renderers. Each one owns its scene graph, camera, frame loop and
-GL state. Putting two of them in one view usually means rewriting one
-into the other, or settling for a flat video texture.
-
-Portal keeps engines sovereign and makes the seam explicit. Scene graphs
-are the wrong layer to standardise, because they're incompatible by
-design. One layer down, every one of these engines emits GL draws. NetGL
-links GL contexts: the guest's draws execute in the host's context, with
-full fidelity. There's no bitmap round-trip and no depth-packing, and
-occlusion works both ways.
+Web 3D engines (three.js, CesiumJS, Babylon.js, Unity WebGL, splat
+renderers) each own their scene graph, camera, frame loop and GL state.
+Putting two in one view usually means rewriting one into the other, or a
+flat video texture. Scene graphs don't compose, but every engine emits GL
+draws. NetGL runs the guest's draws in the host's context: no bitmap
+round-trip, no depth packing, occlusion both ways.
 
 ```
  guest (Cesium, three.js, ...)                 host (three.js app)
@@ -54,92 +47,43 @@ Live demos (GitHub Pages; WebGL2 required):
 
 | Demo | What it shows |
 |---|---|
-| [Local portal](https://pablo-mayrgundter.github.io/portal/) | two three.js worlds joined by a traversable door. Walk through it (WASD, drag to look). |
+| [Local portal](https://pablo-mayrgundter.github.io/portal/three/) | two three.js worlds joined by a door you can walk through |
 | [iframe portal](https://pablo-mayrgundter.github.io/portal/iframe/) | the destination world in an iframe, shipped as colour and depth bitmaps (frame-RPC) |
 | [Worker portal](https://pablo-mayrgundter.github.io/portal/worker/) | the same, rendered in a Web Worker with no DOM |
 | [NetGL portal](https://pablo-mayrgundter.github.io/portal/netgl/) | a three.js guest's GL command stream replayed into the host's canvas |
-| [NetGL + celestiary](https://pablo-mayrgundter.github.io/portal/netgl-celestiary/) | a real, GL-heavy app (the [celestiary](https://github.com/celestiary/web) solar system) through a door |
+| [NetGL + celestiary](https://pablo-mayrgundter.github.io/portal/netgl-celestiary/) | a real app, the [celestiary](https://github.com/celestiary/web) solar system, through a door |
 | [NetGL + Cesium, door](https://pablo-mayrgundter.github.io/portal/netgl-cesium/) | an unmodified Cesium globe through a door, with real parallax |
 | [NetGL + Cesium, in place](https://pablo-mayrgundter.github.io/portal/netgl-cesium/?mode=earth) | Cesium's globe in place of a three.js Earth: the moon occludes it and is occluded by it |
-| [NetGL + deck.gl](https://pablo-mayrgundter.github.io/portal/netgl-deck/) | a three.js guest from another origin (a sandboxed iframe) drawn over a deck.gl globe, in deck's clip space, occluded by the Earth |
-| [Docs: the RFC responses](https://pablo-mayrgundter.github.io/portal/rfcs/) | what Portal and NetGL are, one page per RFC, and the tracks of work and versions that answer them; the version pulldown keeps every release's demos and docs |
+| [NetGL + deck.gl](https://pablo-mayrgundter.github.io/portal/netgl-deck/) | a three.js guest from another origin drawn over a deck.gl globe, in deck's clip space |
+| [Docs](https://pablo-mayrgundter.github.io/portal/) | the site's root: Portal and NetGL in one picture, then the RFC responses, one page per RFC, and how NetGL got here |
 
-In production, [celestiary](https://celestiary.github.io/) shows Cesium's
-Earth, Moon and Mars in place of its own bodies. It uses portal-netgl's
-same-page link and crossfades between the two renderings. Its
-[`CESIUM.md`](https://github.com/celestiary/web/blob/main/CESIUM.md) is
-the integration's design record.
+Every release's demos and docs are kept under `/portal/v/<version>/`, and
+a version pulldown moves between them.
+
+![A deck.gl globe with an orbit and satellite dots drawn by a three.js guest from another origin](./docs/img/netgl-deck.png)
+
+*A three.js guest in a sandboxed cross-origin iframe, replayed into deck.gl's
+context in its clip space; the orbit's far half is hidden by deck's globe
+([live](https://pablo-mayrgundter.github.io/portal/netgl-deck/)).*
 
 ## What works, and what doesn't yet
 
-Works:
-
-- **Command-stream NetGL** for WebGL2 guests, with:
-  - handle interning;
-  - a synchronous shadow context for return values and readback;
-  - a guest state checkpoint, so framework state caches survive a shared
-    context, also for a guest drawn several times in one host frame
-    (sub-frames, one per Cesium depth frustum);
-  - a host-side screen policy: stencil clip, depth-only or no clears,
-    premultiplied-over blending, viewport and scissor remapping, and
-    redirecting the guest into a host render target.
-- **Transports:**
-  - same page, synchronous, zero lag (`makeNetGLImmediateLink`);
-  - `postMessage` to iframes, with flow control and ready/ack
-    handshakes; cross-origin iframes with both ends pinned by origin
-    (`iframeTransport`, `parentTransport`);
-  - one message per guest frame over a `MessageChannel` (wire 2, 0.6),
-    negotiated in the handshake, so 0.5 guests and hosts still work: a
-    cross-site guest frame went from ~187 messages and ~240 ms of host
-    main-thread deserialisation to one message and under 1 ms, and only
-    the bytes each call reads cross (Starlink's frame: 494 KB to 51 KB).
-- **Guests:** three.js (including an overlay guest driven by the host's
-  view), and Cesium unmodified through its `getWebGLStub` hook.
-- **Hosts:** three.js, and deck.gl / luma.gl (`attachNetGLDeckLayer`:
-  replay after deck's layers, luma's state restored, a GlobeView's camera
-  as ECEF metres).
-- **Composition:**
-  - *door* mode, where the host's camera is carried through the door;
-  - *in place* mode, where a camera-coupled guest fills a shape
-    stencil, depth-tested against the host scene;
-  - *overlay* mode, where the guest draws in the host's own clip space
-    and depth-tests against the host's depth buffer (deck.gl globe).
-- **Frame-RPC portals** (colour and depth bitmaps) for local, iframe,
-  Worker and server-side (Node, headless-gl) endpoints, including
-  recursive portals.
-
-Not yet:
-
-- **Untrusted guests.** Guest GL executes in the host's context, and
-  there's no sandbox, so today's guests must be trusted, cross-origin ones
-  included: origin pinning stops other pages from talking to either end,
-  not a hostile guest. What's open is listed in
-  [DESIGN.md](./packages/portal-netgl/DESIGN.md#cross-origin-iframes).
-- **WebRTC and remote transports:** designed, not built.
-- **Non-affine host views:** a guest takes a 4×4 view, so deck.gl's Web
-  Mercator map (and GlobeView above zoom 12) can't host one.
-- **Resource lifecycle:** handle tables only grow, so very long sessions
-  leak.
-- **Extension-object methods** (`WEBGL_multi_draw` and friends) bypass
-  the recorder.
-- **Double drawing:** the shadow context repeats every guest draw.
-  That's 2× GPU for the guest.
-- **WebGPU:** not supported.
-
-The open problems are itemised in
-[`packages/portal-netgl/DESIGN.md`](./packages/portal-netgl/DESIGN.md#open-problems-the-next-pr).
+WebGL2 guests (three.js; Cesium unmodified) draw into three.js and
+deck.gl hosts, on the same page or from an iframe on another origin: as a
+*door*, *in place* of a host object, or as an *overlay* in the host's clip
+space. The [CHANGELOG](./CHANGELOG.md) says which version added what.
+Untrusted guests, resource lifecycle and WebGPU are among DESIGN.md's
+[open problems](./packages/portal-netgl/DESIGN.md#open-problems-the-next-pr);
+what the RFCs ask for next is in the responses'
+[synthesis](./docs/rfcs/responses/README.md).
 
 ## Packages
 
 | Package | What | Status |
 |---|---|---|
-| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL recorder, replay, guest context, screen policy, immediate link, host receiver, cross-origin transports, Cesium shim, deck.gl host adapter, three.js overlay guest | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.6.x, pre-1.0: pin an exact version |
-| `portal-layers` | host/guest shim for in-place layers: compositor, lifecycle, transport bindings, contracts | design, [0.1 draft](./docs/portal-layers.md) |
-| [`portal-core`](./packages/portal-core) | engine-agnostic portal geometry, pose coupling, wire types | workspace only |
-| [`portal-three`](./packages/portal-three) | three.js bindings: stencil mask, coupled camera, local endpoint | workspace only |
-| [`portal-iframe`](./packages/portal-iframe), [`portal-worker`](./packages/portal-worker) | frame-RPC transports and compositor | workspace only |
-| [`portal-headless-three`](./packages/portal-headless-three) | server-side renderer (jsdom + headless-gl) | workspace only |
-| [`portal-controls`](./packages/portal-controls) | demo fly controls | workspace only |
+| [`@pablo-mayrgundter/portal-netgl`](./packages/portal-netgl) | NetGL, its links and transports, the Cesium shim, the deck.gl adapter | [on npm](https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl), 0.6.x; pin an exact version |
+| `portal-layers` | host/guest shim for in-place layers | [0.1 design](./docs/portal-layers.md) |
+| [`portal-core`](./packages/portal-core), [`-three`](./packages/portal-three), [`-iframe`](./packages/portal-iframe), [`-worker`](./packages/portal-worker), [`-headless-three`](./packages/portal-headless-three), [`-controls`](./packages/portal-controls) | [frame-RPC portals](./docs/frame-rpc-portals.md), demo controls | workspace only |
 
 ## Quick start: a Cesium globe in a three.js scene
 
@@ -170,13 +114,10 @@ link.frame(() => widget.render()) // Cesium's calls replay into your context now
 renderer.resetState()
 ```
 
-The package [README](./packages/portal-netgl/README.md) covers the iframe
-host and guest, the three.js guest, and the protocol. For in-place layers
-there's more to get right: depth, colour, camera coupling and handover.
-Read the lessons in
-[DESIGN.md](./packages/portal-netgl/DESIGN.md#lessons-from-celestiarys-cesium-layers)
-and the gotchas checklist in
-[`docs/portal-layers.md`](./docs/portal-layers.md#gotchas-that-stay-in-the-app).
+The [package README](./packages/portal-netgl/README.md) covers the other
+links, guests and hosts. For in-place layers, read the
+[lessons from celestiary](./packages/portal-netgl/DESIGN.md#lessons-from-celestiarys-cesium-layers)
+and the [app's gotchas](./docs/portal-layers.md#gotchas-that-stay-in-the-app).
 
 ## Run the demos locally
 
@@ -200,71 +141,42 @@ npm run build                  # production build of all workspaces
 
 ## Get involved
 
-This is the stage where outside eyes help most. Three ways in, each with
-an issue template:
+Each of these has an issue template:
 
-**Test it.**
-- Run the demos on your browser, OS and GPU, and tell us what you see,
-  especially mobile GPUs, Safari and Firefox. A screenshot and your
-  `chrome://gpu`-style details make a report actionable.
-- Try NetGL with a renderer we haven't: Babylon.js, PlayCanvas,
-  MapLibre, deck.gl, Unity WebGL.
-- Report GL calls that fail to replay. Watch for `unknown handle`,
-  unsupported encodings, and state that drifts after the host touches
-  the context.
+- **Test it** on your browser, OS and GPU, or with a renderer we haven't
+  tried (Babylon.js, PlayCanvas, MapLibre, Unity WebGL). Report GL calls
+  that fail to replay, with a screenshot and your GPU details.
+- **Comment on an RFC, or write one.** The open questions are in the
+  [RFCs](./docs/rfcs/README.md) and the maintainers'
+  [responses](https://pablo-mayrgundter.github.io/portal/rfcs/).
+- **Adopt it.** If your app should embed another engine (a globe, a map,
+  a BIM viewer, a splat scene), open an adoption issue. Real integrations
+  drive the roadmap.
 
-**Write an RFC.** These design questions are open, and we want input
-before they settle:
-- Transport bindings and the isolation model: sync in-page vs worker vs
-  iframe vs remote, and when each is appropriate
-  ([`docs/portal-layers.md`](./docs/portal-layers.md#transports)).
-- A sandbox for untrusted guest GL: which calls to allow, resource
-  budgets, shader validation.
-- Host/guest contracts for alpha, depth and colour space, and whether
-  the screen policy should enforce them.
-- The `portal-layers` 0.1 API as a whole.
-- A WebGPU sibling of the command stream.
-- Frame-RPC vs command-stream, and where the line sits for engines that
-  won't expose their GL.
-
-Small questions can go straight into an issue. Larger proposals are
-welcome as an RFC in [`docs/rfcs/`](./docs/rfcs/README.md), in a PR.
-
-**Adopt it.** If you have a 3D web app that should embed another engine
-in place (a globe, a map, a CAD or BIM viewer, a splat scene) or open a
-portal into one, open an adoption issue. Real integrations drive the
-roadmap: celestiary's Cesium layers produced most of what's in
-DESIGN.md.
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
+Development workflow: [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Roadmap
 
-- **`portal-layers` 0.1:** a host/guest shim library that packages the
-  in-place compositor, lifecycle and contracts
-  ([design](./docs/portal-layers.md)).
-- **NetGL:**
-  - guest-private depth;
-  - a no-draw shadow while no readback is pending;
-  - resource lifecycle (trimming handle tables);
-  - extension objects;
-  - multiple guests per host receiver.
-- **Isolation:** origin-restricted cross-origin iframes, then a sandbox
-  for untrusted GL.
-- **Transports:** Worker + OffscreenCanvas guests, then WebRTC and
-  WebTransport.
-- **Engines:** more guest adapters, and a WebGPU command stream.
+The next portal-netgl versions and their tracks of work are in the
+responses' [Versions](./docs/rfcs/responses/README.md#versions) table.
 
 ## Docs
 
-- [`packages/portal-netgl/README.md`](./packages/portal-netgl/README.md): the NetGL API and protocol.
-- [`packages/portal-netgl/DESIGN.md`](./packages/portal-netgl/DESIGN.md): architecture, the screen policy, composition modes, findings from the Cesium and celestiary integrations, open problems.
-- [`docs/portal-layers.md`](./docs/portal-layers.md): the `portal-layers` 0.1 design, and the gotchas that stay in the app.
-- [`docs/rfcs/`](./docs/rfcs/README.md): RFCs, the proposals for changing these designs, and how to write and comment on one.
-- [`docs/rfcs/responses/`](./docs/rfcs/responses/README.md): the maintainers' responses to the RFCs, with a 1-pager and an infographic each, and the tracks of work and versions that answer them. Published at [/portal/rfcs/](https://pablo-mayrgundter.github.io/portal/rfcs/), with a snapshot of the site per release under `/portal/v/<version>/`.
-- [`docs/netgl-renderer.md`](./docs/netgl-renderer.md): the original NetGL design notes and spikes.
-- [`docs/frame-rpc-portals.md`](./docs/frame-rpc-portals.md): the frame-RPC portal design and its history (endpoints, traversal, recursion, server-side rendering).
-- [`docs/deploying-proxies.md`](./docs/deploying-proxies.md): the snapshot and share proxies behind the demos' social previews.
+- [CHANGELOG.md](./CHANGELOG.md), and the
+  [Evolution page](https://pablo-mayrgundter.github.io/portal/rfcs/evolution.html)
+  ([source](./docs/rfcs/responses/evolution.md)): every release, a
+  snapshot of each, and the axes they moved.
+- [RFC responses](https://pablo-mayrgundter.github.io/portal/rfcs/):
+  the [synthesis](./docs/rfcs/responses/README.md) and a 1-pager per RFC
+  ([0001](./docs/rfcs/responses/0001-globe-orbit-layers.md),
+  [0002](./docs/rfcs/responses/0002-nested-in-place-guests.md),
+  [0003](./docs/rfcs/responses/0003-late-frames.md)).
+- NetGL's [API](./packages/portal-netgl/README.md) and
+  [DESIGN.md](./packages/portal-netgl/DESIGN.md);
+  [`portal-layers`](./docs/portal-layers.md); the [RFCs](./docs/rfcs/README.md).
+- History: [NetGL's first design](./docs/netgl-renderer.md),
+  [frame-RPC portals](./docs/frame-rpc-portals.md),
+  [the preview proxies](./docs/deploying-proxies.md).
 
 ## Design rules
 

@@ -3,8 +3,9 @@
 // each demo, the current page highlighted. Self-contained: inline styles
 // scoped under #portal-nav-*, DOM appended to body, no external assets.
 //
-// The "Local three" demo lives at the deploy root; the other three live at
-// /<key>/ siblings. Drawer URLs are relative so they work under any base
+// Every demo lives at /<key>/ under the deploy root (the "Local three" demo
+// at /three/ since 0.6.9; before that it was the root itself), and the root
+// is the summary page. Drawer URLs are relative so they work under any base
 // (e.g. /portal/, /portal/pr-preview/pr-19/).
 //
 // Above the demos: an intro that says what Portal is, linking to the RFC
@@ -127,8 +128,11 @@ const STYLES = `
 #portal-nav-drawer .portal-nav-intro a { display: inline; padding: 0; background: transparent; border: none; color: #b7a9ff; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
 #portal-nav-drawer .portal-nav-intro a:hover { background: transparent; color: #d6ccff; }
 #portal-nav-drawer .portal-nav-intro svg { display: inline-block; vertical-align: -1px; margin-left: 2px; }
-#portal-nav-drawer .portal-nav-version { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; }
+#portal-nav-drawer .portal-nav-version { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; min-width: 0; }
 #portal-nav-drawer .portal-nav-version select {
+  max-width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
   font: 600 12px Inter, system-ui, sans-serif;
   color: #d8e7ff;
   background: rgba(93, 169, 255, 0.14);
@@ -146,26 +150,17 @@ const EXTERNAL_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" aria-hidde
 const HAMBURGER_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 const CLOSE_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 
-/**
- * Build the relative URL to navigate from the current demo to the target
- * demo. The root demo ('three') lives at /<base>/ and the rest at
- * /<base>/<key>/. From the root, sibling URLs are just `<key>/`; from a
- * sub-demo we have to go up one level first.
- */
-const hrefFor = (current: NavDemoKey, target: NavDemoKey): string => {
-  const fromRoot = current === 'three'
-  if (target === 'three') return fromRoot ? '.' : '..'
-  return fromRoot ? `${target}/` : `../${target}/`
-}
+/** The relative URL from one demo to another: every demo is a /<key>/ sibling. */
+const hrefFor = (_current: NavDemoKey, target: NavDemoKey): string => `../${target}/`
 
 /**
- * Where this deploy's root is, from the page's URL: the root demo's own
- * directory, or a sub-demo's parent. If that root is a /v/<version>/
- * snapshot, `siteRoot` is the site above it and `snapshot` the version.
+ * Where this deploy's root is, from the page's URL: the demo's parent
+ * directory. If that root is a /v/<version>/ snapshot, `siteRoot` is the
+ * site above it and `snapshot` the version.
  */
-const siteRoots = (current: NavDemoKey): { root: string; siteRoot: string; snapshot: string | null } => {
+const siteRoots = (_current: NavDemoKey): { root: string; siteRoot: string; snapshot: string | null } => {
   const dir = location.pathname.replace(/[^/]*$/, '')
-  const root = current === 'three' ? dir : dir.replace(/[^/]+\/$/, '')
+  const root = dir.replace(/[^/]+\/$/, '')
   const m = root.match(/^(.*\/)v\/([^/]+)\/$/)
   return m ? { root, siteRoot: m[1], snapshot: m[2] } : { root, siteRoot: root, snapshot: null }
 }
@@ -177,14 +172,17 @@ const siteRoots = (current: NavDemoKey): { root: string; siteRoot: string; snaps
  */
 const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): void => {
   const { siteRoot, snapshot } = siteRoots(current)
-  const demoPath = current === 'three' ? '' : `${current}/`
-  type VersionMeta = { date?: string; label?: string; demos?: string[]; docs?: boolean }
+  // The snapshots live on the production site; a PR preview has none of its own.
+  const snapshotsRoot = siteRoot.replace(/pr-preview\/pr-\d+\/$/, '')
+  // Up to 0.6.8 a snapshot's Local demo is at its root (`layout: 'demo-root'`); since then at three/.
+  const demoPath = (m: VersionMeta | undefined) => (current === 'three' && m?.layout === 'demo-root' ? '' : `${current}/`)
+  type VersionMeta = { date?: string; label?: string; demos?: string[]; docs?: boolean; layout?: string }
   let meta: Record<string, VersionMeta> = {}
   const fill = (versions: string[], latest: string): void => {
     select.innerHTML = ''
     const options: Array<[string, string]> = [['latest', `latest · ${latest}`], ...versions.map((v): [string, string] => {
       const m = meta[v] ?? {}
-      return [v, `v${v}${m.date ? ` · ${m.date}` : ''}${m.label ? ` · ${m.label}` : ''}`]
+      return [v, `v${v}${m.date ? ` · ${m.date}` : ''}`]
     })]
     if (snapshot && !versions.includes(snapshot)) options.push([snapshot, `v${snapshot} snapshot`])
     for (const [value, label] of options) {
@@ -203,10 +201,10 @@ const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): vo
     .catch(() => undefined)
   select.addEventListener('change', () => {
     const v = select.value
-    const target = v === 'latest' ? siteRoot : `${siteRoot}v/${v}/`
+    const target = v === 'latest' ? siteRoot : `${snapshotsRoot}v/${v}/`
     // The same demo in the chosen version, when that version had it; else its root.
     const had = v === 'latest' || !meta[v]?.demos || (meta[v].demos as string[]).includes(current)
-    location.href = had ? `${target}${demoPath}${location.search}${location.hash}` : target
+    location.href = had ? `${target}${demoPath(v === 'latest' ? undefined : meta[v])}${location.search}${location.hash}` : target
   })
 }
 
@@ -235,7 +233,7 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
   drawer.innerHTML = `
     <h2>Portal demos</h2>
     <p class="portal-nav-subtitle">Same scenes, different wire.</p>
-    <p class="portal-nav-intro">Portal links independent 3D web renderers at the GL layer: a guest's WebGL2 calls replay into the host's context, so engines compose without rewriting either. What it is, and where it's going: <a href="${current === 'three' ? 'rfcs/' : '../rfcs/'}" target="_blank" rel="noopener">the RFC responses${EXTERNAL_SVG}</a></p>
+    <p class="portal-nav-intro">Portal links independent 3D web renderers at the GL layer: a guest's WebGL2 calls replay into the host's context, so engines compose without rewriting either. What it is, and where it's going: <a href="../" target="_blank" rel="noopener">the summary and RFC responses${EXTERNAL_SVG}</a></p>
     <label class="portal-nav-version">Version
       <select id="portal-nav-version" aria-label="Site version"><option value="latest" selected>latest</option></select>
     </label>
