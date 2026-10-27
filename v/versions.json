@@ -1,7 +1,8 @@
 {
   "latest": "0.6.8",
   "versions": [
-    "0.6.8"
+    "0.6.8",
+    "0.0.0-frame-rpc"
   ],
   "meta": {
     "0.6.8": {
@@ -18,7 +19,18 @@
       ],
       "docs": true,
       "reconstructed": false
+    },
+    "0.0.0-frame-rpc": {
+      "date": "2026-04-30",
+      "label": "Frame-RPC portals, before NetGL",
+      "demos": [
+        "three",
+        "iframe",
+        "worker"
+      ],
+      "docs": false,
+      "reconstructed": true
     }
   },
-  "updated": "2026-10-27T20:18:43.355Z"
+  "updated": "2026-10-27T20:19:28.820Z"
 }
