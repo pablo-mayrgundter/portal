@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>portal-netgl 0.0.0-frame-rpc: Frame-RPC portals, before NetGL · Portal</title>
+<title>portal-netgl 0.6.1: Redraw folding · Portal</title>
 <meta name="description" content="The maintainers' response to the Portal RFCs: what each asks, what's built, and the tracks of work and versions that answer them.">
 <style>
 :root { --bg: #fcfcfb; --panel: #fff; --line: #e3e2dd; --ink: #0b0b0b; --ink2: #52514e; --ink3: #8a8984; --host: #2a78d6; --hostbg: #e3eefb; --open: #6250d6; --openbg: #ebe8fa; }
@@ -24,7 +24,7 @@ a.demos svg { opacity: .8; }
 .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .right a { font-size: 13px; color: var(--ink2); }
 .version { position: relative; display: inline-block; }
-.version select { appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
+.version select { max-width: min(60vw, 320px); text-overflow: ellipsis; appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
 .version::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--host); pointer-events: none; font-size: 12px; }
 .version.snapshot select { color: var(--open); background: var(--openbg); border-color: var(--open); }
 .version.snapshot::after { color: var(--open); }
@@ -52,65 +52,49 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="../index.html">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="../index.html">Summary</a><a href="../0001-globe-orbit-layers.html">RFC 0001</a><a href="../0002-nested-in-place-guests.html">RFC 0002</a><a href="../0003-late-frames.html">RFC 0003</a><a href="../evolution.html">Evolution</a></nav>
-  <a class="demos" href="../../v/0.0.0-frame-rpc/" target="_blank" rel="noopener" title="The demos of v0.0.0-frame-rpc, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
+  <a class="brand" href="../rfcs/index.html">Portal <small>RFC responses</small></a>
+  <nav class="pages" aria-label="Pages"><a href="../rfcs/index.html">Summary</a><a href="../rfcs/0001-globe-orbit-layers.html">RFC 0001</a><a href="../rfcs/0002-nested-in-place-guests.html">RFC 0002</a><a href="../rfcs/0003-late-frames.html">RFC 0003</a><a href="../rfcs/evolution.html">Evolution</a></nav>
+  <a class="demos" href="/portal/v/0.6.1/" target="_blank" rel="noopener" title="The demos of v0.6.1, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="0.0.0-frame-rpc" data-depth="1" aria-label="Version"><option value="0.0.0-frame-rpc" selected>portal-netgl 0.0.0-frame-rpc</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="0.6.1" data-snapshots-root="/portal/" aria-label="Version"><option value="0.6.1" selected>portal-netgl 0.6.1</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
 <main class="doc">
 
-<p class="version-kicker">portal-netgl before NetGL · 2026-04-30 · <a href="https://github.com/pablo-mayrgundter/portal/commit/6e3f1d5">6e3f1d5</a></p>
-<h1>Before NetGL: frame-RPC portals (2026-04-26 to 2026-04-30)</h1>
-<p>Doors between three.js worlds: a halfspace stencil and an oblique clip; endpoints over local, iframe, Worker and headless transports shipping colour and packed-depth bitmaps; traversal; recursive portals; a server-side snapshot proxy.</p>
-<p>Not a portal-netgl release; kept as <code>v/0.0.0-frame-rpc/</code>. Design and
-history: <a href="https://github.com/pablo-mayrgundter/portal/blob/main/docs/frame-rpc-portals.md"><code>docs/frame-rpc-portals.md</code></a>.</p>
+<p class="version-kicker">portal-netgl 0.6.1 · 2026-10-24 · <a href="https://github.com/pablo-mayrgundter/portal/commit/8543e93">8543e93</a></p>
+<h1>0.6.1: Redraw folding (2026-10-24)</h1>
+<p>A redraw request restarts the fold window, so a guest frame that lands after a host draw still gets its own.</p>
 <ul>
-<li><strong>Doors between three.js worlds:</strong> the boundary is the door&#39;s
-projection on the portal plane, drawn with a halfspace stencil and an
-oblique near-plane clip; traversal through the door
-(<a href="https://github.com/pablo-mayrgundter/portal/pull/1">#1</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/3">#3</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/5">#5</a>).</li>
-<li><strong>Endpoints:</strong> a <code>PortalEndpoint</code> across four transports (local,
-iframe, Worker, headless Node), each shipping colour and packed-RGBA
-depth bitmaps per frame; iframe traversal both ways
-(<a href="https://github.com/pablo-mayrgundter/portal/pull/6">#6</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/7">#7</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/10">#10</a>).</li>
-<li><strong>Recursive portals and a server-side renderer</strong>, behind a snapshot
-proxy and a share proxy for social previews
-(<a href="https://github.com/pablo-mayrgundter/portal/pull/11">#11</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/12">#12</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/13">#13</a>,
-<a href="https://github.com/pablo-mayrgundter/portal/pull/14">#14</a>).</li>
-<li><strong>Demos:</strong> local, iframe and Worker portals.</li>
+<li>The deck.gl adapter: a redraw request restarts the fold window, so a
+guest frame that lands after a host draw still gets its own
+(<a href="https://github.com/pablo-mayrgundter/portal/pull/41">#41</a>).</li>
 </ul>
 
 <h2 id="demos">The demos at this version</h2>
-<p>Rebuilt from commit <code>6e3f1d5</code> and kept at <a href="../../v/0.0.0-frame-rpc/"><code>/portal/v/0.0.0-frame-rpc/</code></a>, with a banner naming the version:</p>
-<ul><li><a href="../../v/0.0.0-frame-rpc/">Local portal</a></li><li><a href="../../v/0.0.0-frame-rpc/iframe/">iframe portal</a></li><li><a href="../../v/0.0.0-frame-rpc/worker/">Worker portal</a></li></ul>
-<p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="https://github.com/pablo-mayrgundter/portal/blob/main/CHANGELOG.md">CHANGELOG</a>. How the releases fit together: <a href="../evolution.html">Evolution</a>.</p>
+<p>Rebuilt from commit <code>8543e93</code> and kept at <a href="/portal/v/0.6.1/"><code>/portal/v/0.6.1/</code></a>, with a banner naming the version:</p>
+<ul><li><a href="/portal/v/0.6.1/">Local portal</a></li><li><a href="/portal/v/0.6.1/iframe/">iframe portal</a></li><li><a href="/portal/v/0.6.1/worker/">Worker portal</a></li><li><a href="/portal/v/0.6.1/netgl/">NetGL portal</a></li><li><a href="/portal/v/0.6.1/netgl-celestiary/">NetGL + celestiary</a></li><li><a href="/portal/v/0.6.1/netgl-cesium/">NetGL + Cesium</a></li><li><a href="/portal/v/0.6.1/netgl-deck/">NetGL + deck.gl</a></li></ul>
+<p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="https://github.com/pablo-mayrgundter/portal/blob/main/CHANGELOG.md">CHANGELOG</a>. How the releases fit together: <a href="../rfcs/evolution.html">Evolution</a>.</p>
 
 </main>
 <footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.8. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
 <script>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
-  var path = location.pathname, i = path.lastIndexOf('/rfcs/');
-  var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
+  var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page).
+  var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
   var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
-  // A version's changelog page (rfcs/versions/<v>.html) stands for a version with no docs of its own.
-  var onVersionPage = /\/rfcs\/versions\/[^/]+\.html$/.test(path);
+  // Where the snapshots live: the production site, since a PR preview has none of its own.
+  var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\/pr-\d+\/$/, '');
+  var onVersionPage = j >= 0 && i < 0;
   var page = onVersionPage ? 'index.html' : (path.slice(path.lastIndexOf('/') + 1) || 'index.html');
   var meta = {};
   function fill(list, latest) {
     sel.innerHTML = '';
-    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) {
+    var opts = [['latest', 'latest · ' + latest]].concat(list.map(function (v) {
       var m = meta[v] || {};
-      return [v, 'v' + v + (m.date ? ' · ' + m.date : '') + (m.label ? ' · ' + m.label : '')];
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '')];
     }));
     opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
     if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
@@ -119,11 +103,12 @@ proxy and a share proxy for social previews
     if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
   }).catch(function () {});
   sel.addEventListener('change', function () {
-    var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
-    // A reconstructed snapshot has the demos of its day but no docs of its own: its page is the
-    // changelog entry, with this same header, at the latest site's rfcs/versions/<v>.html.
-    var hasDocs = v === 'latest' || !meta[v] || meta[v].docs;
-    location.href = hasDocs ? target + 'rfcs/' + page + location.hash : siteRoot + 'rfcs/versions/' + v + '.html';
+    var v = sel.value;
+    // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
+    // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
+    if (v === 'latest') location.href = siteRoot + 'rfcs/' + page + location.hash;
+    else if (!meta[v] || meta[v].docs) location.href = snapshotsRoot + 'v/' + v + '/rfcs/' + page + location.hash;
+    else location.href = siteRoot + 'versions/' + v + '.html';
   });
 })();
 
