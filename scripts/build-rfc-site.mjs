@@ -32,13 +32,9 @@ const PAGES = [
   { md: '0002-nested-in-place-guests.md', html: '0002-nested-in-place-guests.html', nav: 'RFC 0002', title: 'RFC 0002: nested in-place guests' },
   { md: '0003-late-frames.md', html: '0003-late-frames.html', nav: 'RFC 0003', title: 'RFC 0003: late frames' },
 ]
-// The demos, as the build action lays them out: the root and /<key>/ siblings.
-const DEMOS = [
-  { href: '', label: 'Local portal' }, { href: 'iframe/', label: 'iframe' }, { href: 'worker/', label: 'Worker' },
-  { href: 'netgl/', label: 'NetGL' }, { href: 'netgl-celestiary/', label: 'celestiary' },
-  { href: 'netgl-cesium/', label: 'Cesium door' }, { href: 'netgl-cesium/?mode=earth', label: 'Cesium in place' },
-  { href: 'netgl-deck/', label: 'deck.gl' },
-]
+// The demos live beside the site (the root demo, whose drawer lists the
+// rest), so one link, opened in a new tab.
+const EXTERNAL_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>'
 
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const slug = (text) => text.toLowerCase().replace(/[^\w\- ]/g, '').trim().replace(/ /g, '-')
@@ -82,10 +78,9 @@ header.top .brand small { color: var(--ink3); font-weight: 400; font-size: 12px;
 nav.pages a { color: var(--ink2); text-decoration: none; font-size: 14px; padding: 4px 8px; border-radius: 6px; }
 nav.pages a:hover { background: var(--hostbg); color: var(--host); }
 nav.pages a[aria-current] { background: var(--openbg); color: var(--open); font-weight: 600; }
-nav.demos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-nav.demos .k { font-size: 12px; font-weight: 700; color: var(--host); text-transform: uppercase; letter-spacing: .06em; margin-right: 2px; }
-nav.demos a { font-size: 13px; color: var(--host); background: var(--hostbg); border: 1px solid #bcd3f3; border-radius: 14px; padding: 3px 10px; text-decoration: none; }
-nav.demos a:hover { background: #d2e2f8; }
+a.demos { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--host); background: var(--hostbg); border: 1px solid #bcd3f3; border-radius: 14px; padding: 4px 12px; text-decoration: none; }
+a.demos:hover { background: #d2e2f8; }
+a.demos svg { opacity: .8; }
 .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .right a { font-size: 13px; color: var(--ink2); }
 .version { position: relative; display: inline-block; }
@@ -144,7 +139,6 @@ const SCRIPT = `
 
 function template(page, body) {
   const pages = PAGES.map((p) => `<a href="${p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`).join('')
-  const demos = DEMOS.map((d) => `<a href="../${d.href}">${d.label}</a>`).join('')
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -158,7 +152,7 @@ function template(page, body) {
 <header class="top"><div class="row">
   <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
   <nav class="pages" aria-label="Pages">${pages}</nav>
-  <nav class="demos" aria-label="Demos"><span class="k">Demos</span>${demos}</nav>
+  <a class="demos" href="../" target="_blank" rel="noopener" title="The demos, in a new tab">Demos ${EXTERNAL_ICON}</a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="${esc(version)}" aria-label="Version"><option value="latest" selected>portal-netgl ${esc(version)}</option></select></span>
     <a href="${GITHUB}">GitHub</a>

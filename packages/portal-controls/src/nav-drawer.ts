@@ -7,8 +7,8 @@
 // /<key>/ siblings. Drawer URLs are relative so they work under any base
 // (e.g. /portal/, /portal/pr-preview/pr-19/).
 //
-// Below the demos: a link to the RFC responses (the docs site the build
-// puts at <base>/rfcs/) and a version pulldown. Each portal-netgl release
+// Above the demos, a version pulldown; below them, a link to the RFC
+// responses (the docs site the build puts at <base>/rfcs/). Each portal-netgl release
 // keeps a snapshot of the whole site (demos and docs) at <site>/v/<version>/,
 // listed in <site>/v/versions.json by the Pages workflow; the pulldown
 // moves to the same demo in the chosen snapshot, or back to latest.
@@ -125,7 +125,7 @@ const STYLES = `
 #portal-nav-drawer .portal-nav-docs { margin-top: 18px; }
 #portal-nav-drawer .portal-nav-docs a { border-color: rgba(154, 140, 255, 0.35); }
 #portal-nav-drawer .portal-nav-docs a:hover { background: rgba(154, 140, 255, 0.12); border-color: rgba(154, 140, 255, 0.6); }
-#portal-nav-drawer .portal-nav-version { margin-top: 14px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; }
+#portal-nav-drawer .portal-nav-version { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; }
 #portal-nav-drawer .portal-nav-version select {
   font: 600 12px Inter, system-ui, sans-serif;
   color: #d8e7ff;
@@ -225,6 +225,9 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
   drawer.innerHTML = `
     <h2>Portal demos</h2>
     <p class="portal-nav-subtitle">Same scenes, different wire.</p>
+    <label class="portal-nav-version">Version
+      <select id="portal-nav-version" aria-label="Site version"><option value="latest" selected>latest</option></select>
+    </label>
     <ul>
       ${DEMOS.map((d) => `
         <li${d.key === current ? ' class="portal-nav-current"' : ''}>
@@ -241,9 +244,6 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
         <span class="portal-nav-desc">The RFC responses: an overview of NetGL, one page per RFC, the tracks of work and the versions they claim.</span>
       </a>
     </div>
-    <label class="portal-nav-version">Version
-      <select id="portal-nav-version" aria-label="Site version"><option value="latest" selected>latest</option></select>
-    </label>
     <p class="portal-nav-repo"><a href="https://github.com/pablo-mayrgundter/portal" target="_blank" rel="noopener">github.com/pablo-mayrgundter/portal</a></p>
   `
 
