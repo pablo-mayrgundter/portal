@@ -10,6 +10,13 @@ and an **infographic**. This page is the synthesis: the requirements the
 three share, the tracks of work that answer them, and the portal-netgl
 versions each track claims.
 
+**Published** at [pablo-mayrgundter.github.io/portal/rfcs/](https://pablo-mayrgundter.github.io/portal/rfcs/),
+beside the demos, with the summary as the index. Each portal-netgl
+release keeps a snapshot of the whole site, demos included, at
+`/portal/v/<version>/`; the version pulldown in the header switches
+between them. The pages are built from these files by
+`scripts/build-rfc-site.mjs` on every deploy and PR preview.
+
 It is also the model we'd like public comment to follow: an RFC states a
 need from a real integration; a response says what the maintainers would
 build and why; the open questions are where the argument is.

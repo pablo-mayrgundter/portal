@@ -1,5 +1,5 @@
 name: Build portal demos
-description: Build the demo apps with the given base path and assemble a single dist/ tree. host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary / host-netgl-cesium / host-netgl-deck live at /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/, /netgl-deck/ siblings.
+description: Build the demo apps and the RFC responses site with the given base path and assemble a single dist/ tree. The docs go to /rfcs/ (scripts/build-rfc-site.mjs). host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary / host-netgl-cesium / host-netgl-deck live at /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/, /netgl-deck/ siblings.
 
 inputs:
   base-path:
@@ -63,3 +63,7 @@ runs:
         cp -r apps/host-netgl-celestiary/dist     dist/netgl-celestiary
         cp -r apps/host-netgl-cesium/dist         dist/netgl-cesium
         cp -r apps/host-netgl-deck/dist           dist/netgl-deck
+
+    - name: Build the RFC responses site (docs/rfcs/responses → /rfcs/)
+      shell: bash
+      run: node scripts/build-rfc-site.mjs --base ${{ inputs.base-path }} --out dist/rfcs

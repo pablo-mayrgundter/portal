@@ -90,6 +90,12 @@ were tried and dropped.
   page. Hide `#portal-nav-drawer` before a screenshot.
 - **Known SwiftShader quirk:** `gl_PointCoord` flips in point shaders
   that `discard` or sample a depth texture. Use depth state instead.
+- **The docs site and the version snapshots.** `scripts/build-rfc-site.mjs`
+  turns `docs/rfcs/responses/*.md` into `dist/rfcs/` (the build action runs
+  it; `--out` anywhere to try it). The Pages workflow writes
+  `v/versions.json` and, when portal-netgl's version changes, builds the
+  site a second time under `v/<version>/` and keeps it. Bumping the version
+  is therefore also what takes a snapshot of the demos and docs.
 - **Static servers and rebuilds.** A build that deletes and recreates
   its output directory leaves a server started inside it serving
   nothing. Restart the server after rebuilding.

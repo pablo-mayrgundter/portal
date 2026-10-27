@@ -62,6 +62,7 @@ Live demos (GitHub Pages; WebGL2 required):
 | [NetGL + Cesium, door](https://pablo-mayrgundter.github.io/portal/netgl-cesium/) | an unmodified Cesium globe through a door, with real parallax |
 | [NetGL + Cesium, in place](https://pablo-mayrgundter.github.io/portal/netgl-cesium/?mode=earth) | Cesium's globe in place of a three.js Earth: the moon occludes it and is occluded by it |
 | [NetGL + deck.gl](https://pablo-mayrgundter.github.io/portal/netgl-deck/) | a three.js guest from another origin (a sandboxed iframe) drawn over a deck.gl globe, in deck's clip space, occluded by the Earth |
+| [Docs: the RFC responses](https://pablo-mayrgundter.github.io/portal/rfcs/) | what Portal and NetGL are, one page per RFC, and the tracks of work and versions that answer them; the version pulldown keeps every release's demos and docs |
 
 In production, [celestiary](https://celestiary.github.io/) shows Cesium's
 Earth, Moon and Mars in place of its own bodies. It uses portal-netgl's
@@ -260,7 +261,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
 - [`packages/portal-netgl/DESIGN.md`](./packages/portal-netgl/DESIGN.md): architecture, the screen policy, composition modes, findings from the Cesium and celestiary integrations, open problems.
 - [`docs/portal-layers.md`](./docs/portal-layers.md): the `portal-layers` 0.1 design, and the gotchas that stay in the app.
 - [`docs/rfcs/`](./docs/rfcs/README.md): RFCs, the proposals for changing these designs, and how to write and comment on one.
-- [`docs/rfcs/responses/`](./docs/rfcs/responses/README.md): the maintainers' responses to the RFCs, with a 1-pager and an infographic each, and the tracks of work and versions that answer them.
+- [`docs/rfcs/responses/`](./docs/rfcs/responses/README.md): the maintainers' responses to the RFCs, with a 1-pager and an infographic each, and the tracks of work and versions that answer them. Published at [/portal/rfcs/](https://pablo-mayrgundter.github.io/portal/rfcs/), with a snapshot of the site per release under `/portal/v/<version>/`.
 - [`docs/netgl-renderer.md`](./docs/netgl-renderer.md): the original NetGL design notes and spikes.
 - [`docs/frame-rpc-portals.md`](./docs/frame-rpc-portals.md): the frame-RPC portal design and its history (endpoints, traversal, recursion, server-side rendering).
 - [`docs/deploying-proxies.md`](./docs/deploying-proxies.md): the snapshot and share proxies behind the demos' social previews.

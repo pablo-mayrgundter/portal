@@ -17,7 +17,9 @@ the record of why.
 
 The maintainers' reading of the three together, with a 1-pager and an
 infographic for each and the tracks of work that answer them, is in
-[`responses/`](./responses/README.md).
+[`responses/`](./responses/README.md), published at
+[pablo-mayrgundter.github.io/portal/rfcs/](https://pablo-mayrgundter.github.io/portal/rfcs/)
+with a snapshot per release.
 
 ## Process
 

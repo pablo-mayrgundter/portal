@@ -1,12 +1,19 @@
 // Generates the infographics beside this file (portal-netgl.svg, rfc-000N.svg) as plain SVG.
 // Edit the strings and layout here, then: node docs/rfcs/responses/img/generate.mjs && git diff --stat.
+// --out <dir> writes elsewhere (scripts/build-rfc-site.mjs uses it for the Pages build).
 // No dependencies. Check a render in a browser before committing: the text is laid out by
 // an average glyph width, so a long string can overflow its box.
 import { writeFileSync } from 'node:fs'
 
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '/')
+import { readFileSync, mkdirSync } from 'node:fs'
+const here = dirname(fileURLToPath(import.meta.url))
+const outArg = process.argv.indexOf('--out')
+const OUT = join(outArg > 0 ? resolve(process.argv[outArg + 1]) : here, '/')
+mkdirSync(OUT, { recursive: true })
+// The version tag on the overview: portal-netgl's, so a snapshot of the site says which release it describes.
+const VERSION = JSON.parse(readFileSync(join(here, '../../../../packages/portal-netgl/package.json'), 'utf8')).version
 const C = {
   bg: '#fcfcfb', panel: '#ffffff', line: '#e3e2dd', ink: '#0b0b0b', ink2: '#52514e', ink3: '#8a8984',
   host: '#2a78d6', hostBg: '#e3eefb', guest: '#eb6834', guestBg: '#fdeae2',
@@ -104,7 +111,7 @@ function footer(s, text) { s.text(40, s.h - 18, text, { size: 11, fill: C.ink3 }
 {
   const s = new Svg(1200, 890)
   header(s, 'Portal / NetGL: link independent 3D web renderers at the GL layer',
-    'Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.', 'portal-netgl 0.6.8')
+    'Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.', 'portal-netgl ' + VERSION)
 
   // problem
   let p = s.panel(40, 100, 340, 300, 'The problem')
