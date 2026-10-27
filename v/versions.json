@@ -2,6 +2,7 @@
   "latest": "0.6.8",
   "versions": [
     "0.6.8",
+    "0.3.0",
     "0.2.0",
     "0.1.0",
     "0.0.0-frame-rpc"
@@ -21,6 +22,20 @@
       ],
       "docs": true,
       "reconstructed": false
+    },
+    "0.3.0": {
+      "date": "2026-10-22",
+      "label": "Tracked state",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "reconstructed": true
     },
     "0.2.0": {
       "date": "2026-09-29",
@@ -61,5 +76,5 @@
       "reconstructed": true
     }
   },
-  "updated": "2026-10-27T20:24:53.331Z"
+  "updated": "2026-10-27T20:27:04.625Z"
 }
