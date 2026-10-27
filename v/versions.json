@@ -2,6 +2,7 @@
   "latest": "0.6.8",
   "versions": [
     "0.6.8",
+    "0.2.0",
     "0.1.0",
     "0.0.0-frame-rpc"
   ],
@@ -20,6 +21,20 @@
       ],
       "docs": true,
       "reconstructed": false
+    },
+    "0.2.0": {
+      "date": "2026-09-29",
+      "label": "Checkpoint, screen policy, Cesium",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "reconstructed": true
     },
     "0.1.0": {
       "date": "2026-07-09",
@@ -46,5 +61,5 @@
       "reconstructed": true
     }
   },
-  "updated": "2026-10-27T20:22:31.469Z"
+  "updated": "2026-10-27T20:24:53.331Z"
 }
