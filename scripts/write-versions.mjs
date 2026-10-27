@@ -28,6 +28,6 @@ const versions = [...new Set([latest, ...rest.filter((v) => /^\d+\.\d+\.\d+/.tes
 const meta = {}
 for (const v of versions) {
   const h = history.find((e) => e.version === v)
-  if (h) meta[v] = { date: h.date, label: h.label, demos: h.demos, docs: h.docs === true || v === latest, reconstructed: v !== latest && h.docs !== true }
+  if (h) meta[v] = { date: h.date, label: h.label, demos: h.demos, docs: h.docs === true || v === latest, reconstructed: v !== latest && h.docs !== true, ...(h.layout ? { layout: h.layout } : {}) }
 }
 process.stdout.write(JSON.stringify({ latest, versions, meta, updated: new Date().toISOString() }, null, 2) + '\n')

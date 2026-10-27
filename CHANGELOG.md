@@ -33,6 +33,10 @@ since the version didn't move.
   entry in
   [`history.json`](./docs/rfcs/responses/history.json)
   ([#51](https://github.com/pablo-mayrgundter/portal/pull/51)).
+- **The site's root is the summary page**; the Local portal demo moved
+  from the root to `three/`, beside the other demos. A page per earlier
+  version (`versions/<version>.html`, from this file) is what the
+  version pulldown shows for a version that predates the responses.
 - **The RFCs they answer** ([index](./docs/rfcs/README.md)):
   [0001](./docs/rfcs/0001-globe-orbit-layers.md), globe + orbit layers
   (merged in 0.5.0, discussion in

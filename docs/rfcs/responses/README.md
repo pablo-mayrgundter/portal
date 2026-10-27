@@ -10,8 +10,9 @@ and an **infographic**. This page is the synthesis: the requirements the
 three share, the tracks of work that answer them, and the portal-netgl
 versions each track claims.
 
-**Published** at [pablo-mayrgundter.github.io/portal/rfcs/](https://pablo-mayrgundter.github.io/portal/rfcs/),
-beside the demos, with the summary as the index. Each portal-netgl
+**Published** at [pablo-mayrgundter.github.io/portal/](https://pablo-mayrgundter.github.io/portal/):
+this summary is the site's root page, the responses are under `rfcs/`,
+and the demos beside them. Each portal-netgl
 release keeps a snapshot of the whole site, demos included, at
 `/portal/v/<version>/`; the version pulldown in the header switches
 between them. The pages are built from these files by

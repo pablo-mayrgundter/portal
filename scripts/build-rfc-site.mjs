@@ -8,8 +8,9 @@
 //
 //   node scripts/build-rfc-site.mjs --base /portal/ --out dist/rfcs
 //
-// --out is where the site goes; a page per earlier version (from the
-// CHANGELOG) goes beside it, at <out>/../versions/. --base is the site's
+// --out is where the responses go; the summary is also written as the site
+// root's index.html (<out>/../index.html), and a page per earlier version
+// (from the CHANGELOG) goes beside it, at <out>/../versions/. --base is the site's
 // path, used to point snapshot links at the production site from a PR
 // preview. Links to files outside docs/rfcs/responses/ become links to
 // the file on GitHub.
@@ -50,7 +51,7 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 const slug = (text) => text.toLowerCase().replace(/[^\w\- ]/g, '').trim().replace(/ /g, '-')
 
 /** The repo directory the markdown being rendered lives in, and the site directory its page lands in (relative to rfcs/). */
-let base = { dir: 'docs/rfcs/responses', rfcs: '' }
+let base = { dir: 'docs/rfcs/responses', rfcs: '' } // rfcs: the path from the page being rendered to the rfcs/ directory
 const up = () => base.rfcs
 
 /** Rewrites a markdown href for the published site. */
@@ -133,8 +134,10 @@ const SCRIPT = `
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
   var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
-  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page).
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page), or the
+  // summary page's own directory (it is the root).
   var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
+  var atRoot = i < 0 && j < 0;
   var m = root.match(/^(.*\\/)v\\/([^/]+)\\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
   // Where the snapshots live: the production site, since a PR preview has none of its own.
   var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\\/pr-\\d+\\/$/, '');
@@ -157,16 +160,22 @@ const SCRIPT = `
     var v = sel.value;
     // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
     // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
-    if (v === 'latest') location.href = siteRoot + 'rfcs/' + page + location.hash;
-    else if (!meta[v] || meta[v].docs) location.href = snapshotsRoot + 'v/' + v + '/rfcs/' + page + location.hash;
+    var toDocs = function (base, m) {
+      // The summary is the site root from 0.6.9 on; in a 0.6.8 snapshot it is rfcs/index.html.
+      var summaryAtRoot = !m || m.layout !== 'demo-root';
+      return (atRoot || page === 'index.html') && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+    };
+    if (v === 'latest') location.href = toDocs(siteRoot, null);
+    else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
     else location.href = siteRoot + 'versions/' + v + '.html';
   });
 })();
 `
 
-function template(page, body, { rfcs = '', here = 'latest', demosHref = '../', titleOverride } = {}) {
+function template(page, body, { rfcs = '', root = '../', here = 'latest', demosHref, titleOverride } = {}) {
   const u = rfcs
-  const pages = PAGES.map((p) => `<a href="${u}${p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`).join('')
+  demosHref ??= root + 'three/'
+  const pages = PAGES.map((p) => `<a href="${p.md === 'README.md' ? (root === '' ? './' : root) : u + p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`).join('')
   const title = titleOverride ?? page.title
   return `<!doctype html>
 <html lang="en">
@@ -179,9 +188,9 @@ function template(page, body, { rfcs = '', here = 'latest', demosHref = '../', t
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="${u}index.html">Portal <small>RFC responses</small></a>
+  <a class="brand" href="${root === '' ? './' : root}">Portal <small>RFC responses</small></a>
   <nav class="pages" aria-label="Pages">${pages}</nav>
-  <a class="demos" href="${demosHref.startsWith('/') ? demosHref : u + demosHref}" target="_blank" rel="noopener" title="The demos${here === 'latest' ? '' : ' of v' + esc(here)}, in a new tab">Demos ${EXTERNAL_ICON}</a>
+  <a class="demos" href="${demosHref}" target="_blank" rel="noopener" title="The demos${here === 'latest' ? '' : ' of v' + esc(here)}, in a new tab">Demos ${EXTERNAL_ICON}</a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="${esc(version)}" data-here="${esc(here)}" data-snapshots-root="${esc(snapshotsRoot)}" aria-label="Version"><option value="${esc(here)}" selected>portal-netgl ${esc(here === 'latest' ? version : here)}</option></select></span>
     <a href="${GITHUB}">GitHub</a>
@@ -206,11 +215,19 @@ for (const page of PAGES) {
   writeFileSync(join(out, page.html), template(page, marked.parse(md)))
 }
 
+// The summary is the site's root page too, with its links pointed into rfcs/.
+{
+  const summary = PAGES[0]
+  base = { dir: 'docs/rfcs/responses', rfcs: 'rfcs/' }
+  const md = readFileSync(join(src, summary.md), 'utf8')
+  writeFileSync(join(out, '..', 'index.html'), template(summary, marked.parse(md), { rfcs: 'rfcs/', root: '' }))
+}
+
 // A page per version from the CHANGELOG: what the version pulldown shows for a version
 // that predates these docs. The section is the CHANGELOG's `## <version>: ...` (or
 // `## Before NetGL ...` for the frame-RPC state), rendered under the same header.
 const DEMO_LABEL = { three: 'Local portal', iframe: 'iframe portal', worker: 'Worker portal', netgl: 'NetGL portal', 'netgl-celestiary': 'NetGL + celestiary', 'netgl-cesium': 'NetGL + Cesium', 'netgl-deck': 'NetGL + deck.gl' }
-const DEMO_PATH = { three: '', iframe: 'iframe/', worker: 'worker/', netgl: 'netgl/', 'netgl-celestiary': 'netgl-celestiary/', 'netgl-cesium': 'netgl-cesium/', 'netgl-deck': 'netgl-deck/' }
+const DEMO_PATH = { three: 'three/', iframe: 'iframe/', worker: 'worker/', netgl: 'netgl/', 'netgl-celestiary': 'netgl-celestiary/', 'netgl-cesium': 'netgl-cesium/', 'netgl-deck': 'netgl-deck/' }
 function changelogSection(v) {
   const lines = changelog.split('\n')
   const isHead = (l) => /^## /.test(l)
@@ -229,7 +246,8 @@ for (const h of history) {
   const sec = changelogSection(h.version)
   base = { dir: '', rfcs: '../rfcs/' }
   const snap = `${snapshotsRoot}v/${h.version}/`
-  const demos = (h.demos || []).map((d) => `<li><a href="${esc(snap)}${DEMO_PATH[d] ?? d + '/'}">${esc(DEMO_LABEL[d] ?? d)}</a></li>`).join('')
+  const demoPath = (d) => (d === 'three' && h.layout === 'demo-root' ? '' : DEMO_PATH[d] ?? d + '/')
+  const demos = (h.demos || []).map((d) => `<li><a href="${esc(snap)}${demoPath(d)}">${esc(DEMO_LABEL[d] ?? d)}</a></li>`).join('')
   const body = `
 <p class="version-kicker">portal-netgl ${esc(h.version === '0.0.0-frame-rpc' ? 'before NetGL' : h.version)} · ${esc(h.date)} · <a href="${GITHUB}/commit/${esc(h.ref)}">${esc(h.ref)}</a></p>
 <h1>${esc(sec ? sec.heading : h.label)}</h1>
@@ -241,10 +259,10 @@ ${sec ? marked.parse(sec.body) : '<p><em>No CHANGELOG entry for this version yet
 <p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="${GITHUB}/blob/main/CHANGELOG.md">CHANGELOG</a>. How the releases fit together: <a href="../rfcs/evolution.html">Evolution</a>.</p>
 `
   const fake = { html: '../versions/' + h.version + '.html', title: `portal-netgl ${h.version}` }
-  writeFileSync(join(versionsOut, h.version + '.html'), template(fake, body, { rfcs: '../rfcs/', here: h.version, demosHref: snap, titleOverride: `portal-netgl ${h.version}: ${h.label}` }))
+  writeFileSync(join(versionsOut, h.version + '.html'), template(fake, body, { rfcs: '../rfcs/', root: '../', here: h.version, demosHref: snap + demoPath('three'), titleOverride: `portal-netgl ${h.version}: ${h.label}` }))
   versionPages++
 }
 // The infographics, stamped with this build's version.
 execFileSync(process.execPath, [join(src, 'img/generate.mjs'), '--out', join(out, 'img')], { stdio: 'inherit' })
 for (const f of readdirSync(join(src, 'img'))) if (f.endsWith('.svg')) { /* generated above */ }
-console.log(`rfc site: ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)
+console.log(`rfc site: the summary at ${join(out, '..', 'index.html')}, ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)

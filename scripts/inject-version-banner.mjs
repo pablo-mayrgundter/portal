@@ -35,11 +35,11 @@ const banner = `
   var path = location.pathname, m = path.match(/^(.*\\/)v\\/([^/]+)\\/(.*)$/);
   if (!m) return;
   var siteRoot = m[1], here = m[2], rest = m[3];
-  var sel = document.getElementById('portal-version-banner-select'), demosOf = {};
+  var sel = document.getElementById('portal-version-banner-select'), demosOf = {}, meta = {};
   document.getElementById('portal-version-banner-docs').href = siteRoot + 'rfcs/';
   fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
     if (!j || !j.versions) return;
-    var meta = j.meta || {};
+    meta = j.meta || {};
     var add = function (value, text, selected) { var o = document.createElement('option'); o.value = value; o.textContent = text; o.selected = !!selected; sel.appendChild(o); };
     sel.innerHTML = '';
     add('latest', 'latest · ' + (j.latest || 'main'));
@@ -51,7 +51,10 @@ const banner = `
     var target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
     // The same demo in the chosen version when it has it, else that version's root.
     var demo = rest.replace(/[^/]*$/, ''), key = demo.replace(/\\/$/, '') || 'three';
-    location.href = target + (demosOf[v] && demosOf[v].indexOf(key) < 0 ? '' : demo);
+    // The Local demo is at a snapshot's root up to 0.6.8 (layout demo-root) and at three/ after.
+    var m = (meta || {})[v] || {}, demoRoot = v !== 'latest' && m.layout === 'demo-root';
+    var path = key === 'three' ? (demoRoot ? '' : 'three/') : demo;
+    location.href = target + (demosOf[v] && demosOf[v].indexOf(key) < 0 ? '' : path);
   });
 })();
 </script>

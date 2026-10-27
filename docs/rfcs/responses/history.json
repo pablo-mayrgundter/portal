@@ -1,5 +1,5 @@
 {
-  "$comment": "The releases of portal-netgl, and the state of the repo before it, as the Pages site snapshots them under /v/<version>/. `ref` is the last commit on main at that version (what the version shipped as), `demos` the apps that existed then, `docs` whether the responses site existed. scripts/write-versions.mjs folds this into /v/versions.json, .github/workflows/snapshot.yml rebuilds a version from its ref, and docs/rfcs/responses/img/generate.mjs draws the timeline from it.",
+  "$comment": "The releases of portal-netgl, and the state of the repo before it, as the Pages site snapshots them under /v/<version>/. `ref` is the last commit on main at that version (what the version shipped as), `demos` the apps that existed then, `docs` whether the responses site existed. scripts/write-versions.mjs folds this into /v/versions.json, .github/workflows/snapshot.yml rebuilds a version from its ref, and docs/rfcs/responses/img/generate.mjs draws the timeline from it. `layout: 'demo-root'` marks a snapshot whose Local portal demo is at its root (every version up to 0.6.8); from then on the site root is the summary page and the demo is at three/.",
   "versions": [
     {
       "version": "0.0.0-frame-rpc",
@@ -24,7 +24,8 @@
         12,
         13,
         14
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.1.0",
@@ -51,7 +52,8 @@
         23,
         24,
         25
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.2.0",
@@ -76,7 +78,8 @@
         29,
         30,
         31
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.3.0",
@@ -95,7 +98,8 @@
       "docs": false,
       "prs": [
         33
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.4.0",
@@ -114,7 +118,8 @@
       "docs": false,
       "prs": [
         34
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.5.0",
@@ -135,7 +140,8 @@
       "prs": [
         35,
         36
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.0",
@@ -155,7 +161,8 @@
       "docs": false,
       "prs": [
         40
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.1",
@@ -175,7 +182,8 @@
       "docs": false,
       "prs": [
         41
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.2",
@@ -195,7 +203,8 @@
       "docs": false,
       "prs": [
         42
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.3",
@@ -215,7 +224,8 @@
       "docs": false,
       "prs": [
         43
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.4",
@@ -235,7 +245,8 @@
       "docs": false,
       "prs": [
         44
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.5",
@@ -255,7 +266,8 @@
       "docs": false,
       "prs": [
         45
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.6",
@@ -275,7 +287,8 @@
       "docs": false,
       "prs": [
         46
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.7",
@@ -295,7 +308,8 @@
       "docs": false,
       "prs": [
         47
-      ]
+      ],
+      "layout": "demo-root"
     },
     {
       "version": "0.6.8",
@@ -316,7 +330,8 @@
       "prs": [
         48,
         50
-      ]
+      ],
+      "layout": "demo-root"
     }
   ]
 }
