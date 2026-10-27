@@ -7,8 +7,9 @@
 // /<key>/ siblings. Drawer URLs are relative so they work under any base
 // (e.g. /portal/, /portal/pr-preview/pr-19/).
 //
-// Above the demos, a version pulldown; below them, a link to the RFC
-// responses (the docs site the build puts at <base>/rfcs/). Each portal-netgl release
+// Above the demos: an intro that says what Portal is, linking to the RFC
+// responses (the docs site the build puts at <base>/rfcs/) in a new tab,
+// then a version pulldown. Each portal-netgl release
 // keeps a snapshot of the whole site (demos and docs) at <site>/v/<version>/,
 // listed in <site>/v/versions.json by the Pages workflow; the pulldown
 // moves to the same demo in the chosen snapshot, or back to latest.
@@ -122,9 +123,10 @@ const STYLES = `
 #portal-nav-drawer .portal-nav-current a { background: rgba(93, 169, 255, 0.14); border-color: rgba(93, 169, 255, 0.50); }
 #portal-nav-drawer .portal-nav-label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 3px; }
 #portal-nav-drawer .portal-nav-desc { display: block; font-size: 12px; color: #8fa7c4; line-height: 1.45; }
-#portal-nav-drawer .portal-nav-docs { margin-top: 18px; }
-#portal-nav-drawer .portal-nav-docs a { border-color: rgba(154, 140, 255, 0.35); }
-#portal-nav-drawer .portal-nav-docs a:hover { background: rgba(154, 140, 255, 0.12); border-color: rgba(154, 140, 255, 0.6); }
+#portal-nav-drawer .portal-nav-intro { font-size: 13px; line-height: 1.5; color: #c9c3ea; margin: 0 0 16px; padding: 10px 12px; background: rgba(154, 140, 255, 0.08); border-left: 2px solid rgba(154, 140, 255, 0.55); border-radius: 0 8px 8px 0; }
+#portal-nav-drawer .portal-nav-intro a { display: inline; padding: 0; background: transparent; border: none; color: #b7a9ff; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+#portal-nav-drawer .portal-nav-intro a:hover { background: transparent; color: #d6ccff; }
+#portal-nav-drawer .portal-nav-intro svg { display: inline-block; vertical-align: -1px; margin-left: 2px; }
 #portal-nav-drawer .portal-nav-version { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; }
 #portal-nav-drawer .portal-nav-version select {
   font: 600 12px Inter, system-ui, sans-serif;
@@ -140,6 +142,7 @@ const STYLES = `
 #portal-nav-drawer .portal-nav-repo a:hover { background: transparent; }
 `
 
+const EXTERNAL_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>'
 const HAMBURGER_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 const CLOSE_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 
@@ -225,6 +228,7 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
   drawer.innerHTML = `
     <h2>Portal demos</h2>
     <p class="portal-nav-subtitle">Same scenes, different wire.</p>
+    <p class="portal-nav-intro">Portal links independent 3D web renderers at the GL layer: a guest's WebGL2 calls replay into the host's context, so engines compose without rewriting either. What it is, and where it's going: <a href="${current === 'three' ? 'rfcs/' : '../rfcs/'}" target="_blank" rel="noopener">the RFC responses${EXTERNAL_SVG}</a></p>
     <label class="portal-nav-version">Version
       <select id="portal-nav-version" aria-label="Site version"><option value="latest" selected>latest</option></select>
     </label>
@@ -238,12 +242,6 @@ export const attachNavDrawer = (current: NavDemoKey): void => {
         </li>
       `).join('')}
     </ul>
-    <div class="portal-nav-docs">
-      <a href="${current === 'three' ? 'rfcs/' : '../rfcs/'}">
-        <span class="portal-nav-label">Docs: what Portal is, and where it's going</span>
-        <span class="portal-nav-desc">The RFC responses: an overview of NetGL, one page per RFC, the tracks of work and the versions they claim.</span>
-      </a>
-    </div>
     <p class="portal-nav-repo"><a href="https://github.com/pablo-mayrgundter/portal" target="_blank" rel="noopener">github.com/pablo-mayrgundter/portal</a></p>
   `
 
