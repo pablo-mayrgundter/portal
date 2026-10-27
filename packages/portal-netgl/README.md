@@ -477,7 +477,9 @@ over a MessageChannel the host hands the guest):
 - **The shadow's draws** (0.6.2): by default the shadow executes every
   call, draws included, so it holds the guest's rendered frame for
   readback (Cesium's picking). A guest that never reads its own pixels (an
-  overlay) can pass `makeNetGLGuestContext({ shadowDraws: false })`: draws
+  overlay) can pass `makeNetGLGuestContext({ shadowDraws: false })`, or
+  `makeNetGLCesiumGuest({ shadowDraws: false })` (0.6.6) for a Cesium app
+  that never picks (its inputs off, heights from `globe.getHeight`): draws
   and clears (`draw*`, `clear`, `clearBuffer*`, `blitFramebuffer`) are
   recorded and shipped as ever but skipped on the shadow, so the guest's
   pixel work is done once, by the host's replay. State, uploads, handles
