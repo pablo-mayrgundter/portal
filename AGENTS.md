@@ -100,7 +100,10 @@ were tried and dropped.
   (`.github/workflows/snapshot.yml`, run from the Actions tab with the
   version); its commit, date and demos come from
   `docs/rfcs/responses/history.json`, which also feeds the pulldowns'
-  labels and the Evolution page's timeline. A new release gets a row there.
+  labels and the Evolution page's timeline. A new release gets a row there,
+  and a `## <version>: ...` section in CHANGELOG.md: the site renders that
+  section as `rfcs/versions/<version>.html`, the page the docs' pulldown
+  shows for a version that predates the responses (they start at 0.6.8).
   The workflow takes one version or a JSON array of them (built one after
   another in one run). From a cloud session, dispatch it through the REST
   endpoint: `gh api -X POST repos/<owner>/portal/actions/workflows/snapshot.yml/dispatches -f ref=main -f 'inputs[version]=0.2.0'`;
