@@ -73,10 +73,13 @@ tease out.</p>
 <code>https://pablo-mayrgundter.github.io/portal/v/&lt;version&gt;/</code>, and the
 version pulldown in the header moves between them. Versions before 0.6.8
 are reconstructions: the demos rebuilt from the last commit on <code>main</code> at
-that version, carrying a banner that says so. They have the demos of
-their day and no docs site. Where a demo&#39;s data comes from a service
-(Cesium ion, celestiary&#39;s catalogues), what it shows today is what those
-services serve today, not what they served then.</p>
+that version, with that commit&#39;s lockfile and submodule pointer, carrying
+a banner that says so. They have the demos of their day and no docs
+site. The demos are self-contained (the Cesium demo&#39;s default imagery is
+bundled, the deck.gl demo&#39;s countries are bundled, celestiary comes from
+the submodule), so a snapshot runs the demo as it ran then; the one
+run-time fetch is OpenStreetMap tiles when a Cesium demo is asked for
+them (<code>?imagery=osm</code>).</p>
 <h2 id="the-releases">The releases</h2>
 <table>
 <thead>
@@ -324,8 +327,8 @@ latest. It is injected at deploy time; it isn&#39;t in the commit.</li>
 label and demos from
 <a href="https://github.com/pablo-mayrgundter/portal/blob/main/docs/rfcs/responses/history.json"><code>history.json</code></a>,
 which is where a new version&#39;s entry goes.</li>
-<li>Demo data that comes from a service shows today&#39;s service, and a demo
-that depended on a credential that no longer works shows its fallback.</li>
+<li>Nothing in a snapshot depends on a credential or a catalogue fetched
+at run time; the demos&#39; data is in the commit.</li>
 </ul>
 
 </main>
