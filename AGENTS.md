@@ -101,6 +101,12 @@ were tried and dropped.
   version); its commit, date and demos come from
   `docs/rfcs/responses/history.json`, which also feeds the pulldowns'
   labels and the Evolution page's timeline. A new release gets a row there.
+  The workflow takes one version or a JSON array of them (built one after
+  another in one run). From a cloud session, dispatch it through the REST
+  endpoint: `gh api -X POST repos/<owner>/portal/actions/workflows/snapshot.yml/dispatches -f ref=main -f 'inputs[version]=0.2.0'`;
+  `gh workflow run` fails, since it looks the default branch up over
+  GraphQL, which the session's proxy refuses. `gh run list` and `gh run
+  view` work for watching it.
 - **Static servers and rebuilds.** A build that deletes and recreates
   its output directory leaves a server started inside it serving
   nothing. Restart the server after rebuilding.

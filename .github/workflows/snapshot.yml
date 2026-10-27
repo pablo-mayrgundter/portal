@@ -11,16 +11,19 @@ name: Snapshot a version
 # since old demos predate the drawer's pulldown. Then v/versions.json is
 # rewritten from what's on gh-pages.
 #
-# Run it from the Actions tab (workflow_dispatch), one version per run.
+# Run it from the Actions tab (workflow_dispatch): one version, or several
+# as a JSON array (`["0.1.0","0.2.0"]`), built one after another in one run
+# (they share the gh-pages branch). The versions list is rewritten once at
+# the end.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: The version to rebuild (a key in docs/rfcs/responses/history.json), e.g. 0.2.0
+        description: 'The version to rebuild (a key in docs/rfcs/responses/history.json), e.g. 0.2.0, or a JSON array of them, e.g. ["0.1.0","0.2.0"]'
         required: true
       ref:
-        description: The commit to build from; defaults to the one history.json names
+        description: The commit to build from (single version only); defaults to the one history.json names
         required: false
 
 permissions:
@@ -31,8 +34,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  snapshot:
+  versions:
     runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.parse.outputs.list }}
+    steps:
+      - name: One version or a JSON array of them
+        id: parse
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          node -e '
+            const raw = process.env.VERSION_INPUT.trim()
+            const list = raw.startsWith("[") ? JSON.parse(raw) : [raw]
+            if (!list.length || !list.every((v) => typeof v === "string" && /^[\w.-]+$/.test(v))) { console.error("bad versions input"); process.exit(1) }
+            console.log("list=" + JSON.stringify(list))
+          ' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  snapshot:
+    needs: versions
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.versions.outputs.list) }}
     steps:
       - name: Check out the branch the workflow runs from, for history.json and the scripts
         uses: actions/checkout@v4
@@ -42,23 +69,20 @@ jobs:
       - name: Look the version up
         id: lookup
         run: |
-          VERSION='${{ inputs.version }}'
+          VERSION='${{ matrix.version }}'
           REF='${{ inputs.ref }}'
+          # a ref override applies to a single-version run only
+          if [ "$(node -e 'console.log(JSON.parse(process.argv[1]).length)' '${{ needs.versions.outputs.list }}')" != "1" ]; then REF=''; fi
           ENTRY=$(node -e "const h=require('./docs/rfcs/responses/history.json').versions.find(v=>v.version===process.argv[1]);if(!h){console.error('unknown version');process.exit(1)};console.log(JSON.stringify(h))" "$VERSION")
           [ -n "$REF" ] || REF=$(echo "$ENTRY" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).ref")
           DATE=$(echo "$ENTRY" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).date")
           SHA=$(git rev-parse --verify "$REF^{commit}")
-          LATEST=$(node -p "require('./packages/portal-netgl/package.json').version")
-          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "short=$(git rev-parse --short "$SHA")" >> "$GITHUB_OUTPUT"
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/portal-scripts"
-          cp scripts/write-versions.mjs scripts/inject-version-banner.mjs "$RUNNER_TEMP/portal-scripts/"
-          # write-versions.mjs reads ../docs/rfcs/responses/history.json relative to itself
-          mkdir -p "$RUNNER_TEMP/docs/rfcs/responses"
-          cp docs/rfcs/responses/history.json "$RUNNER_TEMP/docs/rfcs/responses/history.json"
+          cp scripts/inject-version-banner.mjs "$RUNNER_TEMP/portal-scripts/"
           echo "Snapshot $VERSION from $SHA ($DATE)"
 
       - name: Check out that commit
@@ -108,16 +132,24 @@ jobs:
           clean: true
           commit-message: 'Snapshot v${{ steps.lookup.outputs.version }}, rebuilt from ${{ steps.lookup.outputs.short }} 🛫'
 
-      - name: Rewrite the versions list
+  versions-list:
+    needs: [versions, snapshot]
+    if: always() && needs.versions.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rewrite the versions list from what is on gh-pages
         run: |
           git fetch --depth=1 origin gh-pages
-          LATEST='${{ steps.lookup.outputs.latest }}'
+          LATEST=$(node -p "require('./packages/portal-netgl/package.json').version")
           EXISTING=$(git ls-tree --name-only origin/gh-pages v/ | sed 's#^v/##' | grep -E '^[0-9]' || true)
           mkdir -p dist-versions
           # shellcheck disable=SC2086
-          node "$RUNNER_TEMP/portal-scripts/write-versions.mjs" "$LATEST" $EXISTING "${{ steps.lookup.outputs.version }}" > dist-versions/versions.json
+          node scripts/write-versions.mjs "$LATEST" $EXISTING > dist-versions/versions.json
           cat dist-versions/versions.json
-
       - name: Publish the versions list
         uses: JamesIves/github-pages-deploy-action@v4
         with:
