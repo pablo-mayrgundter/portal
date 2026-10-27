@@ -1,0 +1,322 @@
+{
+  "$comment": "The releases of portal-netgl, and the state of the repo before it, as the Pages site snapshots them under /v/<version>/. `ref` is the last commit on main at that version (what the version shipped as), `demos` the apps that existed then, `docs` whether the responses site existed. scripts/write-versions.mjs folds this into /v/versions.json, .github/workflows/snapshot.yml rebuilds a version from its ref, and docs/rfcs/responses/img/generate.mjs draws the timeline from it.",
+  "versions": [
+    {
+      "version": "0.0.0-frame-rpc",
+      "ref": "6e3f1d5",
+      "date": "2026-04-30",
+      "label": "Frame-RPC portals, before NetGL",
+      "summary": "Doors between three.js worlds: a halfspace stencil and an oblique clip; endpoints over local, iframe, Worker and headless transports shipping colour and packed-depth bitmaps; traversal; recursive portals; a server-side snapshot proxy.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker"
+      ],
+      "docs": false,
+      "prs": [
+        1,
+        3,
+        5,
+        6,
+        7,
+        10,
+        11,
+        12,
+        13,
+        14
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "ref": "9885d79",
+      "date": "2026-07-09",
+      "bumped": "2026-05-25",
+      "label": "The command stream",
+      "summary": "A Proxy records a guest's WebGL2 calls, a shadow context answers them synchronously, the host replays them in its own context with handles interned and a frame-end marker; postMessage carries it. celestiary goes through a door unmodified but for a renderer hook: door-fit viewport remap, batches concatenated, autoClear rules. Published to npm on 2026-05-28.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary"
+      ],
+      "docs": false,
+      "prs": [
+        16,
+        17,
+        18,
+        19,
+        21,
+        22,
+        23,
+        24,
+        25
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "ref": "ed267d6",
+      "date": "2026-09-29",
+      "bumped": "2026-09-26",
+      "label": "Checkpoint, screen policy, Cesium",
+      "summary": "A framework-agnostic guest core; the state checkpoint at each frame boundary; the screen policy (stencil, clears, blend) and screenFramebuffer; the same-page immediate link; Cesium as a guest through getWebGLStub, through a door and in place of a three.js Earth. The f → f′ shim model, the portal-layers 0.1 design and the lessons from celestiary's Cesium layers, which run in production.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "prs": [
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "ref": "8bf5c59",
+      "date": "2026-10-22",
+      "label": "Tracked state",
+      "summary": "The checkpoint is built from tracked scalar state: no synchronous GL queries per guest frame (79 before).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "prs": [
+        33
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "ref": "0e88bee",
+      "date": "2026-10-23",
+      "label": "Inside the host's pass",
+      "summary": "clear: 'none' and sub-frames: a guest drawn several times in one host frame, inside the host's pass, against its depth (Cesium drawing Slop New York per frustum).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "prs": [
+        34
+      ]
+    },
+    {
+      "version": "0.5.0",
+      "ref": "0b13021",
+      "date": "2026-10-23",
+      "label": "Overlay, the view, cross-origin",
+      "summary": "The deck.gl / luma.gl host adapter (restore, where three invalidates), the overlay kind in the host's clip space, layer:view and the first control messages, postMessage transports pinned by origin on both ends, a three.js overlay guest. RFC 0001 starts the series.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        35,
+        36
+      ]
+    },
+    {
+      "version": "0.6.0",
+      "ref": "18ea38d",
+      "date": "2026-10-24",
+      "label": "Wire 2",
+      "summary": "One batch per guest frame over a MessagePort, negotiated in the handshake; uploads sliced to the bytes a call reads; recorder-owned buffers transferred. A cross-site frame: 187 messages and 505 KB → 1 and 48 KB.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        40
+      ]
+    },
+    {
+      "version": "0.6.1",
+      "ref": "8543e93",
+      "date": "2026-10-24",
+      "label": "Redraw folding",
+      "summary": "A redraw request restarts the fold window, so a guest frame that lands after a host draw still gets its own.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        41
+      ]
+    },
+    {
+      "version": "0.6.2",
+      "ref": "976ae98",
+      "date": "2026-10-24",
+      "label": "No-draw shadow",
+      "summary": "shadowDraws: false skips the shadow context's draws for a guest that never reads back; the stream is unchanged.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        42
+      ]
+    },
+    {
+      "version": "0.6.3",
+      "ref": "8b8551a",
+      "date": "2026-10-24",
+      "label": "Host reprojection",
+      "summary": "A late overlay frame is corrected to the host's current view (gl_Position × VP_now · VP_frame⁻¹, the vertex shaders rewritten once); viewId on the frame-end says which view a frame was for.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        43
+      ]
+    },
+    {
+      "version": "0.6.4",
+      "ref": "e174de2",
+      "date": "2026-10-24",
+      "label": "Opt-in shaders",
+      "summary": "A vertex shader that declares netgl_reproject applies the correction itself (wide lines keep their width).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        44
+      ]
+    },
+    {
+      "version": "0.6.5",
+      "ref": "b7a1225",
+      "date": "2026-10-26",
+      "label": "Viewport map",
+      "summary": "A frame drawn for one buffer size is mapped when the host's buffer changed size.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        45
+      ]
+    },
+    {
+      "version": "0.6.6",
+      "ref": "b84275f",
+      "date": "2026-10-26",
+      "label": "Cesium shim passthrough",
+      "summary": "makeNetGLCesiumGuest passes shadowDraws through (0.6.5 had gone to the viewport map).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        46
+      ]
+    },
+    {
+      "version": "0.6.7",
+      "ref": "e4f63d0",
+      "date": "2026-10-27",
+      "label": "Pixel sizes",
+      "summary": "A lagging frame's point sizes and line widths follow the host's pixel ratio.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "prs": [
+        47
+      ]
+    },
+    {
+      "version": "0.6.8",
+      "ref": "42e507c",
+      "date": "2026-10-27",
+      "label": "Parts",
+      "summary": "Several draws for one view, each to its own target: part on the frame-end and beforeFrame on the receiver (celestiary's night lights from a guest page). The RFC responses and this site.",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "prs": [
+        48,
+        50
+      ]
+    }
+  ]
+}

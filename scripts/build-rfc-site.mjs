@@ -31,6 +31,7 @@ const PAGES = [
   { md: '0001-globe-orbit-layers.md', html: '0001-globe-orbit-layers.html', nav: 'RFC 0001', title: 'RFC 0001: globe + orbit layers' },
   { md: '0002-nested-in-place-guests.md', html: '0002-nested-in-place-guests.html', nav: 'RFC 0002', title: 'RFC 0002: nested in-place guests' },
   { md: '0003-late-frames.md', html: '0003-late-frames.html', nav: 'RFC 0003', title: 'RFC 0003: late frames' },
+  { md: 'evolution.md', html: 'evolution.html', nav: 'Evolution', title: 'How NetGL got here' },
 ]
 // The demos live beside the site (the root demo, whose drawer lists the
 // rest), so one link, opened in a new tab.
@@ -121,18 +122,24 @@ const SCRIPT = `
   var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
   var m = root.match(/^(.*\\/)v\\/([^/]+)\\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : 'latest';
   var page = path.slice(path.lastIndexOf('/') + 1) || 'index.html';
+  var meta = {};
   function fill(list, latest) {
     sel.innerHTML = '';
-    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) { return [v, 'v' + v + ' snapshot']; }));
+    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) {
+      var m = meta[v] || {};
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '') + (m.label ? ' · ' + m.label : '')];
+    }));
     opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
     if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
   }
   fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-    if (j && j.versions) fill(j.versions, j.latest || sel.dataset.version);
+    if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
   }).catch(function () {});
   sel.addEventListener('change', function () {
     var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
-    location.href = target + 'rfcs/' + page + location.hash;
+    // A reconstructed snapshot has the demos of its day but no docs: go to its root.
+    var hasDocs = v === 'latest' || !meta[v] || meta[v].docs;
+    location.href = hasDocs ? target + 'rfcs/' + page + location.hash : target;
   });
 })();
 `

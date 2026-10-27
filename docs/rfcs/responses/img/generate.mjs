@@ -298,4 +298,57 @@ function footer(s, text) { s.text(40, s.h - 18, text, { size: 11, fill: C.ink3 }
   footer(s, 'docs/rfcs/responses/0003-late-frames.md · RFC text and discussion: portal #49 · integration: celestiary/web #309, #310, #317; cesium-portal')
   writeFileSync(OUT + 'rfc-0003.svg', s.toString())
 }
-console.log('wrote 4 svgs')
+
+// ───────────────────────────── 5. evolution ─────────────────────────────
+{
+  const history = JSON.parse(readFileSync(join(here, '../history.json'), 'utf8')).versions
+  // The axes, and what each release moved on each. Editorial; evolution.md has the same table.
+  const AXES = ['What crosses the wire', 'Whose state the guest\'s is', 'What the host may override', 'How two scenes compose', 'When a frame is late', 'Who is talking']
+  const CELLS = {
+    '0.0.0-frame-rpc': ['colour + packed-depth bitmaps', 'the endpoint\'s own context', 'stencil + oblique clip, by hand', 'a door', '', 'same origin'],
+    '0.1.0': ['GL calls, one message each', 'a shadow context answers sync', 'door-fit viewport remap', 'a door; a real app through it', 'batches concatenated; stale re-run', 'netgl:ready'],
+    '0.2.0': ['', 'the checkpoint, per frame', 'screen policy: stencil, clears, blend, target', 'in place: Cesium\'s Earth', 'a deleting frame never re-run', 'same-page link; ready until acked'],
+    '0.3.0': ['', 'tracked: no queries', '', '', '', ''],
+    '0.4.0': ['', 'deferred across sub-frames', 'clear: none', 'inside the host\'s pass, per frustum', '', ''],
+    '0.5.0': ['', '', '', 'overlay in the host\'s clip space', 'one view in flight; canRerun', 'layer:view, hello-ack; origins pinned'],
+    '0.6.0': ['one batch per frame; sliced; transferred', '', '', '', '', 'the port, negotiated'],
+    '0.6.1': ['', '', '', '', 'redraw folding', ''],
+    '0.6.2': ['', 'the shadow stops drawing', '', '', '', ''],
+    '0.6.3': ['', '', '', '', 'reprojection; viewId on frame-end', ''],
+    '0.6.4': ['', '', '', '', 'shaders opt in', ''],
+    '0.6.5': ['', '', 'viewport map on resize', '', '', ''],
+    '0.6.6': ['', '', '', '', '', ''],
+    '0.6.7': ['', '', '', '', 'pixel sizes follow the host', ''],
+    '0.6.8': ['', '', 'parts to their own targets', '', '', 'part on the frame-end'],
+  }
+  const DEMO_LABEL = { three: 'Local', iframe: 'iframe', worker: 'Worker', netgl: 'NetGL', 'netgl-celestiary': 'celestiary', 'netgl-cesium': 'Cesium', 'netgl-deck': 'deck.gl' }
+  const AXIS_COL = [C.guest, C.open, C.host, C.built, C.risk, C.next]
+  const rows = history
+  const left = 40, labelW = 200, demoW = 140, colW = 140, rowH = 52, top = 150
+  const w = left + labelW + AXES.length * colW + demoW + 40
+  const s = new Svg(Math.max(1200, w), top + rows.length * rowH + 150)
+  header(s, 'How NetGL got here: the releases up to ' + VERSION, 'Read down a column: each release moved one or two of six axes, and the axes are the protocol. Every version is a snapshot of the site, demos included.', 'Apr–Oct 2026')
+  // column headings
+  AXES.forEach((ax, i) => { const x = left + labelW + i * colW; s.add(`<rect x="${x + 4}" y="${top - 46}" width="${colW - 8}" height="36" rx="8" fill="${AXIS_COL[i]}" opacity="0.12"/>`); s.para(x + 10, top - 30, ax, colW - 20, { size: 11.5, bold: true, fill: AXIS_COL[i], lh: 1.2 }) })
+  s.text(left + labelW + AXES.length * colW + 10, top - 22, 'Demos', { size: 11.5, bold: true, fill: C.ink2 })
+  rows.forEach((r, i) => {
+    const y = top + i * rowH
+    s.add(`<rect x="${left}" y="${y}" width="${w - 80}" height="${rowH}" fill="${i % 2 ? '#f7f6f2' : C.panel}"/>`)
+    s.line(left, y + rowH, w - 40, y + rowH, { stroke: C.line, sw: 1 })
+    const v = r.version === '0.0.0-frame-rpc' ? 'before NetGL' : 'v' + r.version
+    s.text(left + 8, y + 19, v + '  ·  ' + r.date, { size: 12, bold: true, fill: r.docs ? C.open : C.ink })
+    s.para(left + 8, y + 35, r.label, labelW - 16, { size: 10.5, fill: C.ink2, lh: 1.2 })
+    const cells = CELLS[r.version] || []
+    cells.forEach((c, j) => { if (!c) return; const x = left + labelW + j * colW; s.circle(x + 10, y + 16, 4, AXIS_COL[j]); s.para(x + 19, y + 20, c, colW - 26, { size: 10.5, fill: C.ink, lh: 1.2 }) })
+    const prev = rows[i - 1]
+    const added = r.demos.filter((d) => !prev || !prev.demos.includes(d))
+    const dx = left + labelW + AXES.length * colW + 10
+    if (added.length) s.para(dx, y + 20, (prev ? '+ ' : '') + added.map((d) => DEMO_LABEL[d] || d).join(', ') + (r.docs && (!prev || !prev.docs) ? ' + docs' : ''), demoW - 10, { size: 10.5, bold: true, fill: C.ink2, lh: 1.2 })
+  })
+  const fy = top + rows.length * rowH + 36
+  s.para(left, fy, 'Three moves explain most of it: the seam moved down a layer (pixels → calls), then the unit moved up (a call → a frame); the guest\'s state became something the protocol carries (shadow → checkpoint → tracked → deferred); and the host\'s say over the guest\'s draws became a policy that grows a clause per integration.', w - 80, { size: 12.5, fill: C.ink })
+  s.para(left, fy + 54, 'Composition modes and lateness follow from the integrations: a door needs a door, an Earth needs a shape, orbits need neither, a city needs the host\'s pass; a guest on another origin is a frame late, so the host corrects what it has.', w - 80, { size: 12.5, fill: C.ink2 })
+  footer(s, 'docs/rfcs/responses/evolution.md · snapshots at /portal/v/<version>/ · history.json names each version\'s commit')
+  writeFileSync(OUT + 'evolution.svg', s.toString())
+}
+console.log('wrote 5 svgs')
