@@ -45,6 +45,9 @@ main.doc pre { background: #f1f0ec; padding: 12px; border-radius: 8px; overflow-
 main.doc pre code { background: none; padding: 0; }
 main.doc blockquote { border-left: 3px solid var(--open); margin: 12px 0; padding: 4px 14px; color: var(--ink2); }
 main.doc .figure { display: block; margin: 18px 0 26px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fcfcfb; }
+main.doc svg.overview { display: block; width: 100%; height: auto; margin: 8px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfb; }
+main.doc svg.overview a { cursor: pointer; }
+main.doc svg.overview a:hover text { text-decoration: underline; }
 main.doc .figure img { display: block; width: 100%; height: auto; }
 footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 12px; color: var(--ink3); border-top: 1px solid var(--line); }
 @media (max-width: 720px) { html { font-size: 15px; } .right { margin-left: 0; } }
@@ -52,11 +55,11 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="../">Portal <small>NetGL</small></a>
-  <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="index.html">Responses</a><a href="0001-globe-orbit-layers.html">RFC 0001</a><a href="0002-nested-in-place-guests.html" aria-current="page">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a><a href="evolution.html">Evolution</a></nav>
+  <a class="brand" href="../">Portal / NetGL</a>
+  <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../changelog.html">Changelog</a><a href="index.html" aria-current="page">RFCs</a></nav>
   <a class="demos" href="../three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.8</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
