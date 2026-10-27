@@ -318,7 +318,7 @@ version): <strong>a track claims its next version here before bumping it.</stron
 </tr>
 <tr>
 <td><strong>T6 Packaging and release</strong></td>
-<td>Entries per framework (<code>/core</code>, <code>/three</code>, <code>/luma</code>, <code>/cesium</code>), each framework an optional peer; this table as the version-claim register; a guest page reports the protocol it speaks; the RFC index points at the issues</td>
+<td>Entries per framework (<code>/core</code>, <code>/three</code>, <code>/luma</code>, <code>/cesium</code>), each framework an optional peer; this table as the version-claim register; a guest page reports the protocol it speaks, and a dynamic network dependency is versioned by that protocol increment, not by its source (decision 13); the RFC index points at the issues</td>
 <td>0001 Q23–Q24; 0002 §12; 0003 §7.4</td>
 <td>a deck host bundles portal-netgl without three.js; no two tracks publish the same version</td>
 </tr>
@@ -395,6 +395,7 @@ the 1-pagers.</p>
 <li><strong>A 2D host gets anchors only in v1;</strong> no <code>webMercator</code> projection in guests until a host-supplied shader prelude exists. (0001 Q7.)</li>
 <li><strong>The <code>occlude</code> pass is the screen policy&#39;s by default</strong> (<code>blend: &#39;occlude&#39;</code>), with a guest-side pass as the opt-out where NaN or translucency bite. (0002 Q7.)</li>
 <li><strong>The ground: the guest drapes within a host budget; the host picks the form; sea level is a scalar until a layer is wider than a city.</strong> (0002 Q8–Q9.)</li>
+<li><strong>A dynamic network dependency is versioned by protocol increment, not by source.</strong> A guest page served from another origin (celestiary&#39;s layer page, the Cesium guest pages on cesium-portal) is meant to move; what a host may rely on is the wire and layer protocol versions it negotiates in the handshake, and a guest page reports the protocol it speaks (0003 §7.4). Pinned dependencies (npm, a submodule) freeze with a commit; network ones don&#39;t, and a site snapshot against today&#39;s guest is a compatibility test of the handshake. (0001 §10.6; 0003 §7.4; the <a href="evolution.html">Evolution page</a>.)</li>
 </ol>
 <h2 id="what-were-asking-commenters">What we&#39;re asking commenters</h2>
 <ul>

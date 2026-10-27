@@ -75,11 +75,22 @@ version pulldown in the header moves between them. Versions before 0.6.8
 are reconstructions: the demos rebuilt from the last commit on <code>main</code> at
 that version, with that commit&#39;s lockfile and submodule pointer, carrying
 a banner that says so. They have the demos of their day and no docs
-site. The demos are self-contained (the Cesium demo&#39;s default imagery is
-bundled, the deck.gl demo&#39;s countries are bundled, celestiary comes from
-the submodule), so a snapshot runs the demo as it ran then; the one
-run-time fetch is OpenStreetMap tiles when a Cesium demo is asked for
-them (<code>?imagery=osm</code>).</p>
+site. What a snapshot freezes is what the commit pins: its npm
+dependencies through the lockfile, and celestiary through the submodule
+pointer (until recently celestiary was an installed package, pinned the
+same way). What it doesn&#39;t freeze is a <strong>dynamic network dependency</strong>:
+a guest page served from another origin, such as celestiary&#39;s layer
+page in netmap or the Cesium guest pages celestiary loads from
+cesium-portal. Those are meant to move, and a snapshot that talks to
+one talks to what that origin serves today. That is the point of a
+network dependency, and it is versioned by the protocol it speaks, not
+by its source: the host and the guest agree in the handshake on the
+wire (1 or 2) and the layer protocol version, and an old host snapshot
+against today&#39;s guest is a compatibility test of exactly that. None of
+this repo&#39;s own demos has such a dependency yet (the deck.gl demo&#39;s
+cross-origin guest is its own build), so today every snapshot is
+self-contained; the one run-time fetch is OpenStreetMap tiles when a
+Cesium demo is asked for them (<code>?imagery=osm</code>).</p>
 <h2 id="the-releases">The releases</h2>
 <table>
 <thead>
@@ -327,8 +338,11 @@ latest. It is injected at deploy time; it isn&#39;t in the commit.</li>
 label and demos from
 <a href="https://github.com/pablo-mayrgundter/portal/blob/main/docs/rfcs/responses/history.json"><code>history.json</code></a>,
 which is where a new version&#39;s entry goes.</li>
-<li>Nothing in a snapshot depends on a credential or a catalogue fetched
-at run time; the demos&#39; data is in the commit.</li>
+<li>A snapshot pins what its commit pins. A dynamic network dependency
+(a guest page on another origin) stays live, and compatibility between
+a snapshot and it is the negotiated protocol version&#39;s business, not
+the snapshot&#39;s. A demo here that comes to load such a guest will say
+so in <code>history.json</code>.</li>
 </ul>
 
 </main>
