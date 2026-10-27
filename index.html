@@ -1,57 +1,277 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Spatial Portal - Host Three</title>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal / NetGL: link independent 3D web renderers at the GL layer</title>
+<meta name="description" content="The maintainers' response to the Portal RFCs: what each asks, what's built, and the tracks of work and versions that answer them.">
+<style>
+:root { --bg: #fcfcfb; --panel: #fff; --line: #e3e2dd; --ink: #0b0b0b; --ink2: #52514e; --ink3: #8a8984; --host: #2a78d6; --hostbg: #e3eefb; --open: #6250d6; --openbg: #ebe8fa; }
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--ink); font: 16px/1.5 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+body { margin: 0; }
+a { color: var(--host); }
+header.top { position: sticky; top: 0; z-index: 10; background: rgba(252,252,251,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+header.top .row { max-width: 1120px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+header.top .brand { font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; letter-spacing: -.01em; }
+header.top .brand small { color: var(--ink3); font-weight: 400; font-size: 12px; margin-left: 6px; }
+nav.pages a { color: var(--ink2); text-decoration: none; font-size: 14px; padding: 4px 8px; border-radius: 6px; }
+nav.pages a:hover { background: var(--hostbg); color: var(--host); }
+nav.pages a[aria-current] { background: var(--openbg); color: var(--open); font-weight: 600; }
+a.demos { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--host); background: var(--hostbg); border: 1px solid #bcd3f3; border-radius: 14px; padding: 4px 12px; text-decoration: none; }
+a.demos:hover { background: #d2e2f8; }
+a.demos svg { opacity: .8; }
+.right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.right a { font-size: 13px; color: var(--ink2); }
+.version { position: relative; display: inline-block; }
+.version select { max-width: min(60vw, 320px); text-overflow: ellipsis; appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
+.version::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--host); pointer-events: none; font-size: 12px; }
+.version.snapshot select { color: var(--open); background: var(--openbg); border-color: var(--open); }
+.version.snapshot::after { color: var(--open); }
+.notice { max-width: 1120px; margin: 12px auto 0; padding: 8px 16px; font-size: 13px; color: var(--open); }
+main.doc { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+main.doc .version-kicker { color: var(--ink2); font-size: 14px; margin: 8px 0 0; }
+main.doc h1 { font-size: 30px; letter-spacing: -.01em; line-height: 1.2; margin: 8px 0 16px; }
+main.doc h2 { font-size: 22px; margin: 36px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+main.doc h3 { font-size: 17px; margin: 24px 0 8px; }
+main.doc p, main.doc li { max-width: 78ch; }
+main.doc li { margin: 4px 0; }
+main.doc table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 12px 0 20px; display: block; overflow-x: auto; }
+main.doc th, main.doc td { border: 1px solid var(--line); padding: 7px 10px; vertical-align: top; text-align: left; }
+main.doc th { background: #f4f3ef; }
+main.doc tr:nth-child(even) td { background: #fbfaf7; }
+main.doc code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #f1f0ec; padding: 1px 4px; border-radius: 4px; }
+main.doc pre { background: #f1f0ec; padding: 12px; border-radius: 8px; overflow-x: auto; }
+main.doc pre code { background: none; padding: 0; }
+main.doc blockquote { border-left: 3px solid var(--open); margin: 12px 0; padding: 4px 14px; color: var(--ink2); }
+main.doc .figure { display: block; margin: 18px 0 26px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fcfcfb; }
+main.doc svg.overview { display: block; width: 100%; height: auto; margin: 8px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfb; }
+main.doc svg.overview a { cursor: pointer; }
+main.doc svg.overview a:hover text { text-decoration: underline; }
+main.doc .figure img { display: block; width: 100%; height: auto; }
+footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 12px; color: var(--ink3); border-top: 1px solid var(--line); }
+@media (max-width: 720px) { html { font-size: 15px; } .right { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header class="top"><div class="row">
+  <a class="brand" href="./">Portal / NetGL</a>
+  <nav class="pages" aria-label="Pages"><a href="./" aria-current="page">Summary</a><a href="changelog.html">Changelog</a><a href="rfcs/index.html">RFCs</a></nav>
+  <a class="demos" href="three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
+  <div class="right">
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.8</option></select></span>
+    <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
+  </div>
+</div></header>
+<main class="doc">
 
-    <!-- Social preview. The og:image URL points at the snapshot-proxy's
-         server-side renderer for the same scene this page renders client-side.
-         Crawlers fetch a real PNG of the scene; JS-aware shares get an
-         updated URL with the current ?pose= once the page boots. The proxy
-         base URL is overridable via the meta tag below — change it for prod
-         deploys without touching JS. -->
-    <meta name="portal:snapshot-proxy" content="https://portal-snapshot-proxy.fly.dev" />
-    <meta name="portal:snapshot-scene" content="pair" />
-    <meta property="og:title" content="Spatial Portal — local two-world demo" />
-    <meta property="og:description" content="Live 3D portal between two browser worlds. Walk through the door." />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://portal-snapshot-proxy.fly.dev/render/pair?w=1200&h=630" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://portal-snapshot-proxy.fly.dev/render/pair?w=1200&h=630" />
-    <style>
-      html, body, #app {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #080b13;
-      }
-      .label {
-        position: fixed;
-        top: 12px;
-        left: 12px;
-        color: #d8e7ff;
-        font-family: Inter, system-ui, sans-serif;
-        font-size: 13px;
-        line-height: 1.4;
-        background: rgba(4, 9, 18, 0.65);
-        border: 1px solid rgba(216, 231, 255, 0.2);
-        border-radius: 8px;
-        padding: 8px 10px;
-        pointer-events: none;
-      }
-    </style>
-    <script type="module" crossorigin src="/portal/assets/index-CLgmX-Dp.js"></script>
-  </head>
-  <body>
-    <div id="app"></div>
-    <div class="label">
-      WASD (or on-screen pad) + drag mouse/finger. Portal view is
-      camera-coupled to your pose. Press <kbd>P</kbd> to copy a permalink
-      for the current view.
-    </div>
-  </body>
+<svg xmlns="http://www.w3.org/2000/svg" class="overview" role="img" aria-label="Portal and NetGL in one picture" viewBox="0 0 1200 890" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<defs><marker id="arr-8a8984" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8a8984"/></marker><marker id="arr-eb6834" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#eb6834"/></marker><marker id="arr-2a78d6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2a78d6"/></marker></defs>
+<rect width="1200" height="890" fill="#fcfcfb"/>
+<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">Portal / NetGL: link independent 3D web renderers at the GL layer</text>
+<text x="40" y="78" font-size="15" fill="#52514e">Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.</text>
+<rect x="40" y="100" width="340" height="300" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="100" width="340" height="4" rx="2" fill="#52514e"/>
+<text x="58" y="132" font-size="16" fill="#0b0b0b" font-weight="700">The problem</text>
+<text x="58" y="156" font-size="13" fill="#52514e">3D on the web is split across engines that</text>
+<text x="58" y="173.55" font-size="13" fill="#52514e">don't compose. Each owns its scene graph,</text>
+<text x="58" y="191.10000000000002" font-size="13" fill="#52514e">camera, frame loop and GL state.</text>
+<rect x="58" y="206" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="106" y="224" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">three.js</text>
+<rect x="162" y="206" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="210" y="224" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">CesiumJS</text>
+<rect x="266" y="206" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="314" y="224" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">deck.gl</text>
+<rect x="58" y="242" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="106" y="260" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">Babylon.js</text>
+<rect x="162" y="242" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="210" y="260" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">WebGPU / splats</text>
+<text x="58" y="296" font-size="13" fill="#0b0b0b">Scene graphs are the wrong layer to</text>
+<text x="58" y="313.55" font-size="13" fill="#0b0b0b">standardise. One layer down, every engine</text>
+<text x="58" y="331.1" font-size="13" fill="#0b0b0b">emits WebGL2 draws.</text>
+<text x="58" y="356.65000000000003" font-size="13" fill="#0b0b0b" font-weight="700">NetGL links GL contexts: full fidelity,</text>
+<text x="58" y="374.20000000000005" font-size="13" fill="#0b0b0b" font-weight="700">no bitmap round-trip, occlusion both</text>
+<text x="58" y="391.75000000000006" font-size="13" fill="#0b0b0b" font-weight="700">ways.</text>
+<rect x="410" y="100" width="750" height="300" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="410" y="100" width="750" height="4" rx="2" fill="#2a78d6"/>
+<text x="428" y="132" font-size="16" fill="#0b0b0b" font-weight="700">How NetGL works</text>
+<rect x="428" y="166" width="118" height="98" rx="8" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="440" y="186" font-size="13.5" fill="#eb6834" font-weight="700">Guest renderer</text>
+<text x="440" y="204" font-size="12.5" fill="#52514e">three.js,</text>
+<text x="440" y="220.25" font-size="12.5" fill="#52514e">Cesium,</text>
+<text x="440" y="236.5" font-size="12.5" fill="#52514e">deck.gl,</text>
+<text x="440" y="252.75" font-size="12.5" fill="#52514e">unmodified</text>
+<rect x="570" y="166" width="140" height="98" rx="8" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="582" y="186" font-size="13.5" fill="#eb6834" font-weight="700">Recorder (Proxy)</text>
+<text x="582" y="204" font-size="12.5" fill="#52514e">intercepts WebGL2</text>
+<text x="582" y="220.25" font-size="12.5" fill="#52514e">calls, interns</text>
+<text x="582" y="236.5" font-size="12.5" fill="#52514e">handles, slices</text>
+<text x="582" y="252.75" font-size="12.5" fill="#52514e">uploads</text>
+<rect x="734" y="166" width="124" height="98" rx="8" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="746" y="186" font-size="13.5" fill="#0b0b0b" font-weight="700">Transport</text>
+<text x="746" y="204" font-size="12.5" fill="#52514e">same page</text>
+<text x="746" y="220.25" font-size="12.5" fill="#52514e">(sync),</text>
+<text x="746" y="236.5" font-size="12.5" fill="#52514e">postMessage +</text>
+<text x="746" y="252.75" font-size="12.5" fill="#52514e">port, worker</text>
+<rect x="882" y="166" width="118" height="98" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="894" y="186" font-size="13.5" fill="#2a78d6" font-weight="700">Replay</text>
+<text x="894" y="204" font-size="12.5" fill="#52514e">into the</text>
+<text x="894" y="220.25" font-size="12.5" fill="#52514e">host's WebGL2</text>
+<text x="894" y="236.5" font-size="12.5" fill="#52514e">context,</text>
+<text x="894" y="252.75" font-size="12.5" fill="#52514e">checkpointed</text>
+<rect x="1024" y="166" width="118" height="98" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1036" y="186" font-size="13.5" fill="#2a78d6" font-weight="700">Screen policy</text>
+<text x="1036" y="204" font-size="12.5" fill="#52514e">stencil,</text>
+<text x="1036" y="220.25" font-size="12.5" fill="#52514e">clears, blend,</text>
+<text x="1036" y="236.5" font-size="12.5" fill="#52514e">viewport,</text>
+<text x="1036" y="252.75" font-size="12.5" fill="#52514e">target</text>
+<line x1="548" y1="215" x2="568" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<line x1="712" y1="215" x2="732" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<line x1="860" y1="215" x2="880" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<line x1="1002" y1="215" x2="1022" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<rect x="570" y="286" width="140" height="46" rx="8" fill="#ffffff" stroke="#eb6834" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="640" y="305" font-size="12" fill="#eb6834" font-weight="700" text-anchor="middle">shadow GL context</text>
+<text x="640" y="321" font-size="11" fill="#52514e" text-anchor="middle">sync answers; no draws needed</text>
+<line x1="640" y1="266" x2="640" y2="284" stroke="#eb6834" stroke-width="1.5" marker-end="url(#arr-eb6834)"/>
+<rect x="882" y="286" width="260" height="46" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1012" y="305" font-size="12" fill="#2a78d6" font-weight="700" text-anchor="middle">the host's canvas, one GPU</text>
+<text x="1012" y="321" font-size="11" fill="#52514e" text-anchor="middle">host depth and stencil bound the guest</text>
+<line x1="1083" y1="266" x2="1083" y2="284" stroke="#2a78d6" stroke-width="1.5" marker-end="url(#arr-2a78d6)"/>
+<text x="428" y="356" font-size="12" fill="#52514e">A guest frame is ~100–500 calls. The state checkpoint restores the guest's GL state at each frame boundary; the</text>
+<text x="428" y="372.2" font-size="12" fill="#52514e">host's framework restores or invalidates its own cache after the replay.</text>
+<rect x="40" y="430" width="560" height="230" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="430" width="560" height="4" rx="2" fill="#52514e"/>
+<text x="58" y="462" font-size="16" fill="#0b0b0b" font-weight="700">Three ways to compose</text>
+<rect x="58" y="486" width="70" height="50" rx="4" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<rect x="80" y="496" width="26" height="40" rx="2" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="58" y="562" font-size="14" fill="#0b0b0b" font-weight="700">Door</text>
+<text x="58" y="582" font-size="12" fill="#52514e">a stencilled quad; the</text>
+<text x="58" y="598.2" font-size="12" fill="#52514e">host camera carried</text>
+<text x="58" y="614.4000000000001" font-size="12" fill="#52514e">through it; real parallax</text>
+<rect x="236" y="486" width="70" height="50" rx="4" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<circle cx="271" cy="511" r="17" fill="#fdeae2" stroke="#eb6834"/>
+<circle cx="294" cy="500" r="6" fill="#e3eefb" stroke="#2a78d6"/>
+<text x="236" y="562" font-size="14" fill="#0b0b0b" font-weight="700">In place</text>
+<text x="236" y="582" font-size="12" fill="#52514e">a shape (ellipsoid, mesh)</text>
+<text x="236" y="598.2" font-size="12" fill="#52514e">stencils where the</text>
+<text x="236" y="614.4000000000001" font-size="12" fill="#52514e">guest's pixels belong;</text>
+<text x="236" y="630.6000000000001" font-size="12" fill="#52514e">depth-tested against the</text>
+<text x="236" y="646.8000000000002" font-size="12" fill="#52514e">host</text>
+<rect x="414" y="486" width="70" height="50" rx="4" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<circle cx="449" cy="516" r="16" fill="#e3eefb" stroke="#2a78d6"/>
+<circle cx="422" cy="498" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="434" cy="494" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="464" cy="500" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="474" cy="516" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="428" cy="526" r="3" fill="#eb6834" stroke="none"/>
+<text x="414" y="562" font-size="14" fill="#0b0b0b" font-weight="700">Overlay</text>
+<text x="414" y="582" font-size="12" fill="#52514e">no shape: the host's</text>
+<text x="414" y="598.2" font-size="12" fill="#52514e">exact clip space, tested</text>
+<text x="414" y="614.4000000000001" font-size="12" fill="#52514e">against the host's depth;</text>
+<text x="414" y="630.6000000000001" font-size="12" fill="#52514e">corrected if late</text>
+<rect x="630" y="430" width="530" height="230" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="630" y="430" width="530" height="4" rx="2" fill="#1baf7a"/>
+<text x="648" y="462" font-size="16" fill="#0b0b0b" font-weight="700">Where it stands</text>
+<circle cx="655" cy="482" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="668" y="486" font-size="13" fill="#0b0b0b" font-weight="700">Works</text>
+<text x="668" y="503.55" font-size="12" fill="#52514e">WebGL2 guests: three.js, Cesium</text>
+<text x="668" y="519.75" font-size="12" fill="#52514e">unmodified. Hosts: three.js,</text>
+<text x="668" y="535.95" font-size="12" fill="#52514e">deck.gl / luma.gl. Same-page,</text>
+<text x="668" y="552.1500000000001" font-size="12" fill="#52514e">iframe and cross-origin transports;</text>
+<text x="668" y="568.3500000000001" font-size="12" fill="#52514e">one batch per frame; host</text>
+<text x="668" y="584.5500000000002" font-size="12" fill="#52514e">reprojection; parts.</text>
+<circle cx="655" cy="606.7500000000002" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="668" y="610.7500000000002" font-size="13" fill="#0b0b0b" font-weight="700">In production</text>
+<text x="668" y="628.3000000000002" font-size="12" fill="#52514e">celestiary draws Cesium's Earth,</text>
+<text x="668" y="644.5000000000002" font-size="12" fill="#52514e">Moon and Mars in place of its own.</text>
+<circle cx="915" cy="482" r="5.5" fill="#6250d6" stroke="none"/>
+<text x="928" y="486" font-size="13" fill="#0b0b0b" font-weight="700">Not yet</text>
+<text x="928" y="503.55" font-size="12" fill="#52514e">Untrusted guests (no sandbox).</text>
+<text x="928" y="519.75" font-size="12" fill="#52514e">WebRTC. Non-affine host views.</text>
+<text x="928" y="535.95" font-size="12" fill="#52514e">Resource lifecycle. Extension</text>
+<text x="928" y="552.1500000000001" font-size="12" fill="#52514e">objects. WebGPU.</text>
+<circle cx="915" cy="574.3500000000001" r="5.5" fill="#eda100" stroke="none"/>
+<text x="928" y="578.3500000000001" font-size="13" fill="#0b0b0b" font-weight="700">Status</text>
+<text x="928" y="595.9000000000001" font-size="12" fill="#52514e">Early prototype, pre-1.0. Pin exact</text>
+<text x="928" y="612.1000000000001" font-size="12" fill="#52514e">versions. Looking for testers, RFCs</text>
+<text x="928" y="628.3000000000002" font-size="12" fill="#52514e">and adopters.</text>
+<rect x="40" y="690" width="1120" height="170" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="690" width="1120" height="4" rx="2" fill="#6250d6"/>
+<text x="58" y="722" font-size="16" fill="#0b0b0b" font-weight="700">Three RFCs, from three real integrations, and the maintainers' responses</text>
+<a href="rfcs/0001-globe-orbit-layers.html">
+<text x="58" y="750" font-size="14" fill="#6250d6" font-weight="700">RFC 0001 · Globe + orbit layers</text>
+</a>
+<text x="58" y="770" font-size="12" fill="#52514e">netmap (deck.gl globe) hosts celestiary's orbits from</text>
+<text x="58" y="786.2" font-size="12" fill="#52514e">another origin. Overlay kind, shared depth, the view,</text>
+<text x="58" y="802.4000000000001" font-size="12" fill="#52514e">time, anchors, trust.</text>
+<text x="58" y="824.6000000000001" font-size="11.5" fill="#8a8984" font-weight="700">built 0.5–0.6.8 · 29 questions</text>
+<a href="rfcs/0002-nested-in-place-guests.html">
+<text x="430" y="750" font-size="14" fill="#6250d6" font-weight="700">RFC 0002 · Nested in-place guests</text>
+</a>
+<text x="430" y="770" font-size="12" fill="#52514e">celestiary → Cesium → Slop New York on one page. Flat</text>
+<text x="430" y="786.2" font-size="12" fill="#52514e">chains, in-frame contract, light, ground, the enu</text>
+<text x="430" y="802.4000000000001" font-size="12" fill="#52514e">frame, lean, staging.</text>
+<text x="430" y="824.6000000000001" font-size="11.5" fill="#8a8984" font-weight="700">shipped composed · library pieces for 0.7</text>
+<a href="rfcs/0003-late-frames.html">
+<text x="802" y="750" font-size="14" fill="#6250d6" font-weight="700">RFC 0003 · Late frames</text>
+</a>
+<text x="802" y="770" font-size="12" fill="#52514e">celestiary's Cesium from a guest page. Deferred</text>
+<text x="802" y="786.2" font-size="12" fill="#52514e">deletes, reprojecting a guest's own targets, its</text>
+<text x="802" y="802.4000000000001" font-size="12" fill="#52514e">projection on the frame-end.</text>
+<text x="802" y="824.6000000000001" font-size="11.5" fill="#8a8984" font-weight="700">proposed for 0.6.9–0.6.10</text>
+<a href="rfcs/index.html">
+<text x="1142" y="750" font-size="13" fill="#6250d6" font-weight="700" text-anchor="end">the responses →</text>
+</a>
+<text x="40" y="872" font-size="11" fill="#8a8984">docs/rfcs/responses · the README, DESIGN.md and portal-layers.md have the detail · github.com/pablo-mayrgundter/portal</text>
+</svg>
+
+<p><strong>Read on:</strong> the <a href="rfcs/index.html">responses to the RFCs</a> (what each asks, the tracks of work and the versions they claim), one page per RFC (<a href="rfcs/0001-globe-orbit-layers.html">0001</a>, <a href="rfcs/0002-nested-in-place-guests.html">0002</a>, <a href="rfcs/0003-late-frames.html">0003</a>), <a href="rfcs/evolution.html">how NetGL got here</a>, the <a href="changelog.html">changelog</a>, and the <a href="three/">demos</a>. The code and the design docs are on <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>; the package is <a href="https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl">@pablo-mayrgundter/portal-netgl</a>.</p>
+<p>Every release keeps a snapshot of this site, demos included; the version pulldown in the header moves between them.</p>
+
+</main>
+<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.8. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
+<script>
+(function () {
+  var sel = document.getElementById('version-select'); if (!sel) return;
+  var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page), or the
+  // summary page's own directory (it is the root).
+  var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
+  var atRoot = i < 0 && j < 0;
+  var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
+  // Where the snapshots live: the production site, since a PR preview has none of its own.
+  var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\/pr-\d+\/$/, '');
+  var onVersionPage = j >= 0 && i < 0;
+  var page = onVersionPage ? 'index.html' : (path.slice(path.lastIndexOf('/') + 1) || 'index.html');
+  var meta = {};
+  function fill(list, latest) {
+    sel.innerHTML = '';
+    var opts = [['latest', 'latest · ' + latest]].concat(list.map(function (v) {
+      var m = meta[v] || {};
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '')];
+    }));
+    opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
+    if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
+  }
+  fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
+  }).catch(function () {});
+  sel.addEventListener('change', function () {
+    var v = sel.value;
+    // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
+    // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
+    var toDocs = function (base, m) {
+      // The overview is the site root from 0.6.9 on; a 0.6.8 snapshot's root is a demo, its docs at rfcs/.
+      var summaryAtRoot = !m || m.layout !== 'demo-root';
+      return (atRoot || onVersionPage) && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+    };
+    if (v === 'latest') location.href = toDocs(siteRoot, null);
+    else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
+    else location.href = siteRoot + 'versions/' + v + '.html';
+  });
+})();
+
+(function () { var p = location.pathname; if (/\/v\/[^/]+\/rfcs\//.test(p)) document.getElementById('version-wrap').classList.add('snapshot'); })();
+</script>
+</body>
 </html>

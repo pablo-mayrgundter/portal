@@ -31,7 +31,8 @@
         "netgl-deck"
       ],
       "docs": true,
-      "reconstructed": false
+      "reconstructed": false,
+      "layout": "demo-root"
     },
     "0.6.7": {
       "date": "2026-10-27",
@@ -46,7 +47,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.6": {
       "date": "2026-10-26",
@@ -61,7 +63,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.5": {
       "date": "2026-10-26",
@@ -76,7 +79,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.4": {
       "date": "2026-10-24",
@@ -91,7 +95,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.3": {
       "date": "2026-10-24",
@@ -106,7 +111,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.2": {
       "date": "2026-10-24",
@@ -121,7 +127,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.1": {
       "date": "2026-10-24",
@@ -136,7 +143,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.6.0": {
       "date": "2026-10-24",
@@ -151,7 +159,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.5.0": {
       "date": "2026-10-23",
@@ -166,7 +175,8 @@
         "netgl-deck"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.4.0": {
       "date": "2026-10-23",
@@ -180,7 +190,8 @@
         "netgl-cesium"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.3.0": {
       "date": "2026-10-22",
@@ -194,7 +205,8 @@
         "netgl-cesium"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.2.0": {
       "date": "2026-09-29",
@@ -208,7 +220,8 @@
         "netgl-cesium"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.1.0": {
       "date": "2026-07-09",
@@ -221,7 +234,8 @@
         "netgl-celestiary"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     },
     "0.0.0-frame-rpc": {
       "date": "2026-04-30",
@@ -232,8 +246,9 @@
         "worker"
       ],
       "docs": false,
-      "reconstructed": true
+      "reconstructed": true,
+      "layout": "demo-root"
     }
   },
-  "updated": "2026-10-27T20:53:19.659Z"
+  "updated": "2026-10-27T22:38:02.556Z"
 }

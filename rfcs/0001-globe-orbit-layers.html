@@ -24,12 +24,13 @@ a.demos svg { opacity: .8; }
 .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .right a { font-size: 13px; color: var(--ink2); }
 .version { position: relative; display: inline-block; }
-.version select { appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
+.version select { max-width: min(60vw, 320px); text-overflow: ellipsis; appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
 .version::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--host); pointer-events: none; font-size: 12px; }
 .version.snapshot select { color: var(--open); background: var(--openbg); border-color: var(--open); }
 .version.snapshot::after { color: var(--open); }
 .notice { max-width: 1120px; margin: 12px auto 0; padding: 8px 16px; font-size: 13px; color: var(--open); }
 main.doc { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+main.doc .version-kicker { color: var(--ink2); font-size: 14px; margin: 8px 0 0; }
 main.doc h1 { font-size: 30px; letter-spacing: -.01em; line-height: 1.2; margin: 8px 0 16px; }
 main.doc h2 { font-size: 22px; margin: 36px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
 main.doc h3 { font-size: 17px; margin: 24px 0 8px; }
@@ -44,6 +45,9 @@ main.doc pre { background: #f1f0ec; padding: 12px; border-radius: 8px; overflow-
 main.doc pre code { background: none; padding: 0; }
 main.doc blockquote { border-left: 3px solid var(--open); margin: 12px 0; padding: 4px 14px; color: var(--ink2); }
 main.doc .figure { display: block; margin: 18px 0 26px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fcfcfb; }
+main.doc svg.overview { display: block; width: 100%; height: auto; margin: 8px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfb; }
+main.doc svg.overview a { cursor: pointer; }
+main.doc svg.overview a:hover text { text-decoration: underline; }
 main.doc .figure img { display: block; width: 100%; height: auto; }
 footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 12px; color: var(--ink3); border-top: 1px solid var(--line); }
 @media (max-width: 720px) { html { font-size: 15px; } .right { margin-left: 0; } }
@@ -51,11 +55,11 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="index.html">Summary</a><a href="0001-globe-orbit-layers.html" aria-current="page">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a><a href="evolution.html">Evolution</a></nav>
-  <a class="demos" href="../" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
+  <a class="brand" href="../">Portal / NetGL</a>
+  <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../changelog.html">Changelog</a><a href="index.html" aria-current="page">RFCs</a></nav>
+  <a class="demos" href="../three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.8</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
@@ -232,16 +236,22 @@ insertion point?</p>
 <script>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
-  var path = location.pathname, i = path.lastIndexOf('/rfcs/');
-  var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
-  var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : 'latest';
-  var page = path.slice(path.lastIndexOf('/') + 1) || 'index.html';
+  var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page), or the
+  // summary page's own directory (it is the root).
+  var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
+  var atRoot = i < 0 && j < 0;
+  var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
+  // Where the snapshots live: the production site, since a PR preview has none of its own.
+  var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\/pr-\d+\/$/, '');
+  var onVersionPage = j >= 0 && i < 0;
+  var page = onVersionPage ? 'index.html' : (path.slice(path.lastIndexOf('/') + 1) || 'index.html');
   var meta = {};
   function fill(list, latest) {
     sel.innerHTML = '';
-    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) {
+    var opts = [['latest', 'latest · ' + latest]].concat(list.map(function (v) {
       var m = meta[v] || {};
-      return [v, 'v' + v + (m.date ? ' · ' + m.date : '') + (m.label ? ' · ' + m.label : '')];
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '')];
     }));
     opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
     if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
@@ -250,10 +260,17 @@ insertion point?</p>
     if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
   }).catch(function () {});
   sel.addEventListener('change', function () {
-    var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
-    // A reconstructed snapshot has the demos of its day but no docs: go to its root.
-    var hasDocs = v === 'latest' || !meta[v] || meta[v].docs;
-    location.href = hasDocs ? target + 'rfcs/' + page + location.hash : target;
+    var v = sel.value;
+    // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
+    // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
+    var toDocs = function (base, m) {
+      // The overview is the site root from 0.6.9 on; a 0.6.8 snapshot's root is a demo, its docs at rfcs/.
+      var summaryAtRoot = !m || m.layout !== 'demo-root';
+      return (atRoot || onVersionPage) && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+    };
+    if (v === 'latest') location.href = toDocs(siteRoot, null);
+    else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
+    else location.href = siteRoot + 'versions/' + v + '.html';
   });
 })();
 
