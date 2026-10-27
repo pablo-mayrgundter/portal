@@ -95,7 +95,12 @@ were tried and dropped.
   it; `--out` anywhere to try it). The Pages workflow writes
   `v/versions.json` and, when portal-netgl's version changes, builds the
   site a second time under `v/<version>/` and keeps it. Bumping the version
-  is therefore also what takes a snapshot of the demos and docs.
+  is therefore also what takes a snapshot of the demos and docs. A past
+  version is rebuilt from its commit by the *Snapshot a version* workflow
+  (`.github/workflows/snapshot.yml`, run from the Actions tab with the
+  version); its commit, date and demos come from
+  `docs/rfcs/responses/history.json`, which also feeds the pulldowns'
+  labels and the Evolution page's timeline. A new release gets a row there.
 - **Static servers and rebuilds.** A build that deletes and recreates
   its output directory leaves a server started inside it serving
   nothing. Restart the server after rebuilding.

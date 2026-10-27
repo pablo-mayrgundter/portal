@@ -178,9 +178,14 @@ const siteRoots = (current: NavDemoKey): { root: string; siteRoot: string; snaps
 const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): void => {
   const { siteRoot, snapshot } = siteRoots(current)
   const demoPath = current === 'three' ? '' : `${current}/`
+  type VersionMeta = { date?: string; label?: string; demos?: string[]; docs?: boolean }
+  let meta: Record<string, VersionMeta> = {}
   const fill = (versions: string[], latest: string): void => {
     select.innerHTML = ''
-    const options: Array<[string, string]> = [['latest', `latest · ${latest}`], ...versions.map((v): [string, string] => [v, `v${v} snapshot`])]
+    const options: Array<[string, string]> = [['latest', `latest · ${latest}`], ...versions.map((v): [string, string] => {
+      const m = meta[v] ?? {}
+      return [v, `v${v}${m.date ? ` · ${m.date}` : ''}${m.label ? ` · ${m.label}` : ''}`]
+    })]
     if (snapshot && !versions.includes(snapshot)) options.push([snapshot, `v${snapshot} snapshot`])
     for (const [value, label] of options) {
       const o = document.createElement('option')
@@ -192,14 +197,16 @@ const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): vo
   }
   fetch(`${siteRoot}v/versions.json`, { cache: 'no-cache' })
     .then((r) => (r.ok ? r.json() : null))
-    .then((j: { latest?: string; versions?: string[] } | null) => {
-      if (j?.versions) fill(j.versions, j.latest ?? 'main')
+    .then((j: { latest?: string; versions?: string[]; meta?: Record<string, VersionMeta> } | null) => {
+      if (j?.versions) { meta = j.meta ?? {}; fill(j.versions, j.latest ?? 'main') }
     })
     .catch(() => undefined)
   select.addEventListener('change', () => {
     const v = select.value
     const target = v === 'latest' ? siteRoot : `${siteRoot}v/${v}/`
-    location.href = `${target}${demoPath}${location.search}${location.hash}`
+    // The same demo in the chosen version, when that version had it; else its root.
+    const had = v === 'latest' || !meta[v]?.demos || (meta[v].demos as string[]).includes(current)
+    location.href = had ? `${target}${demoPath}${location.search}${location.hash}` : target
   })
 }
 

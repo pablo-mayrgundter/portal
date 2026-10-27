@@ -1,0 +1,127 @@
+name: Snapshot a version
+
+# Rebuilds the site as it was at a past portal-netgl version and keeps it at
+# https://pablo-mayrgundter.github.io/portal/v/<version>/, beside the
+# snapshots pages.yml takes of new releases. The version's commit comes from
+# docs/rfcs/responses/history.json on the branch the workflow runs from (or
+# the `ref` input). The commit's
+# own build action builds its demos; a commit from before that action gets
+# the three frame-RPC demos built by hand. Every page gets a banner saying
+# which commit it was rebuilt from, with a pulldown to the other versions,
+# since old demos predate the drawer's pulldown. Then v/versions.json is
+# rewritten from what's on gh-pages.
+#
+# Run it from the Actions tab (workflow_dispatch), one version per run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to rebuild (a key in docs/rfcs/responses/history.json), e.g. 0.2.0
+        required: true
+      ref:
+        description: The commit to build from; defaults to the one history.json names
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the branch the workflow runs from, for history.json and the scripts
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Look the version up
+        id: lookup
+        run: |
+          VERSION='${{ inputs.version }}'
+          REF='${{ inputs.ref }}'
+          ENTRY=$(node -e "const h=require('./docs/rfcs/responses/history.json').versions.find(v=>v.version===process.argv[1]);if(!h){console.error('unknown version');process.exit(1)};console.log(JSON.stringify(h))" "$VERSION")
+          [ -n "$REF" ] || REF=$(echo "$ENTRY" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).ref")
+          DATE=$(echo "$ENTRY" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).date")
+          SHA=$(git rev-parse --verify "$REF^{commit}")
+          LATEST=$(node -p "require('./packages/portal-netgl/package.json').version")
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short "$SHA")" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/portal-scripts"
+          cp scripts/write-versions.mjs scripts/inject-version-banner.mjs "$RUNNER_TEMP/portal-scripts/"
+          # write-versions.mjs reads ../docs/rfcs/responses/history.json relative to itself
+          mkdir -p "$RUNNER_TEMP/docs/rfcs/responses"
+          cp docs/rfcs/responses/history.json "$RUNNER_TEMP/docs/rfcs/responses/history.json"
+          echo "Snapshot $VERSION from $SHA ($DATE)"
+
+      - name: Check out that commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.lookup.outputs.sha }}
+          submodules: recursive
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Does this commit have the build action?
+        id: has
+        run: |
+          if [ -f .github/actions/build/action.yml ]; then echo "action=true" >> "$GITHUB_OUTPUT"; else echo "action=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build with the commit's own build action
+        if: steps.has.outputs.action == 'true'
+        uses: ./.github/actions/build
+        with:
+          base-path: /portal/v/${{ steps.lookup.outputs.version }}/
+
+      - name: Build the frame-RPC demos (a commit from before the build action)
+        if: steps.has.outputs.action == 'false'
+        run: |
+          BASE=/portal/v/${{ steps.lookup.outputs.version }}/
+          npm ci
+          npm run build -w @portal/host-three -- --base=$BASE
+          npm run build -w @portal/host-iframe-demo -- --base=${BASE}iframe/
+          npm run build -w @portal/host-worker-demo -- --base=${BASE}worker/
+          rm -rf dist && mkdir -p dist
+          cp -r apps/host-three/dist/. dist/
+          cp -r apps/host-iframe-demo/dist dist/iframe
+          cp -r apps/host-worker-demo/dist dist/worker
+
+      - name: Mark the pages as a snapshot
+        run: node "$RUNNER_TEMP/portal-scripts/inject-version-banner.mjs" dist "${{ steps.lookup.outputs.version }}" "${{ steps.lookup.outputs.short }}" "${{ steps.lookup.outputs.date }}"
+
+      - name: Deploy the snapshot
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist
+          branch: gh-pages
+          target-folder: v/${{ steps.lookup.outputs.version }}
+          clean: true
+          commit-message: 'Snapshot v${{ steps.lookup.outputs.version }}, rebuilt from ${{ steps.lookup.outputs.short }} 🛫'
+
+      - name: Rewrite the versions list
+        run: |
+          git fetch --depth=1 origin gh-pages
+          LATEST='${{ steps.lookup.outputs.latest }}'
+          EXISTING=$(git ls-tree --name-only origin/gh-pages v/ | sed 's#^v/##' | grep -E '^[0-9]' || true)
+          mkdir -p dist-versions
+          # shellcheck disable=SC2086
+          node "$RUNNER_TEMP/portal-scripts/write-versions.mjs" "$LATEST" $EXISTING "${{ steps.lookup.outputs.version }}" > dist-versions/versions.json
+          cat dist-versions/versions.json
+
+      - name: Publish the versions list
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist-versions
+          branch: gh-pages
+          target-folder: v
+          clean: false

@@ -27,6 +27,7 @@ build and why; the open questions are where the argument is.
 | RFC 0001, globe + orbit layers | [1-pager](./0001-globe-orbit-layers.md) | [infographic](./img/rfc-0001.svg) |
 | RFC 0002, nested in-place guests | [1-pager](./0002-nested-in-place-guests.md) | [infographic](./img/rfc-0002.svg) |
 | RFC 0003, late frames from a guest on another page | [1-pager](./0003-late-frames.md) | [infographic](./img/rfc-0003.svg) |
+| How NetGL got here: every release up to 0.6.8, its snapshot, and the through line | [evolution](./evolution.md) | [timeline](./img/evolution.svg) |
 
 ![Portal and NetGL in one picture](./img/portal-netgl.svg)
 
