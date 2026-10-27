@@ -52,8 +52,8 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="../rfcs/index.html">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="../rfcs/index.html">Summary</a><a href="../rfcs/0001-globe-orbit-layers.html">RFC 0001</a><a href="../rfcs/0002-nested-in-place-guests.html">RFC 0002</a><a href="../rfcs/0003-late-frames.html">RFC 0003</a><a href="../rfcs/evolution.html">Evolution</a></nav>
+  <a class="brand" href="../">Portal <small>RFC responses</small></a>
+  <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../rfcs/0001-globe-orbit-layers.html">RFC 0001</a><a href="../rfcs/0002-nested-in-place-guests.html">RFC 0002</a><a href="../rfcs/0003-late-frames.html">RFC 0003</a><a href="../rfcs/evolution.html">Evolution</a></nav>
   <a class="demos" href="/portal/v/0.3.0/" target="_blank" rel="noopener" title="The demos of v0.3.0, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="0.3.0" data-snapshots-root="/portal/" aria-label="Version"><option value="0.3.0" selected>portal-netgl 0.3.0</option></select></span>
@@ -88,8 +88,10 @@ state on the shadow directly
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
   var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
-  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page).
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page), or the
+  // summary page's own directory (it is the root).
   var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
+  var atRoot = i < 0 && j < 0;
   var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
   // Where the snapshots live: the production site, since a PR preview has none of its own.
   var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\/pr-\d+\/$/, '');
@@ -112,8 +114,13 @@ state on the shadow directly
     var v = sel.value;
     // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
     // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
-    if (v === 'latest') location.href = siteRoot + 'rfcs/' + page + location.hash;
-    else if (!meta[v] || meta[v].docs) location.href = snapshotsRoot + 'v/' + v + '/rfcs/' + page + location.hash;
+    var toDocs = function (base, m) {
+      // The summary is the site root from 0.6.9 on; in a 0.6.8 snapshot it is rfcs/index.html.
+      var summaryAtRoot = !m || m.layout !== 'demo-root';
+      return (atRoot || page === 'index.html') && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+    };
+    if (v === 'latest') location.href = toDocs(siteRoot, null);
+    else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
     else location.href = siteRoot + 'versions/' + v + '.html';
   });
 })();

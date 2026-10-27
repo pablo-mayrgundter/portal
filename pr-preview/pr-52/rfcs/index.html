@@ -52,9 +52,9 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="index.html" aria-current="page">Summary</a><a href="0001-globe-orbit-layers.html">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a><a href="evolution.html">Evolution</a></nav>
-  <a class="demos" href="../" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
+  <a class="brand" href="../">Portal <small>RFC responses</small></a>
+  <nav class="pages" aria-label="Pages"><a href="../" aria-current="page">Summary</a><a href="0001-globe-orbit-layers.html">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a><a href="evolution.html">Evolution</a></nav>
+  <a class="demos" href="../three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
@@ -71,8 +71,9 @@ proposal, proposed answers to its open questions, and how to proceed)
 and an <strong>infographic</strong>. This page is the synthesis: the requirements the
 three share, the tracks of work that answer them, and the portal-netgl
 versions each track claims.</p>
-<p><strong>Published</strong> at <a href="https://pablo-mayrgundter.github.io/portal/rfcs/">pablo-mayrgundter.github.io/portal/rfcs/</a>,
-beside the demos, with the summary as the index. Each portal-netgl
+<p><strong>Published</strong> at <a href="https://pablo-mayrgundter.github.io/portal/">pablo-mayrgundter.github.io/portal/</a>:
+this summary is the site&#39;s root page, the responses are under <code>rfcs/</code>,
+and the demos beside them. Each portal-netgl
 release keeps a snapshot of the whole site, demos included, at
 <code>/portal/v/&lt;version&gt;/</code>; the version pulldown in the header switches
 between them. The pages are built from these files by
@@ -426,8 +427,10 @@ reviewed commit that cites it, as the RFCs do with their findings.</p>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
   var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
-  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page).
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page), or the
+  // summary page's own directory (it is the root).
   var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
+  var atRoot = i < 0 && j < 0;
   var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
   // Where the snapshots live: the production site, since a PR preview has none of its own.
   var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\/pr-\d+\/$/, '');
@@ -450,8 +453,13 @@ reviewed commit that cites it, as the RFCs do with their findings.</p>
     var v = sel.value;
     // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
     // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
-    if (v === 'latest') location.href = siteRoot + 'rfcs/' + page + location.hash;
-    else if (!meta[v] || meta[v].docs) location.href = snapshotsRoot + 'v/' + v + '/rfcs/' + page + location.hash;
+    var toDocs = function (base, m) {
+      // The summary is the site root from 0.6.9 on; in a 0.6.8 snapshot it is rfcs/index.html.
+      var summaryAtRoot = !m || m.layout !== 'demo-root';
+      return (atRoot || page === 'index.html') && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+    };
+    if (v === 'latest') location.href = toDocs(siteRoot, null);
+    else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
     else location.href = siteRoot + 'versions/' + v + '.html';
   });
 })();
