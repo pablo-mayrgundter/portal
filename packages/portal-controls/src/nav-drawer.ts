@@ -127,8 +127,11 @@ const STYLES = `
 #portal-nav-drawer .portal-nav-intro a { display: inline; padding: 0; background: transparent; border: none; color: #b7a9ff; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
 #portal-nav-drawer .portal-nav-intro a:hover { background: transparent; color: #d6ccff; }
 #portal-nav-drawer .portal-nav-intro svg { display: inline-block; vertical-align: -1px; margin-left: 2px; }
-#portal-nav-drawer .portal-nav-version { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; }
+#portal-nav-drawer .portal-nav-version { margin: 0 0 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8fa7c4; min-width: 0; }
 #portal-nav-drawer .portal-nav-version select {
+  max-width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
   font: 600 12px Inter, system-ui, sans-serif;
   color: #d8e7ff;
   background: rgba(93, 169, 255, 0.14);
@@ -177,6 +180,8 @@ const siteRoots = (current: NavDemoKey): { root: string; siteRoot: string; snaps
  */
 const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): void => {
   const { siteRoot, snapshot } = siteRoots(current)
+  // The snapshots live on the production site; a PR preview has none of its own.
+  const snapshotsRoot = siteRoot.replace(/pr-preview\/pr-\d+\/$/, '')
   const demoPath = current === 'three' ? '' : `${current}/`
   type VersionMeta = { date?: string; label?: string; demos?: string[]; docs?: boolean }
   let meta: Record<string, VersionMeta> = {}
@@ -184,7 +189,7 @@ const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): vo
     select.innerHTML = ''
     const options: Array<[string, string]> = [['latest', `latest · ${latest}`], ...versions.map((v): [string, string] => {
       const m = meta[v] ?? {}
-      return [v, `v${v}${m.date ? ` · ${m.date}` : ''}${m.label ? ` · ${m.label}` : ''}`]
+      return [v, `v${v}${m.date ? ` · ${m.date}` : ''}`]
     })]
     if (snapshot && !versions.includes(snapshot)) options.push([snapshot, `v${snapshot} snapshot`])
     for (const [value, label] of options) {
@@ -203,7 +208,7 @@ const attachVersionSelect = (select: HTMLSelectElement, current: NavDemoKey): vo
     .catch(() => undefined)
   select.addEventListener('change', () => {
     const v = select.value
-    const target = v === 'latest' ? siteRoot : `${siteRoot}v/${v}/`
+    const target = v === 'latest' ? siteRoot : `${snapshotsRoot}v/${v}/`
     // The same demo in the chosen version, when that version had it; else its root.
     const had = v === 'latest' || !meta[v]?.demos || (meta[v].demos as string[]).includes(current)
     location.href = had ? `${target}${demoPath}${location.search}${location.hash}` : target

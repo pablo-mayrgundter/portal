@@ -8,9 +8,11 @@
 //
 //   node scripts/build-rfc-site.mjs --base /portal/ --out dist/rfcs
 //
-// --base is informational (the pages use relative URLs), --out is where
-// the site goes. Links to files outside docs/rfcs/responses/ become links
-// to the file on GitHub.
+// --out is where the site goes; a page per earlier version (from the
+// CHANGELOG) goes beside it, at <out>/../versions/. --base is the site's
+// path, used to point snapshot links at the production site from a PR
+// preview. Links to files outside docs/rfcs/responses/ become links to
+// the file on GitHub.
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync } from 'node:fs'
 import { resolve, dirname, join, posix } from 'node:path'
@@ -23,6 +25,10 @@ const repo = resolve(here, '..')
 const src = join(repo, 'docs/rfcs/responses')
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => a.startsWith('--') ? [a.slice(2), all[i + 1]] : []).filter(Boolean))
 const out = resolve(repo, args.out ?? 'dist/rfcs')
+// The site's path, and where the version snapshots live: a PR preview (<site>/pr-preview/pr-N/)
+// has no snapshots of its own, so its snapshot links go to the production site's.
+const sitePath = args.base ?? '/portal/'
+const snapshotsRoot = sitePath.replace(/pr-preview\/pr-\d+\/$/, '')
 const version = JSON.parse(readFileSync(join(repo, 'packages/portal-netgl/package.json'), 'utf8')).version
 const GITHUB = 'https://github.com/pablo-mayrgundter/portal'
 
@@ -44,8 +50,8 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 const slug = (text) => text.toLowerCase().replace(/[^\w\- ]/g, '').trim().replace(/ /g, '-')
 
 /** The repo directory the markdown being rendered lives in, and the site directory its page lands in (relative to rfcs/). */
-let base = { dir: 'docs/rfcs/responses', depth: 0 }
-const up = () => '../'.repeat(base.depth)
+let base = { dir: 'docs/rfcs/responses', rfcs: '' }
+const up = () => base.rfcs
 
 /** Rewrites a markdown href for the published site. */
 function rewriteHref(href) {
@@ -92,7 +98,7 @@ a.demos svg { opacity: .8; }
 .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .right a { font-size: 13px; color: var(--ink2); }
 .version { position: relative; display: inline-block; }
-.version select { appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
+.version select { max-width: min(60vw, 320px); text-overflow: ellipsis; appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
 .version::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--host); pointer-events: none; font-size: 12px; }
 .version.snapshot select { color: var(--open); background: var(--openbg); border-color: var(--open); }
 .version.snapshot::after { color: var(--open); }
@@ -126,18 +132,20 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 const SCRIPT = `
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
-  var path = location.pathname, i = path.lastIndexOf('/rfcs/');
-  var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
+  var path = location.pathname, i = path.lastIndexOf('/rfcs/'), j = path.lastIndexOf('/versions/');
+  // This deploy's root: above rfcs/ (the docs) or versions/ (a version's changelog page).
+  var root = i >= 0 ? path.slice(0, i + 1) : j >= 0 ? path.slice(0, j + 1) : path.replace(/[^/]*$/, '');
   var m = root.match(/^(.*\\/)v\\/([^/]+)\\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : (sel.dataset.here || 'latest');
-  // A version's changelog page (rfcs/versions/<v>.html) stands for a version with no docs of its own.
-  var onVersionPage = /\\/rfcs\\/versions\\/[^/]+\\.html$/.test(path);
+  // Where the snapshots live: the production site, since a PR preview has none of its own.
+  var snapshotsRoot = sel.dataset.snapshotsRoot || siteRoot.replace(/pr-preview\\/pr-\\d+\\/$/, '');
+  var onVersionPage = j >= 0 && i < 0;
   var page = onVersionPage ? 'index.html' : (path.slice(path.lastIndexOf('/') + 1) || 'index.html');
   var meta = {};
   function fill(list, latest) {
     sel.innerHTML = '';
-    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) {
+    var opts = [['latest', 'latest · ' + latest]].concat(list.map(function (v) {
       var m = meta[v] || {};
-      return [v, 'v' + v + (m.date ? ' · ' + m.date : '') + (m.label ? ' · ' + m.label : '')];
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '')];
     }));
     opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
     if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
@@ -146,17 +154,18 @@ const SCRIPT = `
     if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
   }).catch(function () {});
   sel.addEventListener('change', function () {
-    var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
-    // A reconstructed snapshot has the demos of its day but no docs of its own: its page is the
-    // changelog entry, with this same header, at the latest site's rfcs/versions/<v>.html.
-    var hasDocs = v === 'latest' || !meta[v] || meta[v].docs;
-    location.href = hasDocs ? target + 'rfcs/' + page + location.hash : siteRoot + 'rfcs/versions/' + v + '.html';
+    var v = sel.value;
+    // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
+    // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
+    if (v === 'latest') location.href = siteRoot + 'rfcs/' + page + location.hash;
+    else if (!meta[v] || meta[v].docs) location.href = snapshotsRoot + 'v/' + v + '/rfcs/' + page + location.hash;
+    else location.href = siteRoot + 'versions/' + v + '.html';
   });
 })();
 `
 
-function template(page, body, { depth = 0, here = 'latest', demosHref = '../', titleOverride } = {}) {
-  const u = '../'.repeat(depth)
+function template(page, body, { rfcs = '', here = 'latest', demosHref = '../', titleOverride } = {}) {
+  const u = rfcs
   const pages = PAGES.map((p) => `<a href="${u}${p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`).join('')
   const title = titleOverride ?? page.title
   return `<!doctype html>
@@ -172,9 +181,9 @@ function template(page, body, { depth = 0, here = 'latest', demosHref = '../', t
 <header class="top"><div class="row">
   <a class="brand" href="${u}index.html">Portal <small>RFC responses</small></a>
   <nav class="pages" aria-label="Pages">${pages}</nav>
-  <a class="demos" href="${u}${demosHref}" target="_blank" rel="noopener" title="The demos${here === 'latest' ? '' : ' of v' + esc(here)}, in a new tab">Demos ${EXTERNAL_ICON}</a>
+  <a class="demos" href="${demosHref.startsWith('/') ? demosHref : u + demosHref}" target="_blank" rel="noopener" title="The demos${here === 'latest' ? '' : ' of v' + esc(here)}, in a new tab">Demos ${EXTERNAL_ICON}</a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="${esc(version)}" data-here="${esc(here)}" data-depth="${depth}" aria-label="Version"><option value="${esc(here)}" selected>portal-netgl ${esc(here === 'latest' ? version : here)}</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="${esc(version)}" data-here="${esc(here)}" data-snapshots-root="${esc(snapshotsRoot)}" aria-label="Version"><option value="${esc(here)}" selected>portal-netgl ${esc(here === 'latest' ? version : here)}</option></select></span>
     <a href="${GITHUB}">GitHub</a>
   </div>
 </div></header>
@@ -192,7 +201,7 @@ ${body}
 
 mkdirSync(join(out, 'img'), { recursive: true })
 for (const page of PAGES) {
-  base = { dir: 'docs/rfcs/responses', depth: 0 }
+  base = { dir: 'docs/rfcs/responses', rfcs: '' }
   const md = readFileSync(join(src, page.md), 'utf8')
   writeFileSync(join(out, page.html), template(page, marked.parse(md)))
 }
@@ -212,28 +221,30 @@ function changelogSection(v) {
   if (end < 0) end = lines.length
   return { heading: lines[start].replace(/^## /, ''), body: lines.slice(start + 1, end).join('\n').trim() }
 }
-mkdirSync(join(out, 'versions'), { recursive: true })
+const versionsOut = join(out, '..', 'versions')
+mkdirSync(versionsOut, { recursive: true })
 let versionPages = 0
 for (const h of history) {
   if (h.docs) continue
   const sec = changelogSection(h.version)
-  base = { dir: '', depth: 1 }
-  const demos = (h.demos || []).map((d) => `<li><a href="../../v/${esc(h.version)}/${DEMO_PATH[d] ?? d + '/'}">${esc(DEMO_LABEL[d] ?? d)}</a></li>`).join('')
+  base = { dir: '', rfcs: '../rfcs/' }
+  const snap = `${snapshotsRoot}v/${h.version}/`
+  const demos = (h.demos || []).map((d) => `<li><a href="${esc(snap)}${DEMO_PATH[d] ?? d + '/'}">${esc(DEMO_LABEL[d] ?? d)}</a></li>`).join('')
   const body = `
 <p class="version-kicker">portal-netgl ${esc(h.version === '0.0.0-frame-rpc' ? 'before NetGL' : h.version)} · ${esc(h.date)} · <a href="${GITHUB}/commit/${esc(h.ref)}">${esc(h.ref)}</a></p>
 <h1>${esc(sec ? sec.heading : h.label)}</h1>
 <p>${esc(h.summary)}</p>
 ${sec ? marked.parse(sec.body) : '<p><em>No CHANGELOG entry for this version yet.</em></p>'}
 <h2 id="demos">The demos at this version</h2>
-<p>Rebuilt from commit <code>${esc(h.ref)}</code> and kept at <a href="../../v/${esc(h.version)}/"><code>/portal/v/${esc(h.version)}/</code></a>, with a banner naming the version:</p>
+<p>Rebuilt from commit <code>${esc(h.ref)}</code> and kept at <a href="${esc(snap)}"><code>${esc(snap)}</code></a>, with a banner naming the version:</p>
 <ul>${demos}</ul>
-<p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="${GITHUB}/blob/main/CHANGELOG.md">CHANGELOG</a>. How the releases fit together: <a href="../evolution.html">Evolution</a>.</p>
+<p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="${GITHUB}/blob/main/CHANGELOG.md">CHANGELOG</a>. How the releases fit together: <a href="../rfcs/evolution.html">Evolution</a>.</p>
 `
-  const fake = { html: 'versions/' + h.version + '.html', title: `portal-netgl ${h.version}` }
-  writeFileSync(join(out, 'versions', h.version + '.html'), template(fake, body, { depth: 1, here: h.version, demosHref: `../v/${h.version}/`, titleOverride: `portal-netgl ${h.version}: ${h.label}` }))
+  const fake = { html: '../versions/' + h.version + '.html', title: `portal-netgl ${h.version}` }
+  writeFileSync(join(versionsOut, h.version + '.html'), template(fake, body, { rfcs: '../rfcs/', here: h.version, demosHref: snap, titleOverride: `portal-netgl ${h.version}: ${h.label}` }))
   versionPages++
 }
 // The infographics, stamped with this build's version.
 execFileSync(process.execPath, [join(src, 'img/generate.mjs'), '--out', join(out, 'img')], { stdio: 'inherit' })
 for (const f of readdirSync(join(src, 'img'))) if (f.endsWith('.svg')) { /* generated above */ }
-console.log(`rfc site: ${PAGES.length} pages and ${versionPages} version pages at ${out} (portal-netgl ${version})`)
+console.log(`rfc site: ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)

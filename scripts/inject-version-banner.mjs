@@ -19,7 +19,7 @@ const banner = `
 <style>
 #portal-version-banner { position: fixed; left: 12px; bottom: 12px; z-index: 1002; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 9px; background: rgba(8, 11, 19, 0.88); border: 1px solid rgba(154, 140, 255, 0.45); color: #d8e7ff; font: 12px/1.3 Inter, system-ui, sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
 #portal-version-banner b { color: #c9bfff; font-weight: 600; }
-#portal-version-banner select { font: 600 12px Inter, system-ui, sans-serif; color: #d8e7ff; background: rgba(154, 140, 255, 0.14); border: 1px solid rgba(154, 140, 255, 0.5); border-radius: 7px; padding: 3px 6px; cursor: pointer; }
+#portal-version-banner select { max-width: 40vw; text-overflow: ellipsis; font: 600 12px Inter, system-ui, sans-serif; color: #d8e7ff; background: rgba(154, 140, 255, 0.14); border: 1px solid rgba(154, 140, 255, 0.5); border-radius: 7px; padding: 3px 6px; cursor: pointer; }
 #portal-version-banner a { color: #b7a9ff; text-decoration: underline; text-underline-offset: 2px; }
 #portal-version-banner .pvb-note { color: #8fa7c4; }
 @media (max-width: 600px) { #portal-version-banner .pvb-note { display: none; } }
@@ -43,7 +43,7 @@ const banner = `
     var add = function (value, text, selected) { var o = document.createElement('option'); o.value = value; o.textContent = text; o.selected = !!selected; sel.appendChild(o); };
     sel.innerHTML = '';
     add('latest', 'latest · ' + (j.latest || 'main'));
-    j.versions.forEach(function (v) { var mm = meta[v] || {}; if (mm.demos) demosOf[v] = mm.demos; add(v, 'v' + v + (mm.date ? ' · ' + mm.date : '') + (mm.label ? ' · ' + mm.label : ''), v === here); });
+    j.versions.forEach(function (v) { var mm = meta[v] || {}; if (mm.demos) demosOf[v] = mm.demos; add(v, 'v' + v + (mm.date ? ' · ' + mm.date : ''), v === here); });
     if (!meta[here] && j.versions.indexOf(here) < 0) add(here, 'v' + here, true);
   }).catch(function () {});
   sel.addEventListener('change', function () {
