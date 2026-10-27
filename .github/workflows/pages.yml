@@ -1,9 +1,16 @@
 name: Deploy demos to GitHub Pages
 
-# Build all demo apps under /portal/<demo>/ and a landing nav at /portal/.
-# Deploys to the gh-pages branch with clean-exclude=pr-preview so that PR
-# preview directories (managed by .github/workflows/pr-preview.yml) survive
-# main-branch deploys.
+# Build all demo apps under /portal/<demo>/, a landing nav at /portal/ and
+# the RFC responses site at /portal/rfcs/. Deploys to the gh-pages branch
+# with clean-exclude=pr-preview and v so that PR preview directories
+# (managed by .github/workflows/pr-preview.yml) and the version snapshots
+# survive main-branch deploys.
+#
+# Snapshots: the first deploy after portal-netgl's version changes builds
+# the whole site a second time under /portal/v/<version>/ and keeps it
+# there for good, so every release's demos and docs stay reachable.
+# /portal/v/versions.json lists them; the version pulldown in the docs'
+# header and the demos' drawer reads it.
 
 on:
   push:
@@ -36,6 +43,21 @@ jobs:
         with:
           base-path: /portal/
 
+      - name: Find the snapshots that exist, and whether this version needs one
+        id: versions
+        run: |
+          git fetch --depth=1 origin gh-pages || true
+          VERSION=$(node -p "require('./packages/portal-netgl/package.json').version")
+          EXISTING=$(git ls-tree --name-only origin/gh-pages v/ 2>/dev/null | sed 's#^v/##' | grep -E '^[0-9]' || true)
+          NEW=true
+          if echo "$EXISTING" | grep -qx "$VERSION"; then NEW=false; fi
+          mkdir -p dist-versions
+          # shellcheck disable=SC2086
+          node scripts/write-versions.mjs "$VERSION" $EXISTING > dist-versions/versions.json
+          cat dist-versions/versions.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
@@ -44,3 +66,27 @@ jobs:
           clean: true
           clean-exclude: |
             pr-preview
+            v
+
+      - name: Publish the versions list
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist-versions
+          branch: gh-pages
+          target-folder: v
+          clean: false
+
+      - name: Build the snapshot for v/${{ steps.versions.outputs.version }}
+        if: steps.versions.outputs.new == 'true'
+        uses: ./.github/actions/build
+        with:
+          base-path: /portal/v/${{ steps.versions.outputs.version }}/
+
+      - name: Deploy the snapshot
+        if: steps.versions.outputs.new == 'true'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist
+          branch: gh-pages
+          target-folder: v/${{ steps.versions.outputs.version }}
+          clean: false
