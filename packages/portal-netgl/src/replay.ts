@@ -5,7 +5,15 @@
 // etc. on this side of the wire.
 
 import type { NetGLCall, NetGLEncodedValue } from './messages'
-import { NETGL_REPROJECT_UNIFORM, declaresReprojection, reprojectVertexShader } from './reproject'
+import {
+  NETGL_PIXEL_SCALE_UNIFORM,
+  NETGL_REPROJECT_UNIFORM,
+  NETGL_VIEWPORT_SCALE_UNIFORM,
+  declaresReprojection,
+  declaresScales,
+  reprojectVertexShader,
+  writesPointSize
+} from './reproject'
 import { makeScreenPolicyState, type NetGLScreenPolicy } from './screen-policy'
 
 type TypedArrayCtor = new (
@@ -55,6 +63,16 @@ export type NetGLReplay = ((call: NetGLCall) => void) & {
    * re-issues the screen viewport and scissor under the new mapping first.
    */
   setViewportRemap(remap: NetGLViewportRemap | null): void
+  /**
+   * With `reproject` on: the frame's pixel scale (the host's pixel ratio
+   * now over the one the frame was drawn at), for the guest's screen draws
+   * from here on, or null for none (1). Applied to `gl_PointSize` in
+   * wrapped shaders that write it, and given to opted-in shaders that
+   * declare `uniform float netgl_pixelScale;`. Draws into the guest's own
+   * framebuffers always get 1. No GL calls here: the uniform is set lazily,
+   * before each draw whose program doesn't hold the value it needs.
+   */
+  setPixelScale(scale: number | null): void
   /** With `reproject` on: what the rewrite has done so far. */
   readonly reprojectStats: NetGLReprojectStats
 }
@@ -70,7 +88,7 @@ export type NetGLReprojectStats = {
   shaders: number
   /** Vertex shaders that declare `netgl_reproject` themselves and apply it (left unwrapped). */
   optIn: number
-  /** The guest's own sets of `netgl_reproject` dropped (the host sets it). */
+  /** The guest's own sets of `netgl_reproject`, `netgl_pixelScale` or `netgl_viewportScale` dropped (the host sets them). */
   guestSetsDropped: number
   /** Vertex shaders left as they were: no `void main()` found, or the rewrite didn't compile (then `fallbacks` too). */
   skipped: number
@@ -78,6 +96,8 @@ export type NetGLReprojectStats = {
   fallbacks: number
   /** Screen draws made with a correction other than the identity. */
   correctedDraws: number
+  /** Screen draws whose program got a pixel or viewport scale other than 1 (the shader has the uniform). */
+  scaledDraws: number
 }
 
 export type NetGLReplayConfig = {
@@ -273,28 +293,82 @@ export const makeNetGLReplay = (
   const shaderTypes = new WeakMap<object, number>()
   const rewritten = new WeakMap<object, string>()
   // Vertex shaders that apply the correction themselves (the opt-in
-  // convention), and the locations the guest looked the uniform up at.
+  // convention), and the locations the guest looked the host's uniforms up
+  // at. Which scale uniforms each rewritten or opted-in shader has: only
+  // those are looked up, so a shader without them makes 0.6.5's calls.
   const optedIn = new WeakSet<object>()
-  const guestReprojectLocs = new WeakSet<object>()
+  const shaderScales = new WeakMap<object, { pixel: boolean; viewport: boolean }>()
+  const guestHostLocs = new WeakSet<object>()
   const programVertex = new WeakMap<object, object>()
-  const programUniform = new WeakMap<object, { loc: WebGLUniformLocation | null; version: number }>()
+  type ScaleSlot = { loc: WebGLUniformLocation | null; x: number; y: number }
+  const programUniform = new WeakMap<
+    object,
+    { loc: WebGLUniformLocation | null; version: number; pixel: ScaleSlot | null; viewport: ScaleSlot | null }
+  >()
   let currentProgram: object | null = null
   // Version 0 is the identity; each setReprojection with a matrix is new.
   let correction: Float32Array | null = null
   let correctionVersion = 0
   let versions = 0
   const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
-  const reprojectStats: NetGLReprojectStats = { shaders: 0, optIn: 0, guestSetsDropped: 0, skipped: 0, fallbacks: 0, correctedDraws: 0 }
+  // The frame's pixel scale (`setPixelScale`); its viewport scale is the
+  // viewport remap's.
+  let pixelScale = 1
+  const reprojectStats: NetGLReprojectStats = {
+    shaders: 0,
+    optIn: 0,
+    guestSetsDropped: 0,
+    skipped: 0,
+    fallbacks: 0,
+    correctedDraws: 0,
+    scaledDraws: 0
+  }
+  const HOST_UNIFORMS = new Set<string>([NETGL_REPROJECT_UNIFORM, NETGL_PIXEL_SCALE_UNIFORM, NETGL_VIEWPORT_SCALE_UNIFORM])
+
+  // Set a scale uniform (a float, or a vec2 with `y`) when the program
+  // doesn't hold the value yet: NaN until the first set after a link (a
+  // link resets uniforms to 0). Whether the program has it.
+  const setScale = (slot: ScaleSlot | null, x: number, y?: number): boolean => {
+    if (!slot || !slot.loc) return false
+    const yy = y ?? 0
+    if (slot.x !== x || slot.y !== yy) {
+      if (y === undefined) receiver.uniform1f(slot.loc, x)
+      else receiver.uniform2f(slot.loc, x, y)
+      slot.x = x
+      slot.y = yy
+    }
+    return true
+  }
 
   // Before a geometry draw: give the current program the matrix this draw
-  // needs (C for the screen, identity for the guest's own targets).
+  // needs (C for the screen, identity for the guest's own targets), and the
+  // pixel and viewport scales if its shader has them (the frame's for the
+  // screen, 1 for the guest's own targets).
   const applyReprojection = (toScreen: boolean): void => {
     const program = currentProgram
-    if (!program || !programVertex.has(program)) return
+    const shader = program ? programVertex.get(program) : undefined
+    if (!program || !shader) return
     let u = programUniform.get(program)
     if (!u) {
-      u = { loc: receiver.getUniformLocation(program as WebGLProgram, NETGL_REPROJECT_UNIFORM), version: -1 }
+      const scales = shaderScales.get(shader)
+      const slot = (on: boolean | undefined, name: string): ScaleSlot | null =>
+        on ? { loc: receiver.getUniformLocation(program as WebGLProgram, name), x: NaN, y: NaN } : null
+      u = {
+        loc: receiver.getUniformLocation(program as WebGLProgram, NETGL_REPROJECT_UNIFORM),
+        version: -1,
+        pixel: slot(scales?.pixel, NETGL_PIXEL_SCALE_UNIFORM),
+        viewport: slot(scales?.viewport, NETGL_VIEWPORT_SCALE_UNIFORM)
+      }
       programUniform.set(program, u)
+    }
+    if (u.pixel || u.viewport) {
+      const remap = toScreen ? viewportRemap : null
+      const ps = toScreen ? pixelScale : 1
+      const vx = remap ? remap.to[2] / remap.from[2] : 1
+      const vy = remap ? remap.to[3] / remap.from[3] : 1
+      const a = setScale(u.pixel, ps) && ps !== 1
+      const b = setScale(u.viewport, vx, vy) && (vx !== 1 || vy !== 1)
+      if (a || b) reprojectStats.scaledDraws += 1
     }
     if (!u.loc) return
     const version = toScreen && correction ? correctionVersion : 0
@@ -520,11 +594,15 @@ export const makeNetGLReplay = (
         const patched = vertex && !optIn ? reprojectVertexShader(src) : null
         rewritten.delete(shader as object)
         optedIn.delete(shader as object)
+        shaderScales.delete(shader as object)
         if (shader && optIn) {
           optedIn.add(shader)
+          const scales = declaresScales(src)
+          if (scales.pixel || scales.viewport) shaderScales.set(shader, scales)
           reprojectStats.optIn += 1
         } else if (shader && patched !== null) {
           rewritten.set(shader, src)
+          if (writesPointSize(src)) shaderScales.set(shader, { pixel: true, viewport: false })
           decodedArgs = [shader, patched]
         } else if (vertex) {
           reprojectStats.skipped += 1
@@ -539,9 +617,9 @@ export const makeNetGLReplay = (
         }
       } else if (GEOMETRY_DRAWS.has(call.name)) {
         applyReprojection(currentDrawFb === null)
-      } else if (call.name === 'uniformMatrix4fv' && decodedArgs[0] && guestReprojectLocs.has(decodedArgs[0] as object)) {
-        // An opted-in guest sets its own identity (for hosts that don't
-        // reproject); here the host owns the value.
+      } else if (call.name.startsWith('uniform') && decodedArgs[0] && guestHostLocs.has(decodedArgs[0] as object)) {
+        // An opted-in guest sets its own identity and scales of 1 (for
+        // hosts that don't reproject); here the host owns the values.
         reprojectStats.guestSetsDropped += 1
         return
       }
@@ -590,8 +668,8 @@ export const makeNetGLReplay = (
     if (reproject) {
       if (call.name === 'createShader' && result) {
         shaderTypes.set(result as object, decodedArgs[0] as number)
-      } else if (call.name === 'getUniformLocation' && result && decodedArgs[1] === NETGL_REPROJECT_UNIFORM) {
-        guestReprojectLocs.add(result as object)
+      } else if (call.name === 'getUniformLocation' && result && HOST_UNIFORMS.has(decodedArgs[1] as string)) {
+        guestHostLocs.add(result as object)
       } else if (call.name === 'compileShader') {
         const shader = decodedArgs[0] as WebGLShader | null
         const original = shader ? rewritten.get(shader) : undefined
@@ -602,6 +680,7 @@ export const makeNetGLReplay = (
             reprojectStats.shaders += 1
           } else {
             rewritten.delete(shader)
+            shaderScales.delete(shader)
             reprojectStats.fallbacks += 1
             reprojectStats.skipped += 1
             receiver.shaderSource(shader, original)
@@ -661,6 +740,9 @@ export const makeNetGLReplay = (
         m && m.from[2] > 0 && m.from[3] > 0 && !sameRect(m.from, m.to)
           ? { from: [m.from[0], m.from[1], m.from[2], m.from[3]], to: [m.to[0], m.to[1], m.to[2], m.to[3]] }
           : null
+    },
+    setPixelScale(scale: number | null) {
+      pixelScale = scale !== null && Number.isFinite(scale) && scale > 0 ? scale : 1
     },
     setReprojection(m: ArrayLike<number> | null) {
       if (!m) {

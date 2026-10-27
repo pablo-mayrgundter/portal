@@ -715,3 +715,259 @@ describe('attachNetGLDeckLayer({ reproject }) — a guest shader that applies ne
     expect(c.differ).toBeGreaterThan(Math.ceil(c.onB * 0.03))
   })
 })
+
+// --- Pixel sizes after a pixel-ratio change or a resize (0.6.7) ------------
+
+// A guest sized in CSS pixels, as celestiary's: its points' `gl_PointSize`
+// and its wide lines' width are CSS pixels times the view's pixel ratio,
+// and a line extrudes by the viewport's resolution. A frame drawn for view
+// A (CSS wA×hA at prA) is composed into deck's buffer for B (wB×hB at prB)
+// and compared with the guest's own frame for B. A wide line declares
+// `netgl_pixelScale` and `netgl_viewportScale` (`scales`), or not (0.6.5's
+// opt-in); `pixelScale: false` is 0.6.5's replay, which never scales.
+const wideLineScalesVS = (scales: boolean): string => `
+uniform mat4 netgl_reproject;
+${scales ? 'uniform float netgl_pixelScale;\nuniform vec2 netgl_viewportScale;' : ''}
+uniform float uWidth;
+uniform float uPixelRatio;
+uniform vec2 uResolution;
+attribute vec3 aEnd;
+attribute vec2 aSide;
+void main() {
+  vec4 a = netgl_reproject * (projectionMatrix * modelViewMatrix * vec4(position, 1.0));
+  vec4 b = netgl_reproject * (projectionMatrix * modelViewMatrix * vec4(aEnd, 1.0));
+  vec2 halfRes = 0.5 * uResolution${scales ? ' * netgl_viewportScale' : ''};
+  vec2 d = (b.xy / b.w - a.xy / a.w) * halfRes;
+  vec2 dir = normalize(d);
+  vec2 n = vec2(-dir.y, dir.x);
+  float w = uWidth * uPixelRatio${scales ? ' * netgl_pixelScale' : ''};
+  vec4 p = aSide.x < 0.5 ? a : b;
+  p.xy += n * aSide.y * 0.5 * w / halfRes * p.w;
+  gl_Position = p;
+}`
+
+describe('attachNetGLDeckLayer({ reproject }) — pixel sizes follow deck\'s pixel ratio', () => {
+  let dom: JSDOM
+  beforeAll(() => {
+    dom = initDom()
+  })
+
+  type Size = { w: number; h: number; pr: number }
+  const run = async (opts: { a: Size; b: Size; content: 'points' | 'line'; scales?: boolean; pixelScale?: boolean; pan?: boolean }) => {
+    const { a, b, content, scales = true, pixelScale = true, pan = false } = opts
+    const bw = b.w * b.pr
+    const bh = b.h * b.pr
+    const host = await makeLumaHost(dom, bw, bh)
+    let size = a
+    const globe = (props: Record<string, number>) => makeGlobe({ width: size.w, height: size.h, ...props })
+    let viewport = globe({ longitude: 0, latitude: 0, zoom: 0.3, pitch: 0, bearing: 0 })
+    const deck = makeFakeDeck(host, viewport)
+    deck.getViewports = () => [viewport]
+    const view = (vp: DeckViewportLike, o: GlobeLayerViewOptions) =>
+      globeLayerView(vp, { ...o, pixelRatio: size.pr, drawingBufferWidth: size.w * size.pr, drawingBufferHeight: size.h * size.pr })
+    const pair = queuedPair()
+    const layer = attachNetGLDeckLayer(deck, { device: host.device, transport: pair.host, time: () => 0, reproject: true, view })
+    if (!pixelScale) layer.receiver!.replay.setPixelScale = () => {}
+    const R = 6370972
+    const scene = new THREE.Scene()
+    let onView: (v: NetGLLayerView) => void
+    if (content === 'points') {
+      const where = [...sphereToEcef(-12, -8, 1e5, R), ...sphereToEcef(3, 2, 1e5, R), ...sphereToEcef(10, 9, 1e5, R)]
+      const material = new THREE.PointsMaterial({ color: 0x00ff00, size: 1, sizeAttenuation: false, depthTest: false, depthWrite: false })
+      const points = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(where, 3)), material)
+      points.frustumCulled = false
+      scene.add(points)
+      onView = (v) => {
+        material.size = 6 * v.pixelRatio
+      }
+    } else {
+      const p0 = sphereToEcef(-9, -6, 2e5, R)
+      const p1 = sphereToEcef(11, 4, 2e5, R)
+      const geometry = new THREE.BufferGeometry()
+        .setAttribute('position', new THREE.Float32BufferAttribute([...p0, ...p0, ...p0, ...p0], 3))
+        .setAttribute('aEnd', new THREE.Float32BufferAttribute([...p1, ...p1, ...p1, ...p1], 3))
+        .setAttribute('aSide', new THREE.Float32BufferAttribute([0, -1, 0, 1, 1, 1, 1, -1], 2))
+        .setIndex([0, 1, 2, 0, 2, 3])
+      const uniforms: Record<string, THREE.IUniform> = {
+        uWidth: { value: 4 },
+        uPixelRatio: { value: 1 },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+        // The guest's own values, for a host that doesn't reproject.
+        netgl_reproject: { value: new THREE.Matrix4() }
+      }
+      if (scales) {
+        uniforms.netgl_pixelScale = { value: 1 }
+        uniforms.netgl_viewportScale = { value: new THREE.Vector2(1, 1) }
+      }
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: wideLineScalesVS(scales),
+        fragmentShader: 'void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }',
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+      const line = new THREE.Mesh(geometry, material)
+      line.frustumCulled = false
+      scene.add(line)
+      onView = (v) => {
+        uniforms.uPixelRatio.value = v.pixelRatio
+        ;(uniforms.uResolution.value as THREE.Vector2).set(v.viewport[2], v.viewport[3])
+      }
+    }
+    const shadowCanvas = { getContext: () => makeCtx(), style: {}, width: 1, height: 1 } as unknown as HTMLCanvasElement
+    const guest = makeNetGLThreeOverlayGuest({
+      WebGLRenderer: THREE.WebGLRenderer,
+      scene,
+      camera: new THREE.PerspectiveCamera(),
+      transport: pair.guest,
+      canvas: shadowCanvas,
+      onView: (v) => onView(v)
+    })
+    guest.start()
+    pair.flush()
+    deck.frame()
+    pair.flush() // the first frame (never re-run)
+    deck.frame()
+    pair.flush() // the frame for A, undrained
+    // deck's canvas changes before it draws again: its size, its pixel
+    // ratio, or both (and the camera may move too).
+    size = b
+    viewport = globe(pan ? { longitude: 5, latitude: 3, zoom: 0.3, pitch: 0, bearing: 0 } : { longitude: 0, latitude: 0, zoom: 0.3, pitch: 0, bearing: 0 })
+    deck.frame() // A's frame, composed at B
+    const lagged = host.read()
+    const rB = layer.lastReprojection
+    pair.flush() // the guest's own frame for B
+    deck.frame()
+    const truth = host.read()
+    const rs = { ...layer.receiver!.replay.reprojectStats }
+    layer.detach()
+    guest.stop()
+    return { lagged, truth, rB, rs, bw, bh }
+  }
+
+  const green = (px: Uint8Array, i: number): boolean => px[i] === 0 && px[i + 1] === 255 && px[i + 2] === 0
+  const measure = (px: Uint8Array, bw: number) => {
+    let n = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (let i = 0; i < px.length; i += 4) {
+      if (!green(px, i)) continue
+      const x = (i / 4) % bw
+      const y = Math.floor(i / 4 / bw)
+      n += 1
+      x0 = Math.min(x0, x)
+      y0 = Math.min(y0, y)
+      x1 = Math.max(x1, x)
+      y1 = Math.max(y1, y)
+    }
+    return { n, x0, y0, x1, y1 }
+  }
+  const differ = (a: Uint8Array, b: Uint8Array): number => {
+    let d = 0
+    for (let i = 0; i < a.length; i += 4) if (green(a, i) !== green(b, i)) d += 1
+    return d
+  }
+  // A line's width across: its pixels in the truth's middle column.
+  const column = (px: Uint8Array, bw: number, bh: number, x: number): number => {
+    let n = 0
+    for (let y = 0; y < bh; y += 1) if (green(px, (y * bw + x) * 4)) n += 1
+    return n
+  }
+
+  const DPR = { a: { w: W, h: H, pr: 2 }, b: { w: W, h: H, pr: 1 } }
+  const RESIZE = { a: { w: W, h: H, pr: 1 }, b: { w: 96, h: 72, pr: 1 } }
+
+  it('points drawn at 2× composed into 1×: the size and place of the guest\'s own 1× frame', async () => {
+    const { lagged, truth, rB, rs, bw } = await run({ ...DPR, content: 'points' })
+    const t = measure(truth, bw)
+    // Three 6 px points.
+    expect(t.n).toBe(3 * 36)
+    expect(rB?.pixelScale).toBe(0.5)
+    expect(rB?.viewport).toEqual({ from: [0, 0, 2 * W, 2 * H], to: [0, 0, W, H] })
+    expect(measure(lagged, bw)).toEqual(t)
+    expect(differ(lagged, truth)).toBe(0)
+    expect(rs.scaledDraws).toBeGreaterThan(0)
+  })
+
+  it('control (0.6.5): placed right, but each point twice the size', async () => {
+    const { lagged, truth, bw } = await run({ ...DPR, content: 'points', pixelScale: false })
+    const t = measure(truth, bw)
+    const l = measure(lagged, bw)
+    expect(l.n).toBe(4 * t.n)
+    expect(differ(lagged, truth)).toBe(3 * t.n)
+  })
+
+  it('points at 1× composed into 2× (the ratio back up), with a pan', async () => {
+    const { lagged, truth, rB, bw } = await run({ a: DPR.b, b: DPR.a, content: 'points', pan: true })
+    expect(rB?.pixelScale).toBe(2)
+    expect(rB?.correction).not.toBeNull()
+    const t = measure(truth, bw)
+    expect(t.n).toBe(3 * 144)
+    const l = measure(lagged, bw)
+    expect(l.n).toBe(t.n)
+    expect(Math.max(Math.abs(l.x0 - t.x0), Math.abs(l.y0 - t.y0), Math.abs(l.x1 - t.x1), Math.abs(l.y1 - t.y1))).toBeLessThanOrEqual(1)
+  })
+
+  it('a resize at the same ratio: no pixel scale, and the points are already right', async () => {
+    const { lagged, truth, rB, rs, bw } = await run({ ...RESIZE, content: 'points' })
+    expect(rB?.pixelScale).toBeNull()
+    expect(rB?.viewport).toEqual({ from: [0, 0, W, H], to: [0, 0, 96, 72] })
+    const t = measure(truth, bw)
+    expect(t.n).toBe(3 * 36)
+    expect(measure(lagged, bw).n).toBe(t.n)
+    expect(differ(lagged, truth)).toBeLessThanOrEqual(2 * 6 * 3)
+    expect(rs.scaledDraws).toBe(0)
+  })
+
+  it('a wide line, 2× into 1×, declaring the scales: the guest\'s own 1× frame', async () => {
+    const { lagged, truth, rs, bw, bh } = await run({ ...DPR, content: 'line' })
+    const t = measure(truth, bw)
+    expect(t.n).toBeGreaterThan(80)
+    expect(differ(lagged, truth)).toBeLessThanOrEqual(Math.ceil(t.n * 0.03))
+    const mid = Math.round((t.x0 + t.x1) / 2)
+    expect(column(lagged, bw, bh, mid)).toBe(column(truth, bw, bh, mid))
+    // The guest's own 1, (1, 1) and identity were dropped.
+    expect(rs.guestSetsDropped).toBeGreaterThanOrEqual(3)
+  })
+
+  it('a wide line, 2× into 1×, not declaring them (0.6.5): already right, as derived', async () => {
+    const { lagged, truth, bw, bh } = await run({ ...DPR, content: 'line', scales: false })
+    const t = measure(truth, bw)
+    expect(differ(lagged, truth)).toBeLessThanOrEqual(Math.ceil(t.n * 0.03))
+    const mid = Math.round((t.x0 + t.x1) / 2)
+    expect(column(lagged, bw, bh, mid)).toBe(column(truth, bw, bh, mid))
+  })
+
+  it('a wide line after a resize, declaring the scales: the guest\'s own frame at the new size', async () => {
+    const { lagged, truth, rB, bw, bh } = await run({ ...RESIZE, content: 'line' })
+    expect(rB?.correction).not.toBeNull()
+    expect(rB?.pixelScale).toBeNull()
+    const t = measure(truth, bw)
+    expect(differ(lagged, truth)).toBeLessThanOrEqual(Math.ceil(t.n * 0.03))
+    const mid = Math.round((t.x0 + t.x1) / 2)
+    expect(Math.abs(column(lagged, bw, bh, mid) - column(truth, bw, bh, mid))).toBeLessThanOrEqual(0)
+  })
+
+  it('control: a wide line after a resize, not declaring them (0.6.5), is drawn 1.5 times as wide', async () => {
+    const { lagged, truth, bw, bh } = await run({ ...RESIZE, content: 'line', scales: false })
+    const t = measure(truth, bw)
+    const mid = Math.round((t.x0 + t.x1) / 2)
+    const lc = column(lagged, bw, bh, mid)
+    const tc = column(truth, bw, bh, mid)
+    expect(lc).toBeGreaterThanOrEqual(Math.round(tc * 1.5) - 1)
+    expect(differ(lagged, truth)).toBeGreaterThan(Math.ceil(t.n * 0.2))
+  })
+
+  it('the same size and ratio: no scale, and the composites are bit-identical to 0.6.5\'s', async () => {
+    const same = { a: { w: W, h: H, pr: 1 }, b: { w: W, h: H, pr: 1 } }
+    for (const content of ['points', 'line'] as const) {
+      const now = await run({ ...same, content, pan: true })
+      const before = await run({ ...same, content, pan: true, pixelScale: false, scales: false })
+      expect(now.rB?.pixelScale).toBeNull()
+      expect(now.rB?.correction).not.toBeNull()
+      expect(now.rs.scaledDraws).toBe(0)
+      expect(measure(now.lagged, now.bw).n).toBeGreaterThan(50)
+      expect(diffCount(now.lagged, before.lagged)).toBe(0)
+      expect(diffCount(now.truth, before.truth)).toBe(0)
+    }
+  })
+})

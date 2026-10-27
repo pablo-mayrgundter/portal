@@ -31,7 +31,9 @@
 // fragment shader (logarithmic depth) isn't touched. A frame drawn at
 // another viewport than the host's now (a resize, a pixel-ratio change)
 // isn't C's to fix: the replay maps its screen viewport and scissor rects
-// (`setViewportRemap`, 0.6.5), though point sizes stay the frame's pixels.
+// (`setViewportRemap`, 0.6.5), and scales its pixel sizes by the change of
+// pixel ratio (`netgl_pixelScale`, 0.6.7): a wrapped shader's
+// `gl_PointSize`, and whatever an opted-in shader sizes in pixels itself.
 // DESIGN.md, "Host reprojection".
 
 import { mat4InvertRigid, mat4Multiply, type NetGLLayerView, type NetGLMat4 } from './layer-view'
@@ -40,6 +42,22 @@ import { mat4InvertRigid, mat4Multiply, type NetGLLayerView, type NetGLMat4 } fr
 export const NETGL_REPROJECT_UNIFORM = 'netgl_reproject'
 /** What the guest's own `main` is renamed to. */
 export const NETGL_REPROJECT_MAIN = 'netgl_main'
+/**
+ * The uniform for pixel sizes: device pixels of the buffer a frame is
+ * composed into per device pixel of the one it was drawn for, the views'
+ * `to.pixelRatio / from.pixelRatio` (1 unless the pixel ratio changed in
+ * between). A wrapped shader that writes `gl_PointSize` gets it applied
+ * there; an opted-in shader may declare `uniform float netgl_pixelScale;`.
+ */
+export const NETGL_PIXEL_SCALE_UNIFORM = 'netgl_pixelScale'
+/**
+ * The uniform for an opted-in shader that converts between pixels and clip
+ * space by a resolution of its own (a wide line): the composed viewport's
+ * size over the frame's, per axis (`setViewportRemap`'s scale; (1, 1)
+ * unless the drawing buffer changed size). Declared as
+ * `uniform vec2 netgl_viewportScale;`.
+ */
+export const NETGL_VIEWPORT_SCALE_UNIFORM = 'netgl_viewportScale'
 
 // A definition of main, with or without `void` in its parameter list.
 const MAIN_DEF = /\bvoid\s+main\s*\(\s*(?:void\s*)?\)\s*\{/
@@ -56,17 +74,34 @@ const COMMENTS = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g
 // (`gl_Position = vec4(2.0, 2.0, 2.0, 1.0)`, celestiary's hidden satellites
 // and far-side dishes), which a large correction could otherwise bring
 // into view. A real vertex there is clipped in the old frame anyway.
-const WRAPPER = `
+//
+// A shader that writes `gl_PointSize` has it scaled by the change of pixel
+// ratio as well (0.6.7): a point is sized in the framebuffer's pixels, so a
+// frame drawn at ratio 2 composed at 1 would draw its points twice the
+// size. One that doesn't is wrapped exactly as before (an unwritten
+// gl_PointSize is never read).
+const wrapper = (pointSize: boolean): string => `
 // portal-netgl host reprojection (replay \`reproject\`): C = VP_now * VP_frame^-1.
 uniform highp mat4 ${NETGL_REPROJECT_UNIFORM};
-void main() {
+${pointSize ? `uniform highp float ${NETGL_PIXEL_SCALE_UNIFORM};\n` : ''}void main() {
   ${NETGL_REPROJECT_MAIN}();
   highp vec4 netgl_p = gl_Position;
   if (!(netgl_p.w > 0.0 && all(greaterThan(abs(netgl_p.xyz), vec3(netgl_p.w))))) {
     gl_Position = ${NETGL_REPROJECT_UNIFORM} * netgl_p;
   }
-}
+${pointSize ? `  gl_PointSize *= ${NETGL_PIXEL_SCALE_UNIFORM};\n` : ''}}
 `
+
+// An assignment to gl_PointSize (`=`, `*=`, ...; not `==`).
+const WRITES_POINT_SIZE = /\bgl_PointSize\s*[-+*/]?=(?!=)/
+
+/**
+ * Whether a vertex shader writes `gl_PointSize` (outside comments), so the
+ * wrapper scales it by `netgl_pixelScale`. Not when the source names the
+ * uniform already (then it's the guest's own business).
+ */
+export const writesPointSize = (src: string): boolean =>
+  !src.includes(NETGL_PIXEL_SCALE_UNIFORM) && WRITES_POINT_SIZE.test(src.replace(COMMENTS, ' '))
 
 // A guest's own declaration of the correction (the opt-in convention):
 // `uniform [precision] mat4 netgl_reproject;`, outside comments.
@@ -85,10 +120,33 @@ const DECLARES = new RegExp(`\\buniform\\s+(?:(?:highp|mediump|lowp)\\s+)?mat4\\
  */
 export const declaresReprojection = (src: string): boolean => DECLARES.test(src.replace(COMMENTS, ' '))
 
+const declares = (type: string, name: string): RegExp =>
+  new RegExp(`\\buniform\\s+(?:(?:highp|mediump|lowp)\\s+)?${type}\\s+${name}\\s*;`)
+const DECLARES_PIXEL_SCALE = declares('float', NETGL_PIXEL_SCALE_UNIFORM)
+const DECLARES_VIEWPORT_SCALE = declares('vec2', NETGL_VIEWPORT_SCALE_UNIFORM)
+
+/**
+ * Which of the host's scale uniforms an opted-in shader (one that
+ * `declaresReprojection`) declares: `uniform float netgl_pixelScale;` and
+ * `uniform vec2 netgl_viewportScale;`, outside comments. The replay sets
+ * those it declares before each draw (1 and (1, 1) unless the frame was
+ * drawn at another pixel ratio or viewport than the one it's composed
+ * into, and for draws into the guest's own framebuffers) and drops the
+ * guest's own sets of them, as for `netgl_reproject`. A shader that
+ * extrudes by a resolution of its own uses both, so it computes what it
+ * would for the composed view: its resolution times `netgl_viewportScale`,
+ * its pixel sizes times `netgl_pixelScale`.
+ */
+export const declaresScales = (src: string): { pixel: boolean; viewport: boolean } => {
+  const s = src.replace(COMMENTS, ' ')
+  return { pixel: DECLARES_PIXEL_SCALE.test(s), viewport: DECLARES_VIEWPORT_SCALE.test(s) }
+}
+
 /**
  * Rewrite a vertex shader so the host can correct its `gl_Position`: the
  * guest's `main` becomes `netgl_main`, and a new `main` calls it and
- * multiplies `gl_Position` by `uniform mat4 netgl_reproject`. GLSL ES 1.00
+ * multiplies `gl_Position` by `uniform mat4 netgl_reproject` (and, if it
+ * `writesPointSize`, `gl_PointSize` by `uniform float netgl_pixelScale`). GLSL ES 1.00
  * and 3.00 alike; preprocessor lines and declarations are left where they
  * are. Returns null when the source has no `void main()` definition, is
  * already rewritten, or declares the uniform itself (`declaresReprojection`):
@@ -97,7 +155,7 @@ export const declaresReprojection = (src: string): boolean => DECLARES.test(src.
 export const reprojectVertexShader = (src: string): string | null => {
   if (src.includes(NETGL_REPROJECT_UNIFORM)) return null
   if (!MAIN_DEF.test(src.replace(COMMENTS, ' '))) return null
-  return src.replace(MAIN_REF, `${NETGL_REPROJECT_MAIN}$1`) + WRAPPER
+  return src.replace(MAIN_REF, `${NETGL_REPROJECT_MAIN}$1`) + wrapper(writesPointSize(src))
 }
 
 /** The inverse of a column-major 4×4, in doubles, or null if singular. */

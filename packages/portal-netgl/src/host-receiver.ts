@@ -142,6 +142,14 @@ export type NetGLReceiverReprojectConfig = {
    * once per frame in the batch.
    */
   viewport?: (viewId: number | null) => NetGLViewportRemap | null
+  /**
+   * The pixel scale for a frame drawn for `viewId`: the host's pixel ratio
+   * now over the one the frame was drawn at, or null for none (1). Scales
+   * the frame's pixel sizes (`replay.setPixelScale`): `gl_PointSize` in
+   * wrapped shaders, `netgl_pixelScale` in opted-in ones. Called at drain
+   * time after `viewport`, once per frame in the batch.
+   */
+  pixelScale?: (viewId: number | null) => number | null
 }
 
 /** The wire the receiver and its guest agreed on. */
@@ -403,6 +411,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       while (reprojectConfig && m < marks.length && marks[m].at <= i) {
         replay.setReprojection(reprojectConfig.correction(marks[m].viewId))
         if (reprojectConfig.viewport) replay.setViewportRemap(reprojectConfig.viewport(marks[m].viewId))
+        if (reprojectConfig.pixelScale) replay.setPixelScale(reprojectConfig.pixelScale(marks[m].viewId))
         m += 1
       }
       const call = batch[i]
@@ -420,6 +429,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     if (reprojectConfig) {
       replay.setReprojection(null)
       replay.setViewportRemap(null)
+      replay.setPixelScale(null)
     }
   }
 

@@ -590,22 +590,75 @@ the same clip coordinates in the same viewport gives the same pixels.
 `stats.remappedFrames` counts them and `lastReprojection.viewport` names
 the two rects.
 
+**Pixel sizes after a pixel-ratio change** (0.6.7). The remap places a
+lagging frame right, but a point's `gl_PointSize` is in framebuffer
+pixels: on the M2 under `?movedpr=1` the satellites doubled in size for
+the frames before the guest's own landed. The scale a pixel size needs is
+the change of pixel ratio, s = to.pixelRatio / from.pixelRatio (the views
+carry it), not the viewport's: on a plain resize the ratio is unchanged
+and a point's pixels are already right, so s is 1 there. The adapter
+gives the receiver s per frame, by `viewId` as for C (`reproject.pixelScale`
+→ `replay.setPixelScale`); it is 1 with no frame view and for draws into
+the guest's own framebuffers. A wrapped shader that writes `gl_PointSize`
+(an assignment outside comments) also declares `uniform highp float
+netgl_pixelScale` and does `gl_PointSize *= netgl_pixelScale` after
+`netgl_main()`; one that doesn't is wrapped byte for byte as in 0.6.5, so
+an unwritten `gl_PointSize` is never read. The uniform is looked up only
+for programs whose shader has it and set lazily as C is, so same-size
+frames make 0.6.5's calls, plus one `uniform1f(…, 1)` per point program
+after each link (a link resets uniforms to 0, which would hide the
+points). On headless-gl (`luma.test.ts`) three 6 px points drawn for a 2×
+view and composed into a 1× buffer are pixel-identical to the guest's own
+1× frame (108 pixels, 0 differ); unscaled (0.6.5) they cover 432 and 324
+differ. 1× into 2× with a pan: 432 and 432. A resize at ratio 1: s is
+null and 0 differ.
+
+**What a wide line needs.** A screen-space line (celestiary's
+`wideLines.js`, opted in) computes its offset in clip space from its own
+resolution uniform (the viewport, in device pixels) and a width in CSS
+pixels times its pixel ratio: offset_ndc = w_css · pr_f / (½ W_f), with
+W_f = S_f · pr_f for a canvas S_f CSS pixels wide. The remap draws NDC into
+the composed viewport W_t = S_t · pr_t, so the line comes out
+w_css · pr_f · W_t / W_f = w_css · pr_t · S_t / S_f device pixels wide,
+against the wanted w_css · pr_t:
+- a pixel-ratio change (S_t = S_f): the offset is the same fraction of
+  the viewport at either ratio, and the composed width is exactly
+  w_css · pr_t. Right already, with no scale.
+- a resize (pr_t = pr_f): the width is scaled by S_t / S_f, per axis
+  (an aspect change also skews its direction, computed in the old
+  viewport's pixels).
+
+So a line needs the viewport's change as well as the ratio's: an opted-in
+shader may declare `uniform vec2 netgl_viewportScale` (to.w / from.w,
+to.h / from.h, the remap's scale; (1, 1) without one) beside
+`uniform float netgl_pixelScale`, and uses both, its resolution times the
+first and its pixel sizes times the second; it then computes exactly what
+it would for the composed view, direction and antialiasing edge included.
+The replay looks up only what the shader declares, sets each lazily (1 and
+(1, 1) into the guest's own framebuffers) and drops the guest's own sets of
+both, as for `netgl_reproject`. On headless-gl a 4 px opted-in line, 2× into
+1×: 164 pixels and 0 differ, with the scales or without (as derived);
+after a 64×48 → 96×72 resize, with them 0 differ, without them 237 pixels
+against 164 and 7 px across against 5. `reprojectStats.scaledDraws` counts
+the screen draws made with a scale other than 1, and
+`lastReprojection.pixelScale` names s.
+
 **Limits.**
 - Only the position is corrected, unless the shader opts in (above).
   Screen-space extrusion done in a wrapped vertex shader against the old
   view (wide lines, clip-space sprites, labels) is scaled slightly by C
-  during the lag; point sizes are pixels and are unaffected (celestiary's
-  satellites are points). Choices the
+  during the lag; point sizes are pixels and are unaffected by C
+  (celestiary's satellites are points). Choices the
   guest made from the old eye stay (celestiary culls far-side dishes by
   the old view), and objects moving in time aren't moved: C is the
   camera's change only.
 - Depth written in the fragment shader (`gl_FragDepth`, logarithmic depth)
   isn't corrected. celestiary's layer page uses three's default depth.
-- After a resize or a pixel-ratio change, positions are mapped (above) but
-  pixel sizes aren't: points (`gl_PointSize`) and line widths in a frame
-  drawn at ratio 2 are twice as big composed at 1, for the frames until
-  the guest's own lands. `gl.blitFramebuffer` and `readPixels` rects aren't
-  mapped either.
+- After a resize or a pixel-ratio change, a pixel size computed other than
+  by `gl_PointSize` in a wrapped shader, or by an opted-in shader through
+  `netgl_pixelScale` and `netgl_viewportScale`, stays the frame's (`gl.lineWidth`,
+  a wrapped shader's own clip-space extrusion). `gl.blitFramebuffer` and
+  `readPixels` rects aren't mapped either.
 - A guest that composites a full-screen pass to the screen would have its
   quad moved and its offscreen image left as it was: leave `reproject` off.
 - The "hide this vertex" idiom (`gl_Position = vec4(2.0, 2.0, 2.0, 1.0)`)
