@@ -36,8 +36,9 @@ const GITHUB = 'https://github.com/pablo-mayrgundter/portal'
 const history = JSON.parse(readFileSync(join(src, 'history.json'), 'utf8')).versions
 const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8')
 
+const ROOT = { html: '', nav: 'Summary', title: 'Portal: link independent 3D web renderers at the GL layer' }
 const PAGES = [
-  { md: 'README.md', html: 'index.html', nav: 'Summary', title: 'Responses to the RFCs' },
+  { md: 'README.md', html: 'index.html', nav: 'Responses', title: 'Responses to the RFCs' },
   { md: '0001-globe-orbit-layers.md', html: '0001-globe-orbit-layers.html', nav: 'RFC 0001', title: 'RFC 0001: globe + orbit layers' },
   { md: '0002-nested-in-place-guests.md', html: '0002-nested-in-place-guests.html', nav: 'RFC 0002', title: 'RFC 0002: nested in-place guests' },
   { md: '0003-late-frames.md', html: '0003-late-frames.html', nav: 'RFC 0003', title: 'RFC 0003: late frames' },
@@ -161,9 +162,9 @@ const SCRIPT = `
     // latest: this site's docs. A snapshot with docs of its own: its docs, on the production site.
     // A reconstructed snapshot (demos only): its changelog page, with this header, at versions/<v>.html.
     var toDocs = function (base, m) {
-      // The summary is the site root from 0.6.9 on; in a 0.6.8 snapshot it is rfcs/index.html.
+      // The overview is the site root from 0.6.9 on; a 0.6.8 snapshot's root is a demo, its docs at rfcs/.
       var summaryAtRoot = !m || m.layout !== 'demo-root';
-      return (atRoot || page === 'index.html') && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
+      return (atRoot || onVersionPage) && summaryAtRoot ? base : base + 'rfcs/' + page + location.hash;
     };
     if (v === 'latest') location.href = toDocs(siteRoot, null);
     else if (!meta[v] || meta[v].docs) location.href = toDocs(snapshotsRoot + 'v/' + v + '/', meta[v]);
@@ -175,20 +176,22 @@ const SCRIPT = `
 function template(page, body, { rfcs = '', root = '../', here = 'latest', demosHref, titleOverride } = {}) {
   const u = rfcs
   demosHref ??= root + 'three/'
-  const pages = PAGES.map((p) => `<a href="${p.md === 'README.md' ? (root === '' ? './' : root) : u + p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`).join('')
+  const rootHref = root === '' ? './' : root
+  const pages = [`<a href="${rootHref}"${page === ROOT ? ' aria-current="page"' : ''}>Summary</a>`]
+    .concat(PAGES.map((p) => `<a href="${u}${p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`)).join('')
   const title = titleOverride ?? page.title
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · Portal</title>
+<title>${page === ROOT ? esc(title) : esc(title) + " · Portal"}</title>
 <meta name="description" content="The maintainers' response to the Portal RFCs: what each asks, what's built, and the tracks of work and versions that answer them.">
 <style>${CSS}</style>
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="${root === '' ? './' : root}">Portal <small>RFC responses</small></a>
+  <a class="brand" href="${rootHref}">Portal <small>NetGL</small></a>
   <nav class="pages" aria-label="Pages">${pages}</nav>
   <a class="demos" href="${demosHref}" target="_blank" rel="noopener" title="The demos${here === 'latest' ? '' : ' of v' + esc(here)}, in a new tab">Demos ${EXTERNAL_ICON}</a>
   <div class="right">
@@ -215,12 +218,14 @@ for (const page of PAGES) {
   writeFileSync(join(out, page.html), template(page, marked.parse(md)))
 }
 
-// The summary is the site's root page too, with its links pointed into rfcs/.
+// The site's root: the overview infographic (what Portal and NetGL are), with where to read on.
 {
-  const summary = PAGES[0]
-  base = { dir: 'docs/rfcs/responses', rfcs: 'rfcs/' }
-  const md = readFileSync(join(src, summary.md), 'utf8')
-  writeFileSync(join(out, '..', 'index.html'), template(summary, marked.parse(md), { rfcs: 'rfcs/', root: '' }))
+  const body = `
+<a class="figure" href="rfcs/img/portal-netgl.svg" title="Open the SVG"><img src="rfcs/img/portal-netgl.svg" alt="Portal and NetGL in one picture: the problem, how NetGL works, three ways to compose, where it stands, and the three RFCs"></a>
+<p><strong>Read on:</strong> the <a href="rfcs/index.html">responses to the RFCs</a> (what each asks, the tracks of work and the versions they claim), one page per RFC (<a href="rfcs/0001-globe-orbit-layers.html">0001</a>, <a href="rfcs/0002-nested-in-place-guests.html">0002</a>, <a href="rfcs/0003-late-frames.html">0003</a>), <a href="rfcs/evolution.html">how NetGL got here</a>, the <a href="${GITHUB}/blob/main/CHANGELOG.md">CHANGELOG</a>, and the <a href="three/">demos</a>. The code and the design docs are on <a href="${GITHUB}">GitHub</a>; the package is <a href="https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl">@pablo-mayrgundter/portal-netgl</a>.</p>
+<p>Every release keeps a snapshot of this site, demos included; the version pulldown in the header moves between them.</p>
+`
+  writeFileSync(join(out, '..', 'index.html'), template(ROOT, body, { rfcs: 'rfcs/', root: '' }))
 }
 
 // A page per version from the CHANGELOG: what the version pulldown shows for a version
@@ -265,4 +270,4 @@ ${sec ? marked.parse(sec.body) : '<p><em>No CHANGELOG entry for this version yet
 // The infographics, stamped with this build's version.
 execFileSync(process.execPath, [join(src, 'img/generate.mjs'), '--out', join(out, 'img')], { stdio: 'inherit' })
 for (const f of readdirSync(join(src, 'img'))) if (f.endsWith('.svg')) { /* generated above */ }
-console.log(`rfc site: the summary at ${join(out, '..', 'index.html')}, ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)
+console.log(`rfc site: the overview at ${join(out, '..', 'index.html')}, ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)

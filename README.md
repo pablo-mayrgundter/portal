@@ -55,7 +55,7 @@ Live demos (GitHub Pages; WebGL2 required):
 | [NetGL + Cesium, door](https://pablo-mayrgundter.github.io/portal/netgl-cesium/) | an unmodified Cesium globe through a door, with real parallax |
 | [NetGL + Cesium, in place](https://pablo-mayrgundter.github.io/portal/netgl-cesium/?mode=earth) | Cesium's globe in place of a three.js Earth: the moon occludes it and is occluded by it |
 | [NetGL + deck.gl](https://pablo-mayrgundter.github.io/portal/netgl-deck/) | a three.js guest from another origin drawn over a deck.gl globe, in deck's clip space |
-| [Docs](https://pablo-mayrgundter.github.io/portal/) | the site's root: the summary, the RFC responses, one page per RFC, and how NetGL got here |
+| [Docs](https://pablo-mayrgundter.github.io/portal/) | the site's root: Portal and NetGL in one picture, then the RFC responses, one page per RFC, and how NetGL got here |
 
 Every release's demos and docs are kept under `/portal/v/<version>/`, and
 a version pulldown moves between them.

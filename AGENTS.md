@@ -91,9 +91,10 @@ were tried and dropped.
 - **Known SwiftShader quirk:** `gl_PointCoord` flips in point shaders
   that `discard` or sample a depth texture. Use depth state instead.
 - **The docs site and the version snapshots.** `scripts/build-rfc-site.mjs`
-  turns `docs/rfcs/responses/*.md` into `dist/rfcs/`, with the summary as
-  the site's root `index.html` (the build action runs it; `--out` anywhere
-  to try it). The demos are `/<key>/` siblings, the Local portal at
+  turns `docs/rfcs/responses/*.md` into `dist/rfcs/`, with the overview
+  infographic as the site's root `index.html` and the responses' synthesis
+  at `rfcs/index.html` (the build action runs it; `--out` anywhere to try
+  it). The demos are `/<key>/` siblings, the Local portal at
   `three/`; up to 0.6.8 it was the root (`layout: 'demo-root'` in
   `history.json`, which the pulldowns and banner read). The Pages workflow writes
   `v/versions.json` and, when portal-netgl's version changes, builds the

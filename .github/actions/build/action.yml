@@ -1,9 +1,9 @@
 name: Build portal demos
-description: Build the demo apps and the RFC responses site with the given base path and assemble a single dist/ tree. The summary page is the root; the demos are /three/, /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/, /netgl-deck/ siblings; the responses are /rfcs/ and the per-version pages /versions/ (scripts/build-rfc-site.mjs). host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary / host-netgl-cesium / host-netgl-deck live at /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/, /netgl-deck/ siblings.
+description: Build the demo apps and the RFC responses site with the given base path and assemble a single dist/ tree. The overview page is the root; the demos are /three/, /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/, /netgl-deck/ siblings; the responses are /rfcs/ and the per-version pages /versions/ (scripts/build-rfc-site.mjs). host-three deploys at the root (it's the landing experience now, with a side-nav drawer to the other demos); host-iframe-demo / host-worker-demo / host-netgl-demo / host-netgl-celestiary / host-netgl-cesium / host-netgl-deck live at /iframe/, /worker/, /netgl/, /netgl-celestiary/, /netgl-cesium/, /netgl-deck/ siblings.
 
 inputs:
   base-path:
-    description: Base URL path with trailing slash, e.g. /portal/ or /portal/pr-preview/pr-17/. Each demo gets a /<name>/ subpath under it; the summary page is at the base itself.
+    description: Base URL path with trailing slash, e.g. /portal/ or /portal/pr-preview/pr-17/. Each demo gets a /<name>/ subpath under it; the overview page is at the base itself.
     required: true
 
 runs:
@@ -64,7 +64,7 @@ runs:
         cp -r apps/host-netgl-cesium/dist         dist/netgl-cesium
         cp -r apps/host-netgl-deck/dist           dist/netgl-deck
 
-    - name: Build the RFC responses site (the summary at the root, the responses at /rfcs/, the version pages at /versions/)
+    - name: Build the RFC responses site (the overview at the root, the responses at /rfcs/, the version pages at /versions/)
       shell: bash
       run: node scripts/build-rfc-site.mjs --base ${{ inputs.base-path }} --out dist/rfcs
 
