@@ -58,6 +58,13 @@ export type NetGLFrameEnd = {
    * a host that reads it falls back to the view it had in flight.
    */
   viewId?: number
+  /**
+   * Which of the guest's draws for one view this frame is, when it draws
+   * more than once for it (a second pass with other settings): a host
+   * routes each into its own target (the receiver's `beforeFrame`).
+   * Absent for the main draw.
+   */
+  part?: string
 }
 
 /** Union of every stream message kind the NetGL protocol sends on the wire. */

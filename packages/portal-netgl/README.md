@@ -168,6 +168,23 @@ Options:
 Plus `screenFramebuffer` to land the guest in one of your render targets
 instead of the canvas. See DESIGN.md.
 
+**Several draws for one view** (0.6.8). A guest that draws more than once
+for one view, such as a second pass with other settings, tags each
+draw's frame-end with a `part` (`endFrame({ viewId, part: 'lights' })`).
+`beforeFrame(end)` in the receiver's config is called before each frame's
+calls replay, a re-run's too, with that frame's frame-end. The replay
+asks `screenFramebuffer` again at each bind of the screen, so a callback
+that returns the current part's target sends each part to its own:
+
+```js
+let part = null
+const receiver = makeNetGLHostReceiver({
+  gl, transport,
+  beforeFrame: (end) => { part = end.part ?? null },
+  replay: { screenFramebuffer: () => (part === 'lights' ? lightsFbo : dayFbo) }
+})
+```
+
 `receiver.onFrame(cb)` calls back when a guest frame completes (for hosts
 that render on demand), `receiver.post(msg)` sends the guest a control
 message, and `receiver.canRerun` says whether `drain()` would re-run the

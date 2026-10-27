@@ -72,6 +72,30 @@ describe('makeNetGLHostReceiver', () => {
     expect(calls).toEqual(['bindBuffer'])
   })
 
+  it('calls beforeFrame before each frame, a re-run too, with its frame-end', () => {
+    // A guest that draws twice for one view (Cesium's day frame, then its
+    // night lights) tags the second; the host routes each to its target.
+    const { gl, calls } = makeMockGl()
+    const { transport, deliver } = makeTransport()
+    const host = makeNetGLHostReceiver({
+      gl,
+      transport,
+      beforeFrame: (end) => calls.push(`frame:${end.viewId}:${end.part ?? 'main'}`)
+    })
+    deliver({ name: 'clear', args: [0x4000] })
+    deliver({ type: 'netgl:frame-end', viewId: 3 })
+    deliver({ name: 'drawArrays', args: [4, 0, 3] })
+    deliver({ type: 'netgl:frame-end', viewId: 3, part: 'lights' })
+    // A frame with no calls still gets its call.
+    deliver({ type: 'netgl:frame-end', viewId: 3, part: 'empty' })
+    host.drain()
+    expect(calls).toEqual(['frame:3:main', 'clear', 'frame:3:lights', 'drawArrays', 'frame:3:empty'])
+    calls.length = 0
+    host.drain()
+    expect(calls).toEqual(['frame:3:main', 'clear', 'frame:3:lights', 'drawArrays', 'frame:3:empty'])
+    expect(host.drainedViews).toEqual([3, 3, 3])
+  })
+
   it('never re-runs a frame that deleted an object', () => {
     // The Cesium black-door bug: frame 1 creates, uses and deletes a
     // scratch framebuffer. A re-run would bind the deleted FBO (which

@@ -42,3 +42,21 @@ describe('makeNetGLGuestContext announce()', () => {
     expect(readies()).toBe(4)
   })
 })
+
+describe('makeNetGLGuestContext frame-ends', () => {
+  it('carry the view and the part they were drawn for', () => {
+    const { transport, posted } = makeTransport()
+    const guest = makeNetGLGuestContext({ canvas: fakeCanvas, transport, checkpoints: false })
+    guest.endFrame({ viewId: 5 })
+    guest.endFrame({ viewId: 5, part: 'lights' })
+    guest.subFrame({ part: 'lights' })
+    guest.endFrame()
+    const ends = posted.filter((m) => (m as { type?: string }).type === 'netgl:frame-end')
+    expect(ends).toEqual([
+      { type: 'netgl:frame-end', viewId: 5 },
+      { type: 'netgl:frame-end', viewId: 5, part: 'lights' },
+      { type: 'netgl:frame-end', part: 'lights' },
+      { type: 'netgl:frame-end' }
+    ])
+  })
+})

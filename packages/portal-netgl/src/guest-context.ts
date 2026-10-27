@@ -164,7 +164,7 @@ export type NetGLGuestContext = {
    * rather than being cloned into the link's queue. Works across host
    * frames too: a guest drawn only in sub-frames can call it every time.
    */
-  subFrame(options?: Pick<NetGLEndFrameOptions, 'viewId'>): void
+  subFrame(options?: Pick<NetGLEndFrameOptions, 'viewId' | 'part'>): void
   /** Post the `netgl:ready` handshake. */
   announce(anchor: PortalAnchor, background?: ColorRGB): void
 }
@@ -180,6 +180,11 @@ export type NetGLEndFrameOptions = {
    * the frame-end so the host knows which view to compose it for.
    */
   viewId?: number
+  /**
+   * Which of the guest's draws for that view this frame is, when it
+   * draws more than once for it (`NetGLFrameEnd.part`).
+   */
+  part?: string
 }
 
 /** Host → guest: the `netgl:ready` handshake arrived. */
@@ -194,6 +199,13 @@ export type NetGLReadyAckMessage = {
 }
 
 const READY_RESEND_MS = 500
+
+const frameEndOf = (options: Pick<NetGLEndFrameOptions, 'viewId' | 'part'>): NetGLFrameEnd => {
+  const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
+  if (typeof options.viewId === 'number') frameEnd.viewId = options.viewId
+  if (typeof options.part === 'string') frameEnd.part = options.part
+  return frameEnd
+}
 
 export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): NetGLGuestContext => {
   const {
@@ -339,7 +351,7 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       }
     },
     endFrame(options = {}) {
-      const frameEnd: NetGLFrameEnd = typeof options.viewId === 'number' ? { type: 'netgl:frame-end', viewId: options.viewId } : { type: 'netgl:frame-end' }
+      const frameEnd = frameEndOf(options)
       postItem(frameEnd)
       flush()
       // The checkpoint starts the next frame: in wire 2 it waits in the
@@ -347,7 +359,7 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       if (checkpoints && options.checkpoint !== false) recorder.checkpoint()
     },
     subFrame(options = {}) {
-      const frameEnd: NetGLFrameEnd = typeof options.viewId === 'number' ? { type: 'netgl:frame-end', viewId: options.viewId } : { type: 'netgl:frame-end' }
+      const frameEnd = frameEndOf(options)
       postItem(frameEnd)
       flush()
       if (checkpoints) recorder.deferCheckpoint()
