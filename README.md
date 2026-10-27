@@ -260,6 +260,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
 - [`packages/portal-netgl/DESIGN.md`](./packages/portal-netgl/DESIGN.md): architecture, the screen policy, composition modes, findings from the Cesium and celestiary integrations, open problems.
 - [`docs/portal-layers.md`](./docs/portal-layers.md): the `portal-layers` 0.1 design, and the gotchas that stay in the app.
 - [`docs/rfcs/`](./docs/rfcs/README.md): RFCs, the proposals for changing these designs, and how to write and comment on one.
+- [`docs/rfcs/responses/`](./docs/rfcs/responses/README.md): the maintainers' responses to the RFCs, with a 1-pager and an infographic each, and the tracks of work and versions that answer them.
 - [`docs/netgl-renderer.md`](./docs/netgl-renderer.md): the original NetGL design notes and spikes.
 - [`docs/frame-rpc-portals.md`](./docs/frame-rpc-portals.md): the frame-RPC portal design and its history (endpoints, traversal, recursion, server-side rendering).
 - [`docs/deploying-proxies.md`](./docs/deploying-proxies.md): the snapshot and share proxies behind the demos' social previews.

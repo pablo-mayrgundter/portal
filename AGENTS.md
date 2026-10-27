@@ -22,6 +22,7 @@ were tried and dropped.
 | The host/guest shim library (design) | [docs/portal-layers.md](./docs/portal-layers.md), and its [gotchas that stay in the app](./docs/portal-layers.md#gotchas-that-stay-in-the-app) |
 | Where code lives | DESIGN.md [layout](./packages/portal-netgl/DESIGN.md#layout--where-things-live) |
 | Proposed changes to the protocol and contracts (RFCs, their status and open questions) | [docs/rfcs/](./docs/rfcs/README.md) |
+| What the RFCs ask, read together: the maintainers' responses, the tracks of work and the versions each claims | [docs/rfcs/responses/](./docs/rfcs/responses/README.md) |
 | Original NetGL design and spikes | [docs/netgl-renderer.md](./docs/netgl-renderer.md) |
 | Frame-RPC portals (`host-three`, iframe, Worker, headless; `portal-core`/`-three`/`-iframe`/`-worker`) | [docs/frame-rpc-portals.md](./docs/frame-rpc-portals.md) |
 | Demo apps | [host-netgl-cesium](./apps/host-netgl-cesium/README.md), [host-netgl-celestiary](./apps/host-netgl-celestiary/README.md), [host-iframe-demo](./apps/host-iframe-demo/README.md) |
