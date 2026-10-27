@@ -14,10 +14,13 @@ tease out.
 `https://pablo-mayrgundter.github.io/portal/v/<version>/`, and the
 version pulldown in the header moves between them. Versions before 0.6.8
 are reconstructions: the demos rebuilt from the last commit on `main` at
-that version, carrying a banner that says so. They have the demos of
-their day and no docs site. Where a demo's data comes from a service
-(Cesium ion, celestiary's catalogues), what it shows today is what those
-services serve today, not what they served then.
+that version, with that commit's lockfile and submodule pointer, carrying
+a banner that says so. They have the demos of their day and no docs
+site. The demos are self-contained (the Cesium demo's default imagery is
+bundled, the deck.gl demo's countries are bundled, celestiary comes from
+the submodule), so a snapshot runs the demo as it ran then; the one
+run-time fetch is OpenStreetMap tiles when a Cesium demo is asked for
+them (`?imagery=osm`).
 
 ## The releases
 
@@ -91,5 +94,5 @@ has rather than wait.
   label and demos from
   [`history.json`](https://github.com/pablo-mayrgundter/portal/blob/main/docs/rfcs/responses/history.json),
   which is where a new version's entry goes.
-- Demo data that comes from a service shows today's service, and a demo
-  that depended on a credential that no longer works shows its fallback.
+- Nothing in a snapshot depends on a credential or a catalogue fetched
+  at run time; the demos' data is in the commit.
