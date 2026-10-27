@@ -18,10 +18,9 @@ header.top .brand small { color: var(--ink3); font-weight: 400; font-size: 12px;
 nav.pages a { color: var(--ink2); text-decoration: none; font-size: 14px; padding: 4px 8px; border-radius: 6px; }
 nav.pages a:hover { background: var(--hostbg); color: var(--host); }
 nav.pages a[aria-current] { background: var(--openbg); color: var(--open); font-weight: 600; }
-nav.demos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-nav.demos .k { font-size: 12px; font-weight: 700; color: var(--host); text-transform: uppercase; letter-spacing: .06em; margin-right: 2px; }
-nav.demos a { font-size: 13px; color: var(--host); background: var(--hostbg); border: 1px solid #bcd3f3; border-radius: 14px; padding: 3px 10px; text-decoration: none; }
-nav.demos a:hover { background: #d2e2f8; }
+a.demos { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--host); background: var(--hostbg); border: 1px solid #bcd3f3; border-radius: 14px; padding: 4px 12px; text-decoration: none; }
+a.demos:hover { background: #d2e2f8; }
+a.demos svg { opacity: .8; }
 .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .right a { font-size: 13px; color: var(--ink2); }
 .version { position: relative; display: inline-block; }
@@ -54,7 +53,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 <header class="top"><div class="row">
   <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
   <nav class="pages" aria-label="Pages"><a href="index.html" aria-current="page">Summary</a><a href="0001-globe-orbit-layers.html">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a></nav>
-  <nav class="demos" aria-label="Demos"><span class="k">Demos</span><a href="../">Local portal</a><a href="../iframe/">iframe</a><a href="../worker/">Worker</a><a href="../netgl/">NetGL</a><a href="../netgl-celestiary/">celestiary</a><a href="../netgl-cesium/">Cesium door</a><a href="../netgl-cesium/?mode=earth">Cesium in place</a><a href="../netgl-deck/">deck.gl</a></nav>
+  <a class="demos" href="../" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
