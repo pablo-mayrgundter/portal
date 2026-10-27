@@ -119,6 +119,16 @@ export type NetGLHostReceiverConfig = {
    * replay (a re-run too) asks for that view's correction.
    */
   reproject?: NetGLReceiverReprojectConfig
+  /**
+   * Called at drain time before each frame's calls replay (a re-run's
+   * too), with that frame's frame-end, in order. A guest that draws more
+   * than once for one view tags each draw's frame-end (`part`, e.g. a
+   * second pass with other settings), and the host routes each into its
+   * own target here: `replay.screenFramebuffer` is asked again at each
+   * bind of the screen, so a callback that returns the current part's
+   * target sends that part there. A frame with no calls still gets it.
+   */
+  beforeFrame?: (end: NetGLFrameEnd) => void
 }
 
 export type NetGLReceiverReprojectConfig = {
@@ -212,6 +222,7 @@ export type NetGLHostReceiver = {
 
 export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHostReceiver => {
   const reprojectConfig = config.reproject ?? null
+  const beforeFrame = config.beforeFrame
   const replay = makeNetGLReplay(config.gl, reprojectConfig ? { ...config.replay, reproject: true } : config.replay)
   const frameView = reprojectConfig?.frameView ?? ((end: NetGLFrameEnd) => (typeof end.viewId === 'number' ? end.viewId : null))
   const onError = config.onError ?? ((err: unknown) => console.error('[netgl-host] replay error:', err))
@@ -225,7 +236,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
   let lastRerunnable = false
   // Where each frame starts in `pending` / `last`, and the view it was
   // drawn for.
-  type FrameMark = { at: number; viewId: number | null }
+  type FrameMark = { at: number; viewId: number | null; end: NetGLFrameEnd }
   let pendingMarks: FrameMark[] = []
   let lastMarks: FrameMark[] = []
   let drainedViews: Array<number | null> = []
@@ -267,7 +278,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     if (isNetGLFrameEnd(msg)) {
       // Before the listeners: the host's own bookkeeping (a view in
       // flight) is still as it was when the frame was drawn.
-      const mark: FrameMark = { at: pending ? pending.length : 0, viewId: frameView(msg) }
+      const mark: FrameMark = { at: pending ? pending.length : 0, viewId: frameView(msg), end: msg }
       if (pending) pending.push(...inFlight)
       else pending = inFlight
       pendingMarks.push(mark)
@@ -407,11 +418,15 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     replay.invalidate()
     let m = 0
     for (let i = 0; i < batch.length; i += 1) {
-      // Each frame's correction, before its first call.
-      while (reprojectConfig && m < marks.length && marks[m].at <= i) {
-        replay.setReprojection(reprojectConfig.correction(marks[m].viewId))
-        if (reprojectConfig.viewport) replay.setViewportRemap(reprojectConfig.viewport(marks[m].viewId))
-        if (reprojectConfig.pixelScale) replay.setPixelScale(reprojectConfig.pixelScale(marks[m].viewId))
+      // Each frame's correction, and the host's own beforeFrame, before
+      // its first call.
+      while ((reprojectConfig || beforeFrame) && m < marks.length && marks[m].at <= i) {
+        if (reprojectConfig) {
+          replay.setReprojection(reprojectConfig.correction(marks[m].viewId))
+          if (reprojectConfig.viewport) replay.setViewportRemap(reprojectConfig.viewport(marks[m].viewId))
+          if (reprojectConfig.pixelScale) replay.setPixelScale(reprojectConfig.pixelScale(marks[m].viewId))
+        }
+        beforeFrame?.(marks[m].end)
         m += 1
       }
       const call = batch[i]
@@ -426,6 +441,8 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
         }
       }
     }
+    // Frames with no calls after the last call.
+    if (beforeFrame) for (; m < marks.length; m += 1) beforeFrame(marks[m].end)
     if (reprojectConfig) {
       replay.setReprojection(null)
       replay.setViewportRemap(null)

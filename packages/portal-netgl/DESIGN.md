@@ -260,6 +260,26 @@ so celestiary's Cesium layers still clone one checkpoint a frame (80-odd
 calls, more with Cesium's texture units). Offering the deferral there is a
 small option on the shim.
 
+### Parts: several draws for one view
+
+Sub-frames are draws inside one host frame that land on the same target.
+Some guests draw more than once for one view with different settings, and
+the host needs each in a target of its own. Celestiary's Cesium layer
+draws Earth's night lights as a second render, with only the night
+imagery, unlit, on black. On the same page the host renders that between
+decoding the day frame and its own lights pass.
+
+From a guest page both renders arrive as frames of one view, and
+`drain()` replays them together (0.6.8). The guest tags the second
+frame-end (`part: 'lights'`), and the receiver calls `beforeFrame(end)`
+before each frame's calls. The host's `screenFramebuffer` callback then
+returns the current part's target. The replay already asks it at each
+bind of the screen, so nothing in the replay changed. A re-run calls it
+too, from the frame-ends it kept, so a stale frame's parts land where a
+fresh one's would. `drain()` stays atomic: the host's own work between
+the parts (the decode of the day frame) comes after, reading each part's
+target.
+
 ## Screen policy
 
 `screen-policy.ts`, via `makeNetGLReplay(gl, { screen })`. Overrides
