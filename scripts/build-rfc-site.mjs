@@ -36,7 +36,8 @@ const GITHUB = 'https://github.com/pablo-mayrgundter/portal'
 const history = JSON.parse(readFileSync(join(src, 'history.json'), 'utf8')).versions
 const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8')
 
-const ROOT = { html: '', nav: 'Summary', title: 'Portal: link independent 3D web renderers at the GL layer' }
+const ROOT = { html: '', nav: 'Summary', title: 'Portal / NetGL: link independent 3D web renderers at the GL layer' }
+const CHANGELOG_PAGE = { html: 'changelog.html', nav: 'Changelog', title: 'Changelog' }
 const PAGES = [
   { md: 'README.md', html: 'index.html', nav: 'Responses', title: 'Responses to the RFCs' },
   { md: '0001-globe-orbit-layers.md', html: '0001-globe-orbit-layers.html', nav: 'RFC 0001', title: 'RFC 0001: globe + orbit layers' },
@@ -121,6 +122,9 @@ main.doc pre { background: #f1f0ec; padding: 12px; border-radius: 8px; overflow-
 main.doc pre code { background: none; padding: 0; }
 main.doc blockquote { border-left: 3px solid var(--open); margin: 12px 0; padding: 4px 14px; color: var(--ink2); }
 main.doc .figure { display: block; margin: 18px 0 26px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fcfcfb; }
+main.doc svg.overview { display: block; width: 100%; height: auto; margin: 8px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfb; }
+main.doc svg.overview a { cursor: pointer; }
+main.doc svg.overview a:hover text { text-decoration: underline; }
 main.doc .figure img { display: block; width: 100%; height: auto; }
 footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 12px; color: var(--ink3); border-top: 1px solid var(--line); }
 @media (max-width: 720px) { html { font-size: 15px; } .right { margin-left: 0; } }
@@ -177,8 +181,10 @@ function template(page, body, { rfcs = '', root = '../', here = 'latest', demosH
   const u = rfcs
   demosHref ??= root + 'three/'
   const rootHref = root === '' ? './' : root
-  const pages = [`<a href="${rootHref}"${page === ROOT ? ' aria-current="page"' : ''}>Summary</a>`]
-    .concat(PAGES.map((p) => `<a href="${u}${p.html}"${p === page ? ' aria-current="page"' : ''}>${p.nav}</a>`)).join('')
+  // Three sections: the summary (the root), the changelog (its page and the per-version pages), the RFCs (the responses and their pages).
+  const section = page === ROOT ? 'summary' : page === CHANGELOG_PAGE || page.section === 'changelog' ? 'changelog' : 'rfcs'
+  const cur = (sec) => (section === sec ? ' aria-current="page"' : '')
+  const pages = `<a href="${rootHref}"${cur('summary')}>Summary</a><a href="${root}changelog.html"${cur('changelog')}>Changelog</a><a href="${u}index.html"${cur('rfcs')}>RFCs</a>`
   const title = titleOverride ?? page.title
   return `<!doctype html>
 <html lang="en">
@@ -191,11 +197,11 @@ function template(page, body, { rfcs = '', root = '../', here = 'latest', demosH
 </head>
 <body>
 <header class="top"><div class="row">
-  <a class="brand" href="${rootHref}">Portal <small>NetGL</small></a>
+  <a class="brand" href="${rootHref}">Portal / NetGL</a>
   <nav class="pages" aria-label="Pages">${pages}</nav>
   <a class="demos" href="${demosHref}" target="_blank" rel="noopener" title="The demos${here === 'latest' ? '' : ' of v' + esc(here)}, in a new tab">Demos ${EXTERNAL_ICON}</a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="${esc(version)}" data-here="${esc(here)}" data-snapshots-root="${esc(snapshotsRoot)}" aria-label="Version"><option value="${esc(here)}" selected>portal-netgl ${esc(here === 'latest' ? version : here)}</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="${esc(version)}" data-here="${esc(here)}" data-snapshots-root="${esc(snapshotsRoot)}" aria-label="Version"><option value="${esc(here)}" selected>${esc(here === 'latest' ? 'latest · ' + version : 'v' + here)}</option></select></span>
     <a href="${GITHUB}">GitHub</a>
   </div>
 </div></header>
@@ -212,6 +218,8 @@ ${body}
 }
 
 mkdirSync(join(out, 'img'), { recursive: true })
+// The infographics, stamped with this build's version (the root page inlines one of them).
+execFileSync(process.execPath, [join(src, 'img/generate.mjs'), '--out', join(out, 'img')], { stdio: 'inherit' })
 for (const page of PAGES) {
   base = { dir: 'docs/rfcs/responses', rfcs: '' }
   const md = readFileSync(join(src, page.md), 'utf8')
@@ -220,12 +228,21 @@ for (const page of PAGES) {
 
 // The site's root: the overview infographic (what Portal and NetGL are), with where to read on.
 {
+  // The overview inline, so its text is selectable and its links work; sized by CSS, not its attributes.
+  const inline = readFileSync(join(out, 'img', 'portal-netgl-inline.svg'), 'utf8')
+    .replace(/^<svg ([^>]*?)width="\d+" height="\d+" /, '<svg $1class="overview" role="img" aria-label="Portal and NetGL in one picture" ')
   const body = `
-<a class="figure" href="rfcs/img/portal-netgl.svg" title="Open the SVG"><img src="rfcs/img/portal-netgl.svg" alt="Portal and NetGL in one picture: the problem, how NetGL works, three ways to compose, where it stands, and the three RFCs"></a>
-<p><strong>Read on:</strong> the <a href="rfcs/index.html">responses to the RFCs</a> (what each asks, the tracks of work and the versions they claim), one page per RFC (<a href="rfcs/0001-globe-orbit-layers.html">0001</a>, <a href="rfcs/0002-nested-in-place-guests.html">0002</a>, <a href="rfcs/0003-late-frames.html">0003</a>), <a href="rfcs/evolution.html">how NetGL got here</a>, the <a href="${GITHUB}/blob/main/CHANGELOG.md">CHANGELOG</a>, and the <a href="three/">demos</a>. The code and the design docs are on <a href="${GITHUB}">GitHub</a>; the package is <a href="https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl">@pablo-mayrgundter/portal-netgl</a>.</p>
+${inline}
+<p><strong>Read on:</strong> the <a href="rfcs/index.html">responses to the RFCs</a> (what each asks, the tracks of work and the versions they claim), one page per RFC (<a href="rfcs/0001-globe-orbit-layers.html">0001</a>, <a href="rfcs/0002-nested-in-place-guests.html">0002</a>, <a href="rfcs/0003-late-frames.html">0003</a>), <a href="rfcs/evolution.html">how NetGL got here</a>, the <a href="changelog.html">changelog</a>, and the <a href="three/">demos</a>. The code and the design docs are on <a href="${GITHUB}">GitHub</a>; the package is <a href="https://www.npmjs.com/package/@pablo-mayrgundter/portal-netgl">@pablo-mayrgundter/portal-netgl</a>.</p>
 <p>Every release keeps a snapshot of this site, demos included; the version pulldown in the header moves between them.</p>
 `
   writeFileSync(join(out, '..', 'index.html'), template(ROOT, body, { rfcs: 'rfcs/', root: '' }))
+}
+
+// The CHANGELOG as a page at the site root.
+{
+  base = { dir: '', rfcs: 'rfcs/' }
+  writeFileSync(join(out, '..', 'changelog.html'), template(CHANGELOG_PAGE, marked.parse(changelog), { rfcs: 'rfcs/', root: '' }))
 }
 
 // A page per version from the CHANGELOG: what the version pulldown shows for a version
@@ -261,13 +278,10 @@ ${sec ? marked.parse(sec.body) : '<p><em>No CHANGELOG entry for this version yet
 <h2 id="demos">The demos at this version</h2>
 <p>Rebuilt from commit <code>${esc(h.ref)}</code> and kept at <a href="${esc(snap)}"><code>${esc(snap)}</code></a>, with a banner naming the version:</p>
 <ul>${demos}</ul>
-<p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="${GITHUB}/blob/main/CHANGELOG.md">CHANGELOG</a>. How the releases fit together: <a href="../rfcs/evolution.html">Evolution</a>.</p>
+<p>The RFC responses and their infographics begin at 0.6.8; this page is this version's entry in the <a href="../changelog.html">changelog</a>. How the releases fit together: <a href="../rfcs/evolution.html">Evolution</a>.</p>
 `
-  const fake = { html: '../versions/' + h.version + '.html', title: `portal-netgl ${h.version}` }
+  const fake = { html: '../versions/' + h.version + '.html', title: `portal-netgl ${h.version}`, section: 'changelog' }
   writeFileSync(join(versionsOut, h.version + '.html'), template(fake, body, { rfcs: '../rfcs/', root: '../', here: h.version, demosHref: snap + demoPath('three'), titleOverride: `portal-netgl ${h.version}: ${h.label}` }))
   versionPages++
 }
-// The infographics, stamped with this build's version.
-execFileSync(process.execPath, [join(src, 'img/generate.mjs'), '--out', join(out, 'img')], { stdio: 'inherit' })
-for (const f of readdirSync(join(src, 'img'))) if (f.endsWith('.svg')) { /* generated above */ }
-console.log(`rfc site: the overview at ${join(out, '..', 'index.html')}, ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)
+console.log(`rfc site: the overview and changelog at ${join(out, '..')}, ${PAGES.length} pages at ${out}, ${versionPages} version pages at ${versionsOut} (portal-netgl ${version}; snapshots at ${snapshotsRoot}v/)`)
