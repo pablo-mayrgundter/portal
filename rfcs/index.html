@@ -52,7 +52,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 <body>
 <header class="top"><div class="row">
   <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="index.html" aria-current="page">Summary</a><a href="0001-globe-orbit-layers.html">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a></nav>
+  <nav class="pages" aria-label="Pages"><a href="index.html" aria-current="page">Summary</a><a href="0001-globe-orbit-layers.html">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a><a href="evolution.html">Evolution</a></nav>
   <a class="demos" href="../" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
@@ -106,6 +106,11 @@ build and why; the open questions are where the argument is.</p>
 <td>RFC 0003, late frames from a guest on another page</td>
 <td><a href="0003-late-frames.html">1-pager</a></td>
 <td><a href="img/rfc-0003.svg">infographic</a></td>
+</tr>
+<tr>
+<td>How NetGL got here: every release up to 0.6.8, its snapshot, and the through line</td>
+<td><a href="evolution.html">evolution</a></td>
+<td><a href="img/evolution.svg">timeline</a></td>
 </tr>
 </tbody></table>
 <p><a class="figure" href="img/portal-netgl.svg" title="Open the SVG"><img src="img/portal-netgl.svg" alt="Portal and NetGL in one picture"></a></p>
@@ -313,7 +318,7 @@ version): <strong>a track claims its next version here before bumping it.</stron
 </tr>
 <tr>
 <td><strong>T6 Packaging and release</strong></td>
-<td>Entries per framework (<code>/core</code>, <code>/three</code>, <code>/luma</code>, <code>/cesium</code>), each framework an optional peer; this table as the version-claim register; a guest page reports the protocol it speaks; the RFC index points at the issues</td>
+<td>Entries per framework (<code>/core</code>, <code>/three</code>, <code>/luma</code>, <code>/cesium</code>), each framework an optional peer; this table as the version-claim register; a guest page reports the protocol it speaks, and a dynamic network dependency is versioned by that protocol increment, not by its source (decision 13); the RFC index points at the issues</td>
 <td>0001 Q23–Q24; 0002 §12; 0003 §7.4</td>
 <td>a deck host bundles portal-netgl without three.js; no two tracks publish the same version</td>
 </tr>
@@ -390,6 +395,7 @@ the 1-pagers.</p>
 <li><strong>A 2D host gets anchors only in v1;</strong> no <code>webMercator</code> projection in guests until a host-supplied shader prelude exists. (0001 Q7.)</li>
 <li><strong>The <code>occlude</code> pass is the screen policy&#39;s by default</strong> (<code>blend: &#39;occlude&#39;</code>), with a guest-side pass as the opt-out where NaN or translucency bite. (0002 Q7.)</li>
 <li><strong>The ground: the guest drapes within a host budget; the host picks the form; sea level is a scalar until a layer is wider than a city.</strong> (0002 Q8–Q9.)</li>
+<li><strong>A dynamic network dependency is versioned by protocol increment, not by source.</strong> A guest page served from another origin (celestiary&#39;s layer page, the Cesium guest pages on cesium-portal) is meant to move; what a host may rely on is the wire and layer protocol versions it negotiates in the handshake, and a guest page reports the protocol it speaks (0003 §7.4). Pinned dependencies (npm, a submodule) freeze with a commit; network ones don&#39;t, and a site snapshot against today&#39;s guest is a compatibility test of the handshake. (0001 §10.6; 0003 §7.4; the <a href="evolution.html">Evolution page</a>.)</li>
 </ol>
 <h2 id="what-were-asking-commenters">What we&#39;re asking commenters</h2>
 <ul>
@@ -422,18 +428,24 @@ reviewed commit that cites it, as the RFCs do with their findings.</p>
   var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
   var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : 'latest';
   var page = path.slice(path.lastIndexOf('/') + 1) || 'index.html';
+  var meta = {};
   function fill(list, latest) {
     sel.innerHTML = '';
-    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) { return [v, 'v' + v + ' snapshot']; }));
+    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) {
+      var m = meta[v] || {};
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '') + (m.label ? ' · ' + m.label : '')];
+    }));
     opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
     if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
   }
   fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-    if (j && j.versions) fill(j.versions, j.latest || sel.dataset.version);
+    if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
   }).catch(function () {});
   sel.addEventListener('change', function () {
     var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
-    location.href = target + 'rfcs/' + page + location.hash;
+    // A reconstructed snapshot has the demos of its day but no docs: go to its root.
+    var hasDocs = v === 'latest' || !meta[v] || meta[v].docs;
+    location.href = hasDocs ? target + 'rfcs/' + page + location.hash : target;
   });
 })();
 

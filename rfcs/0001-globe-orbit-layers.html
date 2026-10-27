@@ -52,7 +52,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
 <body>
 <header class="top"><div class="row">
   <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
-  <nav class="pages" aria-label="Pages"><a href="index.html">Summary</a><a href="0001-globe-orbit-layers.html" aria-current="page">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a></nav>
+  <nav class="pages" aria-label="Pages"><a href="index.html">Summary</a><a href="0001-globe-orbit-layers.html" aria-current="page">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a><a href="evolution.html">Evolution</a></nav>
   <a class="demos" href="../" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
     <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
@@ -236,18 +236,24 @@ insertion point?</p>
   var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
   var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : 'latest';
   var page = path.slice(path.lastIndexOf('/') + 1) || 'index.html';
+  var meta = {};
   function fill(list, latest) {
     sel.innerHTML = '';
-    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) { return [v, 'v' + v + ' snapshot']; }));
+    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) {
+      var m = meta[v] || {};
+      return [v, 'v' + v + (m.date ? ' · ' + m.date : '') + (m.label ? ' · ' + m.label : '')];
+    }));
     opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
     if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
   }
   fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-    if (j && j.versions) fill(j.versions, j.latest || sel.dataset.version);
+    if (j && j.versions) { meta = j.meta || {}; fill(j.versions, j.latest || sel.dataset.version); }
   }).catch(function () {});
   sel.addEventListener('change', function () {
     var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
-    location.href = target + 'rfcs/' + page + location.hash;
+    // A reconstructed snapshot has the demos of its day but no docs: go to its root.
+    var hasDocs = v === 'latest' || !meta[v] || meta[v].docs;
+    location.href = hasDocs ? target + 'rfcs/' + page + location.hash : target;
   });
 })();
 
