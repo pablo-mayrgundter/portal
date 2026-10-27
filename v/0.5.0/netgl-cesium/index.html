@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal - NetGL + Cesium</title>
+    <style>
+      html, body, #app { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+      .label {
+        position: fixed; top: 12px; left: 12px; max-width: 400px;
+        color: #d8e7ff; font: 13px/1.45 Inter, system-ui, sans-serif;
+        background: rgba(4, 9, 18, 0.7); border: 1px solid rgba(216, 231, 255, 0.2);
+        border-radius: 8px; padding: 8px 10px;
+      }
+      .label p { margin: 6px 0 0; }
+      .modes a { color: #8fb8ff; margin-right: 10px; text-decoration: none; }
+      .modes a.current { color: #fff; font-weight: 600; text-decoration: underline; }
+      #status { margin-top: 6px; color: #ffb4a8; white-space: pre-wrap; }
+      /* Full-viewport but invisible: Cesium sizes its canvas from its
+         container, so the guest needs a real layout box (see DESIGN.md,
+         "The iframe needs a real viewport"). */
+      #guest {
+        position: fixed; inset: 0; width: 100%; height: 100%;
+        opacity: 0; pointer-events: none; border: 0; z-index: -1;
+      }
+    </style>
+    <script type="module" crossorigin src="/portal/v/0.5.0/netgl-cesium/assets/main-BhVbc6n_.js"></script>
+    <link rel="modulepreload" crossorigin href="/portal/v/0.5.0/netgl-cesium/assets/protocol-B_QniMu2.js">
+  </head>
+  <body>
+    <div id="app"></div>
+    <iframe id="guest" title="Cesium guest"></iframe>
+    <div class="label">
+      <div class="modes">
+        <a data-mode="door">Door</a>
+        <a data-mode="earth">Earth in place</a>
+      </div>
+      <p data-help="door" hidden>
+        WASD + drag. A Cesium globe through a portal door in a three.js room.
+        Cesium runs in a hidden iframe; its WebGL calls cross over postMessage
+        and execute in this page's GL context.
+      </p>
+      <p data-help="earth" hidden>
+        Drag to orbit, scroll to zoom. The Earth is a Cesium globe composited
+        into a three.js scene with the host's stars, sun, and moon — depth
+        works both ways as the moon passes. Guest lag: <span id="lag">–</span> frames.
+      </p>
+      <div id="status" hidden></div>
+    </div>
+  
+<!-- portal version banner: this is a snapshot rebuilt from 0b13021 (2026-10-23) -->
+<style>
+#portal-version-banner { position: fixed; left: 12px; bottom: 12px; z-index: 1002; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 9px; background: rgba(8, 11, 19, 0.88); border: 1px solid rgba(154, 140, 255, 0.45); color: #d8e7ff; font: 12px/1.3 Inter, system-ui, sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+#portal-version-banner b { color: #c9bfff; font-weight: 600; }
+#portal-version-banner select { font: 600 12px Inter, system-ui, sans-serif; color: #d8e7ff; background: rgba(154, 140, 255, 0.14); border: 1px solid rgba(154, 140, 255, 0.5); border-radius: 7px; padding: 3px 6px; cursor: pointer; }
+#portal-version-banner a { color: #b7a9ff; text-decoration: underline; text-underline-offset: 2px; }
+#portal-version-banner .pvb-note { color: #8fa7c4; }
+@media (max-width: 600px) { #portal-version-banner .pvb-note { display: none; } }
+</style>
+<div id="portal-version-banner" role="region" aria-label="Site version">
+  <b>portal-netgl 0.5.0</b>
+  <span class="pvb-note">snapshot rebuilt from 0b13021, 2026-10-23</span>
+  <select id="portal-version-banner-select" aria-label="Other versions"><option value="" selected>versions…</option></select>
+  <a id="portal-version-banner-docs" href="#" target="_blank" rel="noopener">docs ↗</a>
+</div>
+<script>
+(function () {
+  var path = location.pathname, m = path.match(/^(.*\/)v\/([^/]+)\/(.*)$/);
+  if (!m) return;
+  var siteRoot = m[1], here = m[2], rest = m[3];
+  var sel = document.getElementById('portal-version-banner-select'), demosOf = {};
+  document.getElementById('portal-version-banner-docs').href = siteRoot + 'rfcs/';
+  fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    if (!j || !j.versions) return;
+    var meta = j.meta || {};
+    var add = function (value, text, selected) { var o = document.createElement('option'); o.value = value; o.textContent = text; o.selected = !!selected; sel.appendChild(o); };
+    sel.innerHTML = '';
+    add('latest', 'latest · ' + (j.latest || 'main'));
+    j.versions.forEach(function (v) { var mm = meta[v] || {}; if (mm.demos) demosOf[v] = mm.demos; add(v, 'v' + v + (mm.date ? ' · ' + mm.date : '') + (mm.label ? ' · ' + mm.label : ''), v === here); });
+    if (!meta[here] && j.versions.indexOf(here) < 0) add(here, 'v' + here, true);
+  }).catch(function () {});
+  sel.addEventListener('change', function () {
+    var v = sel.value; if (!v) return;
+    var target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
+    // The same demo in the chosen version when it has it, else that version's root.
+    var demo = rest.replace(/[^/]*$/, ''), key = demo.replace(/\/$/, '') || 'three';
+    location.href = target + (demosOf[v] && demosOf[v].indexOf(key) < 0 ? '' : demo);
+  });
+})();
+</script>
+</body>
+</html>
