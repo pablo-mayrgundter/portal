@@ -281,7 +281,7 @@ the view in flight when it arrived (one in flight at a time). What it
 can't correct: screen-space extrusion (wide lines, sprites built in clip
 space: scaled slightly during the lag), choices the guest made from the
 old eye (a far-side cull), depth written in the fragment shader
-(logarithmic depth), a resize, and a guest that composites a full-screen
+(logarithmic depth), and a guest that composites a full-screen
 pass to the screen (its quad would be moved; leave `reproject` off). A
 vertex outside the old clip volume on every axis, in front of the camera
 (the `gl_Position = vec4(2.0, 2.0, 2.0, 1.0)` "hide this one" idiom), is
@@ -307,6 +307,23 @@ standalone and on a host that doesn't reproject; a reprojecting host drops
 the guest's own sets of it (`reprojectStats.guestSetsDropped`). A wide line
 written this way keeps its width and position through the lag; wrapped, its
 width is scaled by C's zoom.
+
+**A resize or a pixel-ratio change** (0.6.5). A frame drawn for a view
+whose viewport differs from deck's now (netmap's `?movedpr=1` halves the
+drawing buffer while the camera moves; a window resize) used to replay its
+own `gl.viewport` into the new buffer: magnified and anchored bottom-left,
+so the satellites jumped off the globe until the guest's next frame. With
+`reproject` the frame's screen viewport and scissor rects are now mapped
+from the frame's viewport onto deck's (scale and offset; the guest's own
+framebuffers pass through), so it lands where the guest's own frame for
+the new size would. Same size, nothing changes. Point sizes and line widths
+stay the frame's pixels during the lag.
+
+```js
+layer.lastReprojection.viewport // { from: [0, 0, 2560, 1600], to: [0, 0, 1280, 800] }, or null
+layer.stats.remappedFrames
+receiver.replay.setViewportRemap({ from, to }) // the replay's own seam, for other hosts
+```
 
 The adapter also speaks the rest of the layer control plane (shapes from
 RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):

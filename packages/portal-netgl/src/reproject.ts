@@ -28,9 +28,11 @@
 // built in clip space, labels) is offset in the old clip space, so C
 // scales it slightly during the lag; view-dependent choices (a far-side
 // cull decided by the old eye) stay the old view's; depth written in the
-// fragment shader (logarithmic depth) isn't touched; a viewport resize
-// isn't followed (the guest's frame keeps its own `gl.viewport`). Point
-// sizes are pixels and need no correction. DESIGN.md, "Host reprojection".
+// fragment shader (logarithmic depth) isn't touched. A frame drawn at
+// another viewport than the host's now (a resize, a pixel-ratio change)
+// isn't C's to fix: the replay maps its screen viewport and scissor rects
+// (`setViewportRemap`, 0.6.5), though point sizes stay the frame's pixels.
+// DESIGN.md, "Host reprojection".
 
 import { mat4InvertRigid, mat4Multiply, type NetGLLayerView, type NetGLMat4 } from './layer-view'
 
