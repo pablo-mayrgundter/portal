@@ -10,7 +10,18 @@ import { globeLayerView, type DeckViewportLike } from './frameworks/luma'
 import { mat4Multiply, mat4TransformVec4, projectToPixels, sphereToEcef, type NetGLLayerView } from './layer-view'
 import type { NetGLCall } from './messages'
 import { makeNetGLReplay } from './replay'
-import { NETGL_REPROJECT_UNIFORM, declaresReprojection, isIdentity, mat4Invert, reprojectVertexShader, reprojection } from './reproject'
+import {
+  NETGL_PIXEL_SCALE_UNIFORM,
+  NETGL_REPROJECT_UNIFORM,
+  NETGL_VIEWPORT_SCALE_UNIFORM,
+  declaresReprojection,
+  declaresScales,
+  isIdentity,
+  mat4Invert,
+  reprojectVertexShader,
+  reprojection,
+  writesPointSize
+} from './reproject'
 
 const VS_100 = `precision mediump float;
 attribute vec3 position;
@@ -365,5 +376,248 @@ describe('makeNetGLReplay({ reproject: true }) — opted-in shaders', () => {
     expect(sets).toHaveLength(1)
     // The guest's own call, as it made it (a plain array, not the replay's Float32Array).
     expect(Array.isArray(sets[0].args[2])).toBe(true)
+  })
+})
+
+// --- Pixel sizes after a pixel-ratio change (0.6.7) ----------------------
+
+// 0.6.5's wrapper, verbatim: a shader that doesn't write gl_PointSize must
+// still get exactly this.
+const WRAPPER_065 = `
+// portal-netgl host reprojection (replay \`reproject\`): C = VP_now * VP_frame^-1.
+uniform highp mat4 netgl_reproject;
+void main() {
+  netgl_main();
+  highp vec4 netgl_p = gl_Position;
+  if (!(netgl_p.w > 0.0 && all(greaterThan(abs(netgl_p.xyz), vec3(netgl_p.w))))) {
+    gl_Position = netgl_reproject * netgl_p;
+  }
+}
+`
+
+describe('reprojectVertexShader — gl_PointSize', () => {
+  it('a shader that doesn\'t write gl_PointSize is wrapped exactly as 0.6.5 wrapped it', () => {
+    const src = 'attribute vec3 position;\nuniform mat4 mvp;\n// gl_PointSize = 2.0; (a comment)\nvoid main() { gl_Position = mvp * vec4(position, 1.0); }'
+    expect(writesPointSize(src)).toBe(false)
+    expect(reprojectVertexShader(src)).toBe(src.replace(/\bmain(\s*\()/g, 'netgl_main$1') + WRAPPER_065)
+    expect(reprojectVertexShader(VS_300)).toBe(VS_300.replace(/\bmain(\s*\()/g, 'netgl_main$1') + WRAPPER_065)
+  })
+
+  it('one that writes it gets the uniform, and gl_PointSize scaled after the guest\'s main', () => {
+    expect(writesPointSize(VS_100)).toBe(true)
+    expect(writesPointSize('void main() { gl_PointSize *= 2.0; }')).toBe(true)
+    expect(writesPointSize('void main() { gl_PointSize=1.0; }')).toBe(true)
+    expect(writesPointSize('void main() { if (gl_PointSize == 1.0) {} }')).toBe(false)
+    expect(writesPointSize('/* gl_PointSize = 1.0; */ void main() {}')).toBe(false)
+    const out = reprojectVertexShader(VS_100)!
+    expect(out).toContain(`uniform highp float ${NETGL_PIXEL_SCALE_UNIFORM};`)
+    const body = out.slice(out.lastIndexOf('void main()'))
+    expect(body.indexOf('netgl_main();')).toBeLessThan(body.indexOf(`gl_PointSize *= ${NETGL_PIXEL_SCALE_UNIFORM};`))
+    expect(body.indexOf(`gl_Position = ${NETGL_REPROJECT_UNIFORM} * netgl_p;`)).toBeLessThan(body.indexOf('gl_PointSize *='))
+    // Only the wrapper's part differs from 0.6.5's.
+    expect(out.replace(`uniform highp float ${NETGL_PIXEL_SCALE_UNIFORM};\n`, '').replace(`  gl_PointSize *= ${NETGL_PIXEL_SCALE_UNIFORM};\n`, '')).toBe(
+      VS_100.replace(/\bmain(\s*\()/g, 'netgl_main$1') + WRAPPER_065
+    )
+  })
+
+  it('compiles and links on a real GL, GLSL ES 1.00 and 3.00, with the uniform active (headless-gl)', () => {
+    const ctx = gl(4, 4, { createWebGL2Context: true } as unknown as WebGLContextAttributes) as unknown as WebGL2RenderingContext
+    if (!ctx) throw new Error('headless-gl: could not create WebGL2 context')
+    const vs300 = '#version 300 es\nin vec3 position;\nuniform float size;\nvoid main() { gl_Position = vec4(position, 1.0); gl_PointSize = size; }'
+    const fs100 = 'precision mediump float;\nvoid main() { gl_FragColor = vec4(1.0); }'
+    const fs300 = '#version 300 es\nprecision mediump float;\nout vec4 c;\nvoid main() { c = vec4(1.0); }'
+    for (const [vs, fs] of [[VS_100, fs100], [vs300, fs300]]) {
+      const v = ctx.createShader(ctx.VERTEX_SHADER)!
+      ctx.shaderSource(v, reprojectVertexShader(vs)!)
+      ctx.compileShader(v)
+      expect(ctx.getShaderParameter(v, ctx.COMPILE_STATUS), ctx.getShaderInfoLog(v) ?? '').toBe(true)
+      const f = ctx.createShader(ctx.FRAGMENT_SHADER)!
+      ctx.shaderSource(f, fs)
+      ctx.compileShader(f)
+      const p = ctx.createProgram()!
+      ctx.attachShader(p, v)
+      ctx.attachShader(p, f)
+      ctx.linkProgram(p)
+      expect(ctx.getProgramParameter(p, ctx.LINK_STATUS), ctx.getProgramInfoLog(p) ?? '').toBe(true)
+      expect(ctx.getUniformLocation(p, NETGL_PIXEL_SCALE_UNIFORM)).not.toBeNull()
+    }
+  })
+})
+
+describe('declaresScales — an opted-in shader\'s pixel and viewport scales', () => {
+  it('recognises each declaration by its type, not in a comment', () => {
+    expect(declaresScales('uniform float netgl_pixelScale;\nuniform highp vec2 netgl_viewportScale;')).toEqual({ pixel: true, viewport: true })
+    expect(declaresScales('uniform mediump float  netgl_pixelScale ;')).toEqual({ pixel: true, viewport: false })
+    expect(declaresScales('// uniform float netgl_pixelScale;\nuniform vec2 netgl_viewportScale;')).toEqual({ pixel: false, viewport: true })
+    expect(declaresScales('uniform vec2 netgl_pixelScale; uniform float netgl_viewportScale;')).toEqual({ pixel: false, viewport: false })
+    expect(declaresScales(VS_OPT_IN)).toEqual({ pixel: false, viewport: false })
+  })
+})
+
+describe('makeNetGLReplay({ reproject: true }) — setPixelScale', () => {
+  const sets1f = (log: Logged[]) => log.filter((l) => l.name === 'uniform1f')
+  const lookups = (log: Logged[], name: string) => log.filter((l) => l.name === 'getUniformLocation' && l.args[1] === name)
+
+  it('a wrapped shader that writes gl_PointSize gets the scale before its screen draws, and 1 into its own framebuffers', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of setup) replay(c)
+    replay.setPixelScale(0.5)
+    log.length = 0
+    for (const c of draws) replay(c)
+    // Screen: 0.5; RT: 1; screen again: 0.5. Each before its draw.
+    expect(sets1f(log).map((l) => l.args)).toEqual([[{ loc: NETGL_PIXEL_SCALE_UNIFORM }, 0.5], [{ loc: NETGL_PIXEL_SCALE_UNIFORM }, 1], [{ loc: NETGL_PIXEL_SCALE_UNIFORM }, 0.5]])
+    const names = log.map((l) => l.name)
+    expect(names.indexOf('uniform1f')).toBeLessThan(names.indexOf('drawArrays'))
+    expect(lookups(log, NETGL_PIXEL_SCALE_UNIFORM)).toHaveLength(1)
+    expect(replay.reprojectStats.scaledDraws).toBe(2)
+  })
+
+  it('sets nothing again while the scale holds, and 1 after null', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of setup) replay(c)
+    replay.setPixelScale(2)
+    replay(draws[0])
+    replay(draws[1])
+    replay(draws[1])
+    expect(sets1f(log).map((l) => l.args[1])).toEqual([2])
+    replay.setPixelScale(null)
+    replay(draws[1])
+    replay(draws[1])
+    expect(sets1f(log).map((l) => l.args[1])).toEqual([2, 1])
+    // A link resets the program's uniforms: set again at its next draw.
+    replay(setup[9])
+    replay(draws[1])
+    expect(sets1f(log).map((l) => l.args[1])).toEqual([2, 1, 1])
+  })
+
+  it('a shader that doesn\'t write gl_PointSize: no lookup, no set, the same calls whatever the scale', () => {
+    const noPoints: NetGLCall[] = setup.map((c) => (c.name === 'shaderSource' && c.args[1] === VS_100 ? { ...c, args: [c.args[0], VS_300] } : c))
+    const runWith = (scale: number | null) => {
+      const { gl, log } = mockGl()
+      const replay = makeNetGLReplay(gl, { reproject: true })
+      for (const c of noPoints) replay(c)
+      replay.setReprojection(C)
+      replay.setPixelScale(scale)
+      for (const c of draws) replay(c)
+      return log.map((l) => ({ name: l.name, args: l.args.map((a) => (a instanceof Float32Array ? Array.from(a) : a)) }))
+    }
+    const plain = runWith(null)
+    expect(plain.filter((l) => l.name === 'uniform1f')).toHaveLength(0)
+    expect(plain.filter((l) => l.name === 'getUniformLocation' && l.args[1] === NETGL_PIXEL_SCALE_UNIFORM)).toHaveLength(0)
+    expect(runWith(0.5)).toEqual(plain)
+    expect(runWith(1)).toEqual(plain)
+  })
+
+  it('a scale of 1 after the first set adds nothing per frame: the frames\' calls are those without setPixelScale', () => {
+    const frameCalls = (scale: boolean) => {
+      const { gl, log } = mockGl()
+      const replay = makeNetGLReplay(gl, { reproject: true })
+      for (const c of setup) replay(c)
+      for (const c of draws) replay(c) // the first frame: the one set of 1 after the link
+      log.length = 0
+      for (let f = 0; f < 3; f += 1) {
+        if (scale) replay.setPixelScale(1)
+        for (const c of draws) replay(c)
+        if (scale) replay.setPixelScale(null)
+      }
+      return log.map((l) => l.name)
+    }
+    expect(frameCalls(true)).toEqual(frameCalls(false))
+    expect(frameCalls(true)).not.toContain('uniform1f')
+  })
+
+  const C = [1.01, 0, 0, 0, 0, 0.99, 0, 0, 0, 0, 1, 0, 0.02, -0.01, 0, 1]
+  const VS_SCALES = `uniform highp mat4 netgl_reproject;
+uniform float netgl_pixelScale;
+uniform vec2 netgl_viewportScale;
+uniform mat4 mvp;
+uniform vec2 uResolution;
+attribute vec3 position;
+void main() {
+  vec4 a = netgl_reproject * (mvp * vec4(position, 1.0));
+  a.xy += vec2(3.0 * netgl_pixelScale) / (0.5 * uResolution * netgl_viewportScale) * a.w;
+  gl_Position = a;
+}`
+  const scalesSetup: NetGLCall[] = [
+    { name: 'createShader', args: [VERTEX], returnId: 21 },
+    { name: 'shaderSource', args: [h(21), VS_SCALES] },
+    { name: 'compileShader', args: [h(21)] },
+    { name: 'createShader', args: [FRAGMENT], returnId: 22 },
+    { name: 'shaderSource', args: [h(22), 'void main() { gl_FragColor = vec4(1.0); }'] },
+    { name: 'compileShader', args: [h(22)] },
+    { name: 'createProgram', args: [], returnId: 23 },
+    { name: 'attachShader', args: [h(23), h(21)] },
+    { name: 'attachShader', args: [h(23), h(22)] },
+    { name: 'linkProgram', args: [h(23)] },
+    // The guest's own lookups (three's), and its values for a host that doesn't reproject.
+    { name: 'getUniformLocation', args: [h(23), NETGL_REPROJECT_UNIFORM], returnId: 24 },
+    { name: 'getUniformLocation', args: [h(23), NETGL_PIXEL_SCALE_UNIFORM], returnId: 25 },
+    { name: 'getUniformLocation', args: [h(23), NETGL_VIEWPORT_SCALE_UNIFORM], returnId: 26 },
+    { name: 'getUniformLocation', args: [h(23), 'uResolution'], returnId: 27 },
+    { name: 'createFramebuffer', args: [], returnId: 28 }
+  ]
+  const scalesDraws: NetGLCall[] = [
+    { name: 'useProgram', args: [h(23)] },
+    { name: 'uniformMatrix4fv', args: [h(24), false, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]] },
+    { name: 'uniform1f', args: [h(25), 1] },
+    { name: 'uniform2f', args: [h(26), 1, 1] },
+    { name: 'uniform2fv', args: [h(26), [1, 1]] },
+    { name: 'uniform2f', args: [h(27), 200, 100] },
+    { name: 'drawArrays', args: [0, 0, 6] },
+    { name: 'bindFramebuffer', args: [0x8d40, h(28)] },
+    { name: 'drawArrays', args: [0, 0, 6] }
+  ]
+
+  it('an opted-in shader that declares the scales gets the frame\'s, and the guest\'s own sets are dropped', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of scalesSetup) replay(c)
+    // A frame drawn at 2× (200×100) composed at 1× (100×50).
+    replay.setReprojection(C)
+    replay.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 100, 50] })
+    replay.setPixelScale(0.5)
+    log.length = 0
+    for (const c of scalesDraws) replay(c)
+    const mat = (a: unknown) => (a instanceof Float32Array ? (isIdentity(Array.from(a)) ? 'identity' : 'C') : a)
+    const host = log.filter((l) => l.name.startsWith('uniform')).map((l) => [l.name, ...l.args.map(mat)])
+    expect(host).toEqual([
+      // The guest's own resolution goes through.
+      ['uniform2f', { loc: 'uResolution' }, 200, 100],
+      // Before the screen draw, at the replay's own locations: the frame's values.
+      ['uniform1f', { loc: NETGL_PIXEL_SCALE_UNIFORM }, 0.5],
+      ['uniform2f', { loc: NETGL_VIEWPORT_SCALE_UNIFORM }, 0.5, 0.5],
+      ['uniformMatrix4fv', { loc: 'netgl' }, false, 'C'],
+      // Into its own framebuffer: 1, (1, 1) and the identity.
+      ['uniform1f', { loc: NETGL_PIXEL_SCALE_UNIFORM }, 1],
+      ['uniform2f', { loc: NETGL_VIEWPORT_SCALE_UNIFORM }, 1, 1],
+      ['uniformMatrix4fv', { loc: 'netgl' }, false, 'identity']
+    ])
+    expect(replay.reprojectStats).toMatchObject({ optIn: 1, guestSetsDropped: 4, scaledDraws: 1 })
+  })
+
+  it('declaring neither scale, an opted-in shader makes 0.6.5\'s calls', () => {
+    const runWith = (scaled: boolean) => {
+      const { gl, log } = mockGl()
+      const replay = makeNetGLReplay(gl, { reproject: true })
+      for (const c of [
+        { name: 'createShader', args: [VERTEX], returnId: 31 },
+        { name: 'shaderSource', args: [h(31), VS_OPT_IN] },
+        { name: 'createProgram', args: [], returnId: 33 },
+        { name: 'attachShader', args: [h(33), h(31)] },
+        { name: 'linkProgram', args: [h(33)] },
+        { name: 'useProgram', args: [h(33)] }
+      ] as NetGLCall[]) replay(c)
+      replay.setReprojection(C)
+      if (scaled) {
+        replay.setViewportRemap({ from: [0, 0, 200, 100], to: [0, 0, 100, 50] })
+        replay.setPixelScale(0.5)
+      }
+      replay({ name: 'drawArrays', args: [0, 0, 6] })
+      return log.filter((l) => l.name !== 'viewport' && l.name !== 'scissor').map((l) => l.name)
+    }
+    expect(runWith(true)).toEqual(runWith(false))
+    expect(runWith(true)).not.toContain('uniform1f')
   })
 })

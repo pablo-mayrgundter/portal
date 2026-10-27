@@ -270,9 +270,9 @@ corrected too, so a guest slower than deck stays on the globe.
 
 ```js
 const layer = attachNetGLDeckLayer(deck, { device, transport, time, reproject: true })
-layer.lastReprojection // { viewId, from, to, correction } of the last guest replay
+layer.lastReprojection // { viewId, from, to, correction, viewport, pixelScale } of the last guest replay
 layer.stats.reprojectedFrames
-layer.receiver.replay.reprojectStats // { shaders, skipped, fallbacks, correctedDraws }
+layer.receiver.replay.reprojectStats // { shaders, optIn, skipped, fallbacks, correctedDraws, scaledDraws, ... }
 ```
 
 Which view a frame was drawn for: its frame-end's `viewId`
@@ -316,13 +316,50 @@ so the satellites jumped off the globe until the guest's next frame. With
 `reproject` the frame's screen viewport and scissor rects are now mapped
 from the frame's viewport onto deck's (scale and offset; the guest's own
 framebuffers pass through), so it lands where the guest's own frame for
-the new size would. Same size, nothing changes. Point sizes and line widths
-stay the frame's pixels during the lag.
+the new size would. Same size, nothing changes.
 
 ```js
 layer.lastReprojection.viewport // { from: [0, 0, 2560, 1600], to: [0, 0, 1280, 800] }, or null
 layer.stats.remappedFrames
 receiver.replay.setViewportRemap({ from, to }) // the replay's own seam, for other hosts
+```
+
+**Pixel sizes follow the pixel ratio** (0.6.7). A point's `gl_PointSize`
+is in the framebuffer's pixels, so a frame drawn at ratio 2 composed at 1
+drew its dots twice the size until the guest caught up. Now a wrapped
+vertex shader that writes `gl_PointSize` also gets
+`gl_PointSize *= netgl_pixelScale` after its `main`, and the replay sets
+that uniform to deck's pixel ratio over the frame's (`to.pixelRatio /
+from.pixelRatio`): 1 on a plain resize (the points' pixels are already
+right there), 1 into the guest's own framebuffers, and 1 when the frame's
+view is unknown. A shader that doesn't write `gl_PointSize` is wrapped
+exactly as before, and same-size frames make 0.6.5's calls (a point
+program gets one `uniform1f(netgl_pixelScale, 1)` after each link).
+
+An opted-in shader that extrudes by a resolution of its own (a wide line)
+may declare the host's scales too, and use both: its resolution times
+`netgl_viewportScale` (the composed viewport over the frame's, per axis)
+and its pixel sizes times `netgl_pixelScale`. It then computes what it
+would for the composed view. Without them a wide line keeps its width on a
+pixel-ratio change (its clip-space offset is the same fraction of the
+viewport either way) but not on a resize, where it's scaled by the change
+of CSS size, per axis.
+
+```glsl
+uniform mat4 netgl_reproject;     // identity
+uniform float netgl_pixelScale;   // 1
+uniform vec2 netgl_viewportScale; // (1, 1)
+vec2 halfRes = 0.5 * uResolution * netgl_viewportScale;
+float width = uWidth * uPixelRatio * netgl_pixelScale;
+```
+
+Give them 1 and (1, 1) yourself, as the identity for `netgl_reproject`; a
+reprojecting host drops the guest's own sets of all three.
+
+```js
+layer.lastReprojection.pixelScale // 0.5 for a 2× frame composed at 1×, or null
+receiver.replay.setPixelScale(0.5) // the replay's seam
+receiver.replay.reprojectStats.scaledDraws
 ```
 
 The adapter also speaks the rest of the layer control plane (shapes from

@@ -280,7 +280,10 @@ export type DeckReceiverLayerConfig = DeckLayerBase & {
    * buffer was resized, or its pixel ratio changed, since: netmap drops to
    * `useDevicePixels: 1` while the camera moves), the guest's screen
    * viewport and scissor are mapped from that one onto deck's, so the
-   * frame isn't drawn magnified from a corner. Default false.
+   * frame isn't drawn magnified from a corner, and when its pixel ratio
+   * differed, its pixel sizes are scaled by deck's over the frame's
+   * (`gl_PointSize`, and `netgl_pixelScale` in opted-in shaders), so its
+   * points keep their size. Default false.
    */
   reproject?: boolean
 }
@@ -320,6 +323,11 @@ export type NetGLDeckReprojection = {
    * screen rects were mapped from one onto the other; else null.
    */
   viewport: { from: NetGLLayerView['viewport']; to: NetGLLayerView['viewport'] } | null
+  /**
+   * deck's pixel ratio over the frame's, when they differed and the
+   * frame's pixel sizes were scaled by it; else null.
+   */
+  pixelScale: number | null
 }
 
 export type NetGLDeckLayer = {
@@ -532,7 +540,7 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
       if (c && !isIdentity(c)) correction = c
     }
     if (correction) stats.reprojectedFrames += 1
-    lastReprojection = { viewId: from ? id : null, from, to, correction, viewport: null }
+    lastReprojection = { viewId: from ? id : null, from, to, correction, viewport: null, pixelScale: null }
     return correction
   }
   // A frame drawn at another viewport than deck's now (a resize, a pixel
@@ -548,6 +556,18 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
     if (lastReprojection && lastReprojection.to === to) lastReprojection.viewport = { from: a, to: b }
     return { from: a, to: b }
   }
+  // A frame drawn at another pixel ratio: its pixel sizes (points) scale by
+  // the ratio's change. Not by the viewport's: on a resize at the same ratio
+  // a point's pixels are already right.
+  const pixelScaleFor = (id: number | null): number | null => {
+    const to = viewNow
+    const from = id === null ? null : sentViews.get(id) ?? null
+    if (!to || !from || !(from.pixelRatio > 0) || !(to.pixelRatio > 0)) return null
+    const s = to.pixelRatio / from.pixelRatio
+    if (s === 1 || !Number.isFinite(s)) return null
+    if (lastReprojection && lastReprojection.to === to) lastReprojection.pixelScale = s
+    return s
+  }
 
   const link = isImmediate ? makeNetGLImmediateLink(common) : null
   const receiver = isImmediate
@@ -562,7 +582,8 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
               // timed out, the last sent).
               frameView: (end) => (typeof end.viewId === 'number' ? end.viewId : inFlight ? viewId : lastSentId),
               correction: correctionFor,
-              viewport: viewportFor
+              viewport: viewportFor,
+              pixelScale: pixelScaleFor
             }
           : undefined
       })
