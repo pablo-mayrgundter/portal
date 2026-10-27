@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="945" viewBox="0 0 1200 945" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<defs><marker id="arr-eb6834" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#eb6834"/></marker><marker id="arr-9c9b96" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9c9b96"/></marker><marker id="arr-8a8984" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8a8984"/></marker></defs>
+<rect width="1200" height="945" fill="#fcfcfb"/>
+<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">RFC 0002 · Nested in-place guests</text>
+<text x="40" y="78" font-size="15" fill="#52514e">celestiary → Cesium → Slop New York: three engines, two links deep, on one page, the city standing on Cesium's terrain.</text>
+<rect x="1053.5" y="30" width="106.5" height="28" rx="14" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1106.75" y="49" font-size="13" fill="#2a78d6" font-weight="700" text-anchor="middle">Draft · #38</text>
+<rect x="40" y="100" width="580" height="290" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="100" width="580" height="4" rx="2" fill="#2a78d6"/>
+<text x="58" y="132" font-size="16" fill="#0b0b0b" font-weight="700">The chain: composed today, flat in 0.7</text>
+<rect x="58" y="156" width="190" height="62" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="70" y="176" font-size="13.5" fill="#2a78d6" font-weight="700">celestiary (root)</text>
+<text x="70" y="194" font-size="11.5" fill="#52514e">three.js, HDR scene buffer;</text>
+<text x="70" y="208.95" font-size="11.5" fill="#52514e">owns camera and clock</text>
+<rect x="58" y="242" width="190" height="62" rx="8" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="70" y="262" font-size="13.5" fill="#0b0b0b" font-weight="700">Cesium (middle)</text>
+<text x="70" y="280" font-size="11.5" fill="#52514e">guest of celestiary, host</text>
+<text x="70" y="294.95" font-size="11.5" fill="#52514e">of the city; log depth</text>
+<rect x="58" y="328" width="190" height="62" rx="8" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="70" y="348" font-size="13.5" fill="#eb6834" font-weight="700">Slop New York (leaf)</text>
+<text x="70" y="366" font-size="11.5" fill="#52514e">three.js dev on WebGL2; in</text>
+<text x="70" y="380.95" font-size="11.5" fill="#52514e">Cesium's frame, per frustum</text>
+<line x1="153" y1="328" x2="153" y2="306" stroke="#eb6834" stroke-width="2" marker-end="url(#arr-eb6834)"/>
+<line x1="153" y1="242" x2="153" y2="220" stroke="#9c9b96" stroke-width="2" marker-end="url(#arr-9c9b96)"/>
+<rect x="264" y="156" width="160" height="234" rx="8" fill="#fbe3e3" stroke="#e34948" stroke-width="1"/>
+<text x="276" y="178" font-size="13.5" fill="#e34948" font-weight="700">Composed (today)</text>
+<text x="276" y="200" font-size="11.5" fill="#52514e">every city call runs</text>
+<text x="276" y="215.525" font-size="11.5" fill="#52514e">3×: its shadow,</text>
+<text x="276" y="231.05" font-size="11.5" fill="#52514e">Cesium's shadow,</text>
+<text x="276" y="246.57500000000002" font-size="11.5" fill="#52514e">celestiary's context</text>
+<text x="276" y="266.1" font-size="11.5" fill="#52514e">2 encode-decode</text>
+<text x="276" y="281.625" font-size="11.5" fill="#52514e">passes, 2 trackers</text>
+<text x="276" y="301.15" font-size="11.5" fill="#52514e">64 programs compile 3×</text>
+<text x="276" y="320.67499999999995" font-size="11.5" fill="#52514e">nothing has to</text>
+<text x="276" y="336.19999999999993" font-size="11.5" fill="#52514e">cooperate</text>
+<rect x="434" y="156" width="160" height="234" rx="8" fill="#e0f5ec" stroke="#1baf7a" stroke-width="1"/>
+<text x="446" y="178" font-size="13.5" fill="#1baf7a" font-weight="700">Flat (0.7)</text>
+<text x="446" y="200" font-size="11.5" fill="#52514e">the leaf replays</text>
+<text x="446" y="215.525" font-size="11.5" fill="#52514e">straight into the root</text>
+<text x="446" y="235.05" font-size="11.5" fill="#52514e">the middle exposes its</text>
+<text x="446" y="250.57500000000002" font-size="11.5" fill="#52514e">link, resync() and</text>
+<text x="446" y="266.1" font-size="11.5" fill="#52514e">resolve(handle)</text>
+<text x="446" y="285.625" font-size="11.5" fill="#52514e">2 executions, 1</text>
+<text x="446" y="301.15" font-size="11.5" fill="#52514e">encode-decode,</text>
+<text x="446" y="316.67499999999995" font-size="11.5" fill="#52514e">compiles 2×</text>
+<text x="446" y="336.19999999999993" font-size="11.5" fill="#52514e">composed stays as the</text>
+<text x="446" y="351.7249999999999" font-size="11.5" fill="#52514e">fallback</text>
+<path d="M424 273 L434 273" stroke="#8a8984" stroke-width="2" fill="none" marker-end="url(#arr-8a8984)"/>
+<rect x="650" y="100" width="510" height="290" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="650" y="100" width="510" height="4" rx="2" fill="#1baf7a"/>
+<text x="668" y="132" font-size="16" fill="#0b0b0b" font-weight="700">What it adds</text>
+<circle cx="675" cy="152" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="156" font-size="12.5" fill="#0b0b0b" font-weight="700">Flat chains</text>
+<text x="688" y="171" font-size="11" fill="#52514e">nested link, resync(), resolve()</text>
+<circle cx="915" cy="152" r="5.5" fill="#eda100" stroke="none"/>
+<text x="928" y="156" font-size="12.5" fill="#0b0b0b" font-weight="700">In-frame contract</text>
+<text x="928" y="171" font-size="11" fill="#52514e">overlay at a phase; writes log depth</text>
+<circle cx="675" cy="192" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="196" font-size="12.5" fill="#0b0b0b" font-weight="700">portal.light/1</text>
+<text x="688" y="211" font-size="11" fill="#52514e">host light, stored-lit, 3 passes</text>
+<circle cx="915" cy="192" r="5.5" fill="#eda100" stroke="none"/>
+<text x="928" y="196" font-size="12.5" fill="#0b0b0b" font-weight="700">portal.ground/1</text>
+<text x="928" y="211" font-size="11" fill="#52514e">guest asks, host samples, budgeted</text>
+<circle cx="675" cy="232" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="236" font-size="12.5" fill="#0b0b0b" font-weight="700">The enu frame</text>
+<text x="688" y="251" font-size="11" fill="#52514e">geodetic origin, bearing, doubles</text>
+<circle cx="915" cy="232" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="928" y="236" font-size="12.5" fill="#0b0b0b" font-weight="700">shadow: lean</text>
+<text x="928" y="251" font-size="11" fill="#52514e">extends shadowDraws: false (0.6.2)</text>
+<circle cx="675" cy="272" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="276" font-size="12.5" fill="#0b0b0b" font-weight="700">Staged set-up</text>
+<text x="688" y="291" font-size="11" fill="#52514e">chunks; stops at the first frame</text>
+<circle cx="915" cy="272" r="5.5" fill="#eda100" stroke="none"/>
+<text x="928" y="276" font-size="12.5" fill="#0b0b0b" font-weight="700">stencil no-write, blend occlude</text>
+<text x="928" y="291" font-size="11" fill="#52514e">screen policy</text>
+<circle cx="675" cy="312" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="316" font-size="12.5" fill="#0b0b0b" font-weight="700">Offered, switched on</text>
+<text x="688" y="331" font-size="11" fill="#52514e">building statuses; layers:nyc token</text>
+<circle cx="915" cy="312" r="5.5" fill="#eda100" stroke="none"/>
+<text x="928" y="316" font-size="12.5" fill="#0b0b0b" font-weight="700">Manifest, credits, same-page tier</text>
+<text x="928" y="331" font-size="11" fill="#52514e">home: cesium-portal (proposed)</text>
+<circle cx="674" cy="358" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="685" y="362" font-size="12" fill="#52514e">partly built</text>
+<circle cx="788.2" cy="358" r="5.5" fill="#eda100" stroke="none"/>
+<text x="799.2" y="362" font-size="12" fill="#52514e">proposed, for 0.7 / 0.8</text>
+<rect x="40" y="420" width="580" height="275" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="420" width="580" height="4" rx="2" fill="#eb6834"/>
+<text x="58" y="452" font-size="16" fill="#0b0b0b" font-weight="700">What it cost, and what the lean city fixed</text>
+<rect x="58" y="476" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="58" y="486" width="4" height="56" rx="2" fill="#eb6834"/>
+<text x="74" y="510" font-size="22" fill="#0b0b0b" font-weight="700">2.6–4.2 s → 0.27 s</text>
+<text x="74" y="530" font-size="11.5" fill="#52514e">the city's first frame (set-up staged</text>
+<text x="74" y="544.95" font-size="11.5" fill="#52514e">over 23 chunks)</text>
+<rect x="334" y="476" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="334" y="486" width="4" height="56" rx="2" fill="#eb6834"/>
+<text x="350" y="510" font-size="22" fill="#0b0b0b" font-weight="700">941 → 739 MB</text>
+<text x="350" y="530" font-size="11.5" fill="#52514e">renderer process RSS, headless</text>
+<rect x="58" y="560" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="58" y="570" width="4" height="56" rx="2" fill="#eb6834"/>
+<text x="74" y="594" font-size="22" fill="#0b0b0b" font-weight="700">10.5 s → 89 ms</text>
+<text x="74" y="614" font-size="11.5" fill="#52514e">a frame at street level</text>
+<rect x="334" y="560" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="334" y="570" width="4" height="56" rx="2" fill="#e34948"/>
+<text x="350" y="594" font-size="22" fill="#0b0b0b" font-weight="700">×3 → ×3</text>
+<text x="350" y="614" font-size="11.5" fill="#52514e">program compiles: still paid; the</text>
+<text x="350" y="628.95" font-size="11.5" fill="#52514e">nested link makes it ×2</text>
+<text x="58" y="650" font-size="12" fill="#0b0b0b">Hazards found: a drape that never ended on real terrain (the host must bound it); the</text>
+<text x="58" y="666.2" font-size="12" fill="#0b0b0b">eye under the ellipsoid (float32 sun test); a stage that kept chunking (a flicker every</text>
+<text x="58" y="682.4000000000001" font-size="12" fill="#0b0b0b">37 frames).</text>
+<rect x="650" y="420" width="510" height="275" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="650" y="420" width="510" height="4" rx="2" fill="#eda100"/>
+<text x="668" y="452" font-size="16" fill="#0b0b0b" font-weight="700">Our take</text>
+<circle cx="675" cy="472" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="688" y="476" font-size="13" fill="#0b0b0b" font-weight="700">Accept every section</text>
+<text x="688" y="493.55" font-size="12" fill="#52514e">flat chains, the in-frame contract, light, ground, enu, lean, staging,</text>
+<text x="688" y="509.75" font-size="12" fill="#52514e">lifecycle, the manifest.</text>
+<circle cx="675" cy="527.95" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="531.95" font-size="13" fill="#0b0b0b" font-weight="700">Amend</text>
+<text x="688" y="549.5" font-size="12" fill="#52514e">no fourth kind: an overlay at a phase; the occlude pass is the policy's</text>
+<text x="688" y="565.7" font-size="12" fill="#52514e">blend by default; the city rebuilds on a true tangent plane rather than</text>
+<text x="688" y="581.9000000000001" font-size="12" fill="#52514e">hosts warping it; a scalar sea level.</text>
+<circle cx="675" cy="600.1000000000001" r="5.5" fill="#6250d6" stroke="none"/>
+<text x="688" y="604.1000000000001" font-size="13" fill="#0b0b0b" font-weight="700">Recommend</text>
+<text x="688" y="621.6500000000001" font-size="12" fill="#52514e">cesium-portal as the home of the Earth layers (it holds the Cesium guest</text>
+<text x="688" y="637.8500000000001" font-size="12" fill="#52514e">pages already), with the city's missing credits in its manifest.</text>
+<rect x="40" y="725" width="1120" height="190" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="725" width="1120" height="4" rx="2" fill="#6250d6"/>
+<text x="58" y="757" font-size="16" fill="#0b0b0b" font-weight="700">How to proceed</text>
+<rect x="58" y="775" width="137" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="126.5" y="791" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">0.7.0 · T2 + T3</text>
+<text x="58" y="821" font-size="12" fill="#52514e">nested link, resync, resolve, lean,</text>
+<text x="58" y="837.2" font-size="12" fill="#52514e">staging, no-write, occlude, dispose</text>
+<text x="58" y="853.4000000000001" font-size="12" fill="#52514e">through the link; LayerView v2</text>
+<rect x="336" y="775" width="100" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="386" y="791" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">0.7.x · T4</text>
+<text x="336" y="821" font-size="12" fill="#52514e">enu helper, light and ground types, a</text>
+<text x="336" y="837.2" font-size="12" fill="#52514e">Cesium-as-host adapter generic over enu</text>
+<text x="336" y="853.4000000000001" font-size="12" fill="#52514e">guests</text>
+<rect x="614" y="775" width="114.80000000000001" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="671.4" y="791" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">slop-newyork</text>
+<text x="614" y="821" font-size="12" fill="#52514e">stored-lit, setLight, setPass,</text>
+<text x="614" y="837.2" font-size="12" fill="#52514e">subFrame(); geodata on a tangent plane</text>
+<rect x="892" y="775" width="218.4" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="1001.2" y="791" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">celestiary · cesium-portal</text>
+<text x="892" y="821" font-size="12" fill="#52514e">delete netglLean and the colour</text>
+<text x="892" y="837.2" font-size="12" fill="#52514e">stopgaps; the Earth-layers package,</text>
+<text x="892" y="853.4000000000001" font-size="12" fill="#52514e">manifests, credits (0.8)</text>
+<text x="58" y="889" font-size="12.5" fill="#0b0b0b" font-weight="700">Open for comment:</text>
+<text x="186" y="889" font-size="12.5" fill="#52514e">Q5 light units (stored-lit, or linear-hdr with an exposure) · Q8 who drapes · Q14 packaging · Q16 / Q17 the controls, doors inside a layer</text>
+<text x="40" y="927" font-size="11" fill="#8a8984">docs/rfcs/responses/0002-nested-in-place-guests.md · RFC text and discussion: portal #38 · integration: celestiary/web #287, slop-newyork #1</text>
+</svg>

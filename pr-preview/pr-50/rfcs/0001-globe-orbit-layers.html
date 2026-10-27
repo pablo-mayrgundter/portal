@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RFC 0001: globe + orbit layers · Portal</title>
+<meta name="description" content="The maintainers' response to the Portal RFCs: what each asks, what's built, and the tracks of work and versions that answer them.">
+<style>
+:root { --bg: #fcfcfb; --panel: #fff; --line: #e3e2dd; --ink: #0b0b0b; --ink2: #52514e; --ink3: #8a8984; --host: #2a78d6; --hostbg: #e3eefb; --open: #6250d6; --openbg: #ebe8fa; }
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--ink); font: 16px/1.5 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+body { margin: 0; }
+a { color: var(--host); }
+header.top { position: sticky; top: 0; z-index: 10; background: rgba(252,252,251,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+header.top .row { max-width: 1120px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+header.top .brand { font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; letter-spacing: -.01em; }
+header.top .brand small { color: var(--ink3); font-weight: 400; font-size: 12px; margin-left: 6px; }
+nav.pages a { color: var(--ink2); text-decoration: none; font-size: 14px; padding: 4px 8px; border-radius: 6px; }
+nav.pages a:hover { background: var(--hostbg); color: var(--host); }
+nav.pages a[aria-current] { background: var(--openbg); color: var(--open); font-weight: 600; }
+nav.demos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+nav.demos .k { font-size: 12px; font-weight: 700; color: var(--host); text-transform: uppercase; letter-spacing: .06em; margin-right: 2px; }
+nav.demos a { font-size: 13px; color: var(--host); background: var(--hostbg); border: 1px solid #bcd3f3; border-radius: 14px; padding: 3px 10px; text-decoration: none; }
+nav.demos a:hover { background: #d2e2f8; }
+.right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.right a { font-size: 13px; color: var(--ink2); }
+.version { position: relative; display: inline-block; }
+.version select { appearance: none; -webkit-appearance: none; font: 600 13px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--host); background: var(--hostbg); border: 1px solid var(--host); border-radius: 14px; padding: 4px 26px 4px 12px; cursor: pointer; }
+.version::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--host); pointer-events: none; font-size: 12px; }
+.version.snapshot select { color: var(--open); background: var(--openbg); border-color: var(--open); }
+.version.snapshot::after { color: var(--open); }
+.notice { max-width: 1120px; margin: 12px auto 0; padding: 8px 16px; font-size: 13px; color: var(--open); }
+main.doc { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+main.doc h1 { font-size: 30px; letter-spacing: -.01em; line-height: 1.2; margin: 8px 0 16px; }
+main.doc h2 { font-size: 22px; margin: 36px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+main.doc h3 { font-size: 17px; margin: 24px 0 8px; }
+main.doc p, main.doc li { max-width: 78ch; }
+main.doc li { margin: 4px 0; }
+main.doc table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 12px 0 20px; display: block; overflow-x: auto; }
+main.doc th, main.doc td { border: 1px solid var(--line); padding: 7px 10px; vertical-align: top; text-align: left; }
+main.doc th { background: #f4f3ef; }
+main.doc tr:nth-child(even) td { background: #fbfaf7; }
+main.doc code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #f1f0ec; padding: 1px 4px; border-radius: 4px; }
+main.doc pre { background: #f1f0ec; padding: 12px; border-radius: 8px; overflow-x: auto; }
+main.doc pre code { background: none; padding: 0; }
+main.doc blockquote { border-left: 3px solid var(--open); margin: 12px 0; padding: 4px 14px; color: var(--ink2); }
+main.doc .figure { display: block; margin: 18px 0 26px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fcfcfb; }
+main.doc .figure img { display: block; width: 100%; height: auto; }
+footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 12px; color: var(--ink3); border-top: 1px solid var(--line); }
+@media (max-width: 720px) { html { font-size: 15px; } .right { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header class="top"><div class="row">
+  <a class="brand" href="index.html">Portal <small>RFC responses</small></a>
+  <nav class="pages" aria-label="Pages"><a href="index.html">Summary</a><a href="0001-globe-orbit-layers.html" aria-current="page">RFC 0001</a><a href="0002-nested-in-place-guests.html">RFC 0002</a><a href="0003-late-frames.html">RFC 0003</a></nav>
+  <nav class="demos" aria-label="Demos"><span class="k">Demos</span><a href="../">Local portal</a><a href="../iframe/">iframe</a><a href="../worker/">Worker</a><a href="../netgl/">NetGL</a><a href="../netgl-celestiary/">celestiary</a><a href="../netgl-cesium/">Cesium door</a><a href="../netgl-cesium/?mode=earth">Cesium in place</a><a href="../netgl-deck/">deck.gl</a></nav>
+  <div class="right">
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" aria-label="Version"><option value="latest" selected>portal-netgl 0.6.8</option></select></span>
+    <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
+  </div>
+</div></header>
+<main class="doc">
+<h1 id="response-to-rfc-0001-globe--orbit-layers">Response to RFC 0001: globe + orbit layers</h1>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>RFC</strong></td>
+<td><a href="https://github.com/pablo-mayrgundter/portal/blob/main/docs/rfcs/0001-globe-orbit-layers.md"><code>docs/rfcs/0001-globe-orbit-layers.md</code></a>, merged as Draft in portal #35; discussion and findings in <a href="https://github.com/pablo-mayrgundter/portal/issues/39">#39</a></td>
+</tr>
+<tr>
+<td><strong>Integration</strong></td>
+<td>netmap&#39;s deck.gl <code>GlobeView</code> hosting celestiary&#39;s orbits (satellites, Starlink, Iridium, the DSN) from a cross-origin iframe</td>
+</tr>
+<tr>
+<td><strong>Built</strong></td>
+<td>portal-netgl 0.5.0 (#36: the luma.gl host adapter, <code>layer:view</code>, origin-pinned transports), 0.6.0–0.6.8 (wire 2, host reprojection, parts); celestiary/web #296, #304; netmap #7, #8</td>
+</tr>
+<tr>
+<td><strong>Tracks</strong></td>
+<td>T5 (control plane and trust), T3 (the view), T6 (packaging); T1 answered its Q29</td>
+</tr>
+<tr>
+<td><strong>Picture</strong></td>
+<td><a href="img/rfc-0001.svg">rfc-0001.svg</a></td>
+</tr>
+</tbody></table>
+<p><a class="figure" href="img/rfc-0001.svg" title="Open the SVG"><img src="img/rfc-0001.svg" alt="RFC 0001 at a glance"></a></p>
+<h2 id="what-it-asks">What it asks</h2>
+<p>A globe host draws the Earth; a guest from another origin draws things
+in orbit around it, in the host&#39;s view, hidden by the globe where they
+should be, and links join a satellite in one engine to a network node in
+the other. Neither a door nor a stencilled shape fits, so the RFC asks
+for:</p>
+<ol>
+<li>an <strong>overlay</strong> kind: no shape, no stencil, the host&#39;s exact projection, depth-tested against the host (§4–5);</li>
+<li>the far plane <strong>sized to the guest&#39;s extent</strong>, and content past it clamped as sky (§5.3);</li>
+<li>a <strong>precise view</strong>: ECEF metres, rigid view, doubles, an Earth model and surface mapping, projections that aren&#39;t a 4×4 (§6);</li>
+<li><strong>time</strong> owned by the root, with scale offsets, an epoch and an elapsed clock (§7);</li>
+<li><strong>anchors</strong>: named positions with a URI registry, subscriptions and links across engines (§8);</li>
+<li><strong>nesting</strong> flattened into one context with a tree of frame maps (§9);</li>
+<li><strong>cross-origin</strong> iframes with a handshake, capabilities and trust tiers (§10);</li>
+<li><strong>host adapter</strong> semantics, restore or invalidate (§11).</li>
+</ol>
+<h2 id="whats-built-and-what-it-taught">What&#39;s built, and what it taught</h2>
+<p>Most of §4–6 and §11 shipped and held up. The control plane is split
+across two implementations that don&#39;t yet share an envelope (#36 sends
+<code>{view: {…}}</code>, #296 reads the fields flat; §6.7). The findings that
+changed the design, all now in the DESIGN.md:</p>
+<ul>
+<li><strong>The wire was the cost, not the GPU.</strong> One message per call put the host&#39;s main thread 90–99% busy; one batch per frame over a MessagePort, with uploads sliced to the bytes a call reads, took a frame from 187 messages and 505 KB to 1 and 48 KB, and the host&#39;s decode from 210 ms to 0.1 ms (Q29; 0.6.0).</li>
+<li><strong>A late frame is corrected, not waited for.</strong> Host reprojection rewrites the guest&#39;s vertex shaders once and multiplies <code>gl_Position</code> by <code>VP_now · VP_frame⁻¹</code>; the guest&#39;s content lands where the current camera puts it (0.6.3–0.6.7).</li>
+<li><strong>The frame-end carries the frame&#39;s metadata.</strong> <code>viewId</code> (0.6.3) answered Q18; <code>part</code> (0.6.8) followed. RFC 0003 adds two fields more.</li>
+<li><strong>Origin is the whole trust boundary today.</strong> Both transports pin origins; a nonce and a port are specified but not built (§10.2).</li>
+<li><strong>Remaining latency is the host&#39;s own frame rate</strong>, not the transport (the M2 captures in #39).</li>
+</ul>
+<h2 id="our-take">Our take</h2>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Proposal</th>
+<th>Take</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§4</td>
+<td>the overlay kind</td>
+<td><strong>Accept, built.</strong> With 0002&#39;s amendment: an overlay may be inserted at a phase inside the host&#39;s pass.</td>
+</tr>
+<tr>
+<td>§5.1</td>
+<td>shared depth, no clears, writes as a grant</td>
+<td><strong>Accept, with change:</strong> the encoding&#39;s kind in <code>hello-ack</code>, its parameters per view (0002 §5.3); <code>write</code> is a per-host default (Q3, settled).</td>
+</tr>
+<tr>
+<td>§5.3</td>
+<td>extent, far plane, <code>clamp-to-far</code></td>
+<td><strong>Accept.</strong> <code>layer:extent</code> on change is unbuilt; add <code>box</code> (0002 §5.6).</td>
+</tr>
+<tr>
+<td>§6</td>
+<td>the view: frames, doubles, Earth model, surface mapping</td>
+<td><strong>Accept; this is T3&#39;s <code>LayerView</code> v2.</strong> Keep <code>earth</code> per view. <code>frame</code> becomes any registered id.</td>
+</tr>
+<tr>
+<td>§6.4</td>
+<td>a projection descriptor for Web Mercator</td>
+<td><strong>Defer.</strong> A 2D host gets anchors only in v1 (Q7). The <code>shader</code> kind (a host prelude) is the likely real answer.</td>
+</tr>
+<tr>
+<td>§7</td>
+<td><code>portal.time/1</code>: <code>timeMs</code> in the view, <code>layer:time</code> as state</td>
+<td><strong>Accept.</strong> Add <code>time: &#39;elapsed&#39;</code> in hello for guests that animate on wall time (0002 §5.4).</td>
+</tr>
+<tr>
+<td>§8</td>
+<td><code>portal.anchors/1</code>, the URI registry, links</td>
+<td><strong>Accept, with change:</strong> near-N subscriptions (celestiary #304) are part of the extension, required of a publisher with a large population; the binary table waits for a subscriber that needs whole constellations. Start empty: no anchors before a subscription.</td>
+</tr>
+<tr>
+<td>§9</td>
+<td>flattened nesting, <code>layer:children</code></td>
+<td><strong>Accept as amended by 0002:</strong> flat through the middle&#39;s link on one page; the root creates cross-origin children.</td>
+</tr>
+<tr>
+<td>§10.1–10.4</td>
+<td>the iframe, the nonce and port, one message per frame, the async scheduler</td>
+<td><strong>Accept.</strong> The port is built (wire 2); the nonce isn&#39;t. Opaque-origin guests are supported through the nonce and the port, and a real origin is recommended (Q17).</td>
+</tr>
+<tr>
+<td>§10.5</td>
+<td>trust tiers</td>
+<td><strong>Accept the tiers; build <code>trusted-origin</code>&#39;s cheap checks; don&#39;t build <code>untrusted-gl</code>.</strong> Untrusted code goes to <code>isolated</code> frame-RPC bitmaps (Q16). Add 0002&#39;s <code>same-page</code> tier. A scissor from an overlay&#39;s extent goes in the screen policy anyway (Q1).</td>
+</tr>
+<tr>
+<td>§10.6–10.7</td>
+<td>capabilities, hello, lifecycle states</td>
+<td><strong>Accept; this is T5.</strong> Make &quot;the host queues control posts until hello&quot; (Q25) and <code>layer:invalidate</code> (Q26) normative.</td>
+</tr>
+<tr>
+<td>§11</td>
+<td>restore vs invalidate; in-layer-order insertion for deck</td>
+<td><strong>Accept, built.</strong> A deck layer that runs the guest (in deck&#39;s order) when a host needs its own draws after the guest (Q13).</td>
+</tr>
+</tbody></table>
+<h2 id="proposed-answers-to-the-open-questions">Proposed answers to the open questions</h2>
+<p>Settled: Q3 (per host), Q11 (flat on one page, root-created cross-origin
+children), Q13 (phases for synchronous bindings; one insertion point
+async), Q14 (Cesium invalidates; upstreaming the hook is tracked in
+cesium-portal), Q18 (fields on the frame-end), Q25, Q26, Q28 (render on
+view messages, the guest&#39;s libraries included), Q29 (measured and fixed
+in 0.6.x).</p>
+<p>Proposed here:</p>
+<ul>
+<li><strong>Q1, Q16, Q21.</strong> Overlays for <code>bundled</code>, <code>same-page</code> and <code>trusted-origin</code>; a nonce per iframe plus origin pinning is enough for those; untrusted code is <code>isolated</code>. A capability token comes with the untrusted path, if it is ever built.</li>
+<li><strong>Q2.</strong> Don&#39;t specify <code>shared-texture</code> until a host without a per-frustum hook needs it.</li>
+<li><strong>Q4, Q5.</strong> <code>timeMs</code> plus an optional two-part <code>jd</code>; the host is the binding source of TAI − UTC and UT1 − UTC. ECEF of date and UT1 are enough; no Earth rotation angle on the wire until two guests visibly disagree.</li>
+<li><strong>Q6.</strong> Surface-tied positions must use the host&#39;s mapping; orbital positions should, and a guest that doesn&#39;t says so (<code>warp: false</code>).</li>
+<li><strong>Q7.</strong> Anchors only for 2D hosts in v1.</li>
+<li><strong>Q8.</strong> Page-local <code>portal:/path#id</code> in v1. 0002&#39;s <code>layers:&lt;id&gt;</code> permalink token covers &quot;switched on&quot;; a cross-page form waits for a permalink that needs it.</li>
+<li><strong>Q9.</strong> A CURIE-style prefix registry in this repo; <code>naif:</code> canonical, <code>dsn-sc:</code> an alias.</li>
+<li><strong>Q10.</strong> Relaying needs both sides&#39; grants.</li>
+<li><strong>Q12.</strong> One clock at every level; no per-edge time.</li>
+<li><strong>Q15.</strong> JSON anchors with near-N in v1; the binary table later.</li>
+<li><strong>Q17.</strong> Supported through the nonce and the port (GitHub Pages previews need it); a real origin recommended.</li>
+<li><strong>Q19.</strong> Lifting ground geometry is the guest&#39;s business; the view already carries what it needs to size the lift (<code>clipRange</code> and <code>bits</code>).</li>
+<li><strong>Q20.</strong> Accept the limb mismatch in v1; an optional occluder sphere in the view if it shows.</li>
+<li><strong>Q22.</strong> No propagation in the host: near-N plus <code>p + v·Δt</code> extrapolation covers the links, and SGP4 stays with the publisher.</li>
+<li><strong>Q23.</strong> The version-claim register is the <a href="index.html#tracks">tracks table</a>. <strong>Q24.</strong> Yes: entries per framework, each framework an optional peer. <strong>Q27.</strong> A gotcha: a guest page never shares a chunk graph with the host app beside it.</li>
+</ul>
+<h2 id="how-to-proceed">How to proceed</h2>
+<ol>
+<li><strong>Now (T1, 0.6.9–0.6.10):</strong> RFC 0003&#39;s deferred deletes and named targets also serve this guest; nothing of 0001&#39;s changes.</li>
+<li><strong>0.7.0 (T3):</strong> <code>LayerView</code> v2 as one type in <code>layer-view.ts</code>; <code>globeLayerView</code> fills it; celestiary&#39;s layer page reads <code>msg.view</code> so #296 and #36 interoperate.</li>
+<li><strong>0.8.0 (T5):</strong> <code>hello</code> / <code>hello-ack</code> with the nonce and the port, replacing <code>netgl:ready</code> and celestiary&#39;s <code>originTransport</code>; <code>trusted-origin</code>&#39;s checks on the replay; <code>portal.time/1</code> and <code>portal.anchors/1</code> with near-N; lifecycle states; <code>portal-layers</code> 0.1 cut from portal-netgl, with the luma adapter moving there.</li>
+<li><strong>In netmap and celestiary, in step:</strong> rename the anchor ids to the registry (<code>dsn:GDSCC</code>, <code>dsn-sc:VGR1</code>); place the DSN complexes by <code>view.earth</code>; publish nothing before a subscription.</li>
+</ol>
+<h2 id="what-were-asking">What we&#39;re asking</h2>
+<p>Whether decisions 6, 9 and 10 of the <a href="index.html#decisions-were-proposing">synthesis</a>
+are right: untrusted guests as bitmaps rather than validated GL; no
+propagation in the host; anchors only over a 2D map. And from anyone
+with a globe or map engine: can it fill R1&#39;s view and expose an
+insertion point?</p>
+
+</main>
+<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.8. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
+<script>
+(function () {
+  var sel = document.getElementById('version-select'); if (!sel) return;
+  var path = location.pathname, i = path.lastIndexOf('/rfcs/');
+  var root = i >= 0 ? path.slice(0, i + 1) : path.replace(/[^/]*$/, '');
+  var m = root.match(/^(.*\/)v\/([^/]+)\/$/), siteRoot = m ? m[1] : root, here = m ? m[2] : 'latest';
+  var page = path.slice(path.lastIndexOf('/') + 1) || 'index.html';
+  function fill(list, latest) {
+    sel.innerHTML = '';
+    var opts = [['latest', 'latest · ' + latest + ' (main)']].concat(list.map(function (v) { return [v, 'v' + v + ' snapshot']; }));
+    opts.forEach(function (o) { var e = document.createElement('option'); e.value = o[0]; e.textContent = o[1]; if (o[0] === here) e.selected = true; sel.appendChild(e); });
+    if (here !== 'latest' && !list.includes(here)) { var e = document.createElement('option'); e.value = here; e.textContent = 'v' + here + ' snapshot'; e.selected = true; sel.appendChild(e); }
+  }
+  fetch(siteRoot + 'v/versions.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    if (j && j.versions) fill(j.versions, j.latest || sel.dataset.version);
+  }).catch(function () {});
+  sel.addEventListener('change', function () {
+    var v = sel.value, target = v === 'latest' ? siteRoot : siteRoot + 'v/' + v + '/';
+    location.href = target + 'rfcs/' + page + location.hash;
+  });
+})();
+
+(function () { var p = location.pathname; if (/\/v\/[^/]+\/rfcs\//.test(p)) document.getElementById('version-wrap').classList.add('snapshot'); })();
+</script>
+</body>
+</html>
