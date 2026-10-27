@@ -9,11 +9,18 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const [latest, ...rest] = process.argv.slice(2)
-if (!latest) { console.error('usage: write-versions.mjs <latest> [snapshots...]'); process.exit(1) }
+//   node scripts/write-versions.mjs <latest> --from-history > dist/v/versions.json
+// lists every version history.json knows (a build with no gh-pages to read:
+// a PR preview, a local build), so the pulldowns can be tried.
+
+const args = process.argv.slice(2)
+const fromHistory = args.includes('--from-history')
+const [latest, ...rest] = args.filter((a) => a !== '--from-history')
+if (!latest) { console.error('usage: write-versions.mjs <latest> [snapshots...] [--from-history]'); process.exit(1) }
 const here = dirname(fileURLToPath(import.meta.url))
 let history = []
 try { history = JSON.parse(readFileSync(join(here, '../docs/rfcs/responses/history.json'), 'utf8')).versions } catch { /* no history beside this script: labels only */ }
+if (fromHistory) rest.push(...history.map((h) => h.version))
 
 const parse = (v) => v.split(/[.-]/).map((p) => (/^\d+$/.test(p) ? Number(p) : p))
 const cmp = (a, b) => { const x = parse(a), y = parse(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (y[i] ?? -1) > (x[i] ?? -1) ? 1 : (y[i] ?? -1) < (x[i] ?? -1) ? -1 : 0; if (d) return d } return 0 }

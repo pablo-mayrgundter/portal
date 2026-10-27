@@ -67,3 +67,10 @@ runs:
     - name: Build the RFC responses site (docs/rfcs/responses → /rfcs/)
       shell: bash
       run: node scripts/build-rfc-site.mjs --base ${{ inputs.base-path }} --out dist/rfcs
+
+    - name: A versions list from history.json, so a preview's pulldowns can be tried
+      # The main deploy replaces it with the list of what is on gh-pages (pages.yml).
+      shell: bash
+      run: |
+        mkdir -p dist/v
+        node scripts/write-versions.mjs "$(node -p "require('./packages/portal-netgl/package.json').version")" --from-history > dist/v/versions.json
