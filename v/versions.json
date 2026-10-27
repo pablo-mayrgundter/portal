@@ -2,6 +2,7 @@
   "latest": "0.6.8",
   "versions": [
     "0.6.8",
+    "0.6.7",
     "0.6.6",
     "0.6.5",
     "0.6.4",
@@ -31,6 +32,21 @@
       ],
       "docs": true,
       "reconstructed": false
+    },
+    "0.6.7": {
+      "date": "2026-10-27",
+      "label": "Pixel sizes",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true
     },
     "0.6.6": {
       "date": "2026-10-26",
@@ -219,5 +235,5 @@
       "reconstructed": true
     }
   },
-  "updated": "2026-10-27T20:50:57.899Z"
+  "updated": "2026-10-27T20:53:19.659Z"
 }
