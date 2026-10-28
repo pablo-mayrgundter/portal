@@ -336,7 +336,7 @@
     },
     {
       "version": "0.6.9",
-      "ref": "9bdde98",
+      "ref": "d7c2706",
       "date": "2026-10-28",
       "label": "Deferred deletes",
       "summary": "Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place (RFC 0003's first step, for celestiary's late Cesium frames).",

@@ -51,7 +51,7 @@ Cesium demo is asked for them (`?imagery=osm`).
 | 0.6.5 | 2026-10-26 | `b7a1225` | A frame drawn for one buffer size is mapped when the host's buffer changed size. | | [`v/0.6.5/`](https://pablo-mayrgundter.github.io/portal/v/0.6.5/) |
 | 0.6.6 | 2026-10-26 | `b84275f` | The Cesium shim passes `shadowDraws` through. | | [`v/0.6.6/`](https://pablo-mayrgundter.github.io/portal/v/0.6.6/) |
 | 0.6.7 | 2026-10-27 | `e4f63d0` | A lagging frame's point sizes and line widths follow the host's pixel ratio. | | [`v/0.6.7/`](https://pablo-mayrgundter.github.io/portal/v/0.6.7/) |
-| 0.6.9 | 2026-10-28 | `9bdde98` | **Deferred deletes.** Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place. RFC 0003's first step. | | [`v/0.6.9/`](https://pablo-mayrgundter.github.io/portal/v/0.6.9/) |
+| 0.6.9 | 2026-10-28 | `d7c2706` | **Deferred deletes.** Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place. RFC 0003's first step. | | [`v/0.6.9/`](https://pablo-mayrgundter.github.io/portal/v/0.6.9/) |
 | 0.6.8 | 2026-10-27 | `42e507c` | **Parts.** Several draws for one view, each to its own target: `part` on the frame-end, `beforeFrame` on the receiver. The RFC responses and this site. | + docs | [`v/0.6.8/`](https://pablo-mayrgundter.github.io/portal/v/0.6.8/) |
 
 ## The through line
