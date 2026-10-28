@@ -333,6 +333,26 @@
         51
       ],
       "layout": "demo-root"
+    },
+    {
+      "version": "0.6.9",
+      "ref": "9bdde98",
+      "date": "2026-10-28",
+      "label": "Deferred deletes",
+      "summary": "Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place (RFC 0003's first step, for celestiary's late Cesium frames).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "prs": [
+        54
+      ]
     }
   ]
 }

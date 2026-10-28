@@ -168,7 +168,7 @@ const overview = ({ tag, links }) => {
   const rf = [
     ['RFC 0001 · Globe + orbit layers', 'netmap (deck.gl globe) hosts celestiary\'s orbits from another origin. Overlay kind, shared depth, the view, time, anchors, trust.', 'built 0.5–0.6.8 · 29 questions'],
     ['RFC 0002 · Nested in-place guests', 'celestiary → Cesium → Slop New York on one page. Flat chains, in-frame contract, light, ground, the enu frame, lean, staging.', 'shipped composed · library pieces for 0.7'],
-    ['RFC 0003 · Late frames', 'celestiary\'s Cesium from a guest page. Deferred deletes, reprojecting a guest\'s own targets, its projection on the frame-end.', 'proposed for 0.6.9–0.6.10'],
+    ['RFC 0003 · Late frames', 'celestiary\'s Cesium from a guest page. Deferred deletes, reprojecting a guest\'s own targets, its projection on the frame-end.', 'built 0.6.9 · 0.6.10 proposed'],
   ]
   const rfcHref = ['rfcs/0001-globe-orbit-layers.html', 'rfcs/0002-nested-in-place-guests.html', 'rfcs/0003-late-frames.html']
   rf.forEach(([t, d, st], i) => {
@@ -337,6 +337,7 @@ writeFileSync(OUT + 'portal-netgl-inline.svg', overview({ tag: false, links: tru
     '0.6.6': ['', '', '', '', '', ''],
     '0.6.7': ['', '', '', '', 'pixel sizes follow the host', ''],
     '0.6.8': ['', '', 'parts to their own targets', '', '', 'part on the frame-end'],
+    '0.6.9': ['', '', '', '', 'deletes deferred: any frame re-runs', ''],
   }
   const DEMO_LABEL = { three: 'Local', iframe: 'iframe', worker: 'Worker', netgl: 'NetGL', 'netgl-celestiary': 'celestiary', 'netgl-cesium': 'Cesium', 'netgl-deck': 'deck.gl' }
   const AXIS_COL = [C.guest, C.open, C.host, C.built, C.risk, C.next]

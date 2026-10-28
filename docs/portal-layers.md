@@ -134,7 +134,8 @@ The binding supplies two things:
      - The ready handshake is repeated until acked.
      - Frame batches are concatenated, never overwritten.
      - A stale frame is re-run without its uploads.
-     - A frame that deletes an object is never re-run.
+     - A frame's deletes wait for the next new frame, so any frame can be
+       re-run (0.6.9; before, a frame that deleted was never re-run).
 
 **Pose-tagged composition (async only).** A late guest frame, stencilled
 for the host's *current* view, slides against its stencil. The

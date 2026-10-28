@@ -604,9 +604,8 @@ export const attachNetGLDeckLayer = (deck: DeckLike, config: NetGLDeckLayerConfi
   const sendView = (view: NetGLLayerView): void => {
     if (!receiver || !(receiver.ready || hello) || inFlight) return
     // An unchanged view needs no new frame, unless the guest invalidated
-    // its last one, or that one can't be re-run (it deleted objects, as a
-    // three.js guest's first frame does): then the guest draws it again,
-    // so it stays on screen.
+    // its last one, or that one can't be re-run (it read back, or used a
+    // sync object): then the guest draws it again, so it stays on screen.
     if (!forceView && lastSent && sameView(lastSent, view) && receiver.canRerun) return
     forceView = false
     const msg: NetGLLayerViewMessage = { type: 'layer:view', viewId: ++viewId, view }

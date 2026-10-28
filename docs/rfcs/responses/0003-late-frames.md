@@ -4,7 +4,7 @@
 |---|---|
 | **RFC** | [#49](https://github.com/pablo-mayrgundter/portal/issues/49) |
 | **Integration** | celestiary drawing Earth's, the Moon's and Mars's Cesium from guest pages on `pablo-mayrgundter.github.io/cesium-portal`, in lockstep: post the view, render the host's scene, wait up to 100 ms for the guest's frame, else re-run the last one |
-| **Built** | celestiary/web #309, #310, #317 (`?cesium=iframe`, the copy fallback), portal-netgl 0.6.3–0.6.8 (reprojection, parts). The two portal steps are proposed, not built. |
+| **Built** | celestiary/web #309, #310, #317 (`?cesium=iframe`, the copy fallback), portal-netgl 0.6.3–0.6.8 (reprojection, parts), 0.6.9 (deferred deletes, #54). Named targets (0.6.10) are proposed, not built. |
 | **Tracks** | T1 (late frames), with a field for T3 (the view) |
 | **Picture** | [rfc-0003.svg](./img/rfc-0003.svg) |
 

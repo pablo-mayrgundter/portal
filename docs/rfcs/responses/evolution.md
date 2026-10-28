@@ -51,6 +51,7 @@ Cesium demo is asked for them (`?imagery=osm`).
 | 0.6.5 | 2026-10-26 | `b7a1225` | A frame drawn for one buffer size is mapped when the host's buffer changed size. | | [`v/0.6.5/`](https://pablo-mayrgundter.github.io/portal/v/0.6.5/) |
 | 0.6.6 | 2026-10-26 | `b84275f` | The Cesium shim passes `shadowDraws` through. | | [`v/0.6.6/`](https://pablo-mayrgundter.github.io/portal/v/0.6.6/) |
 | 0.6.7 | 2026-10-27 | `e4f63d0` | A lagging frame's point sizes and line widths follow the host's pixel ratio. | | [`v/0.6.7/`](https://pablo-mayrgundter.github.io/portal/v/0.6.7/) |
+| 0.6.9 | 2026-10-28 | `9bdde98` | **Deferred deletes.** Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place. RFC 0003's first step. | | [`v/0.6.9/`](https://pablo-mayrgundter.github.io/portal/v/0.6.9/) |
 | 0.6.8 | 2026-10-27 | `42e507c` | **Parts.** Several draws for one view, each to its own target: `part` on the frame-end, `beforeFrame` on the receiver. The RFC responses and this site. | + docs | [`v/0.6.8/`](https://pablo-mayrgundter.github.io/portal/v/0.6.8/) |
 
 ## The through line
@@ -64,7 +65,7 @@ one or two of six axes, and the axes are the protocol.
 | **Whose state the guest's is** | the endpoint's own context | a shadow context answers synchronously | the checkpoint re-emits it per frame | tracked, no queries | deferred across sub-frames | | the shadow stops drawing (0.6.2) |
 | **What the host may override** | stencil and oblique clip, by hand per material | door-fit viewport remap | the screen policy: stencil, clears, blend, target | | `clear: 'none'` | | viewport map (0.6.5), parts to their own targets (0.6.8) |
 | **How two scenes compose** | a door | a door, a real app through it | in place: Cesium's Earth under a stencilled shape | | inside the host's pass, per frustum | an overlay in the host's clip space | |
-| **What happens when a frame is late** | | batches concatenated; a stale frame re-run | a deleting frame never re-run; ready re-sent until acked | | | one view in flight; `canRerun` | redraw folding (0.6.1); reprojection and `viewId` (0.6.3, 0.6.4, 0.6.7) |
+| **What happens when a frame is late** | | batches concatenated; a stale frame re-run | a deleting frame never re-run; ready re-sent until acked | | | one view in flight; `canRerun` | redraw folding (0.6.1); reprojection and `viewId` (0.6.3, 0.6.4, 0.6.7); deletes deferred, any frame re-run (0.6.9) |
 | **Who is talking** | same origin | `netgl:ready` | same-page link | | | `layer:view`, `hello-ack`, `invalidate`; origins pinned both ways | the port negotiated (0.6.0); `part` on the frame-end (0.6.8) |
 
 Three moves explain most of it:
