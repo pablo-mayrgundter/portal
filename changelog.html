@@ -59,7 +59,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
   <nav class="pages" aria-label="Pages"><a href="./">Summary</a><a href="changelog.html" aria-current="page">Changelog</a><a href="rfcs/index.html">RFCs</a></nav>
   <a class="demos" href="three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.8" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.8</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.9" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.9</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
@@ -76,7 +76,27 @@ Every version&#39;s demos are kept at
 <code>https://pablo-mayrgundter.github.io/portal/v/&lt;version&gt;/</code>; the ones before
 0.6.8 are reconstructions built from that version&#39;s last commit. The
 package is pre-1.0: pin an exact version.</p>
-<h2 id="unreleased">Unreleased</h2>
+<h2 id="069-deferred-deletes-2026-10-28">0.6.9: Deferred deletes (2026-10-28)</h2>
+<ul>
+<li><strong>Any frame can be re-run.</strong> The receiver holds every delete back until
+it drains a new frame, so a re-run of the last frame finds every object
+it used; the delete&#39;s implicit unbinds (the bound framebuffer back to the
+screen, a texture off its units, an attachment detached from the bound
+framebuffer, ...) happen at its position, as calls. Until now a frame that
+deleted anything was never re-run, and Cesium deletes buffers and
+textures nearly every frame while tiles load, so a host waiting on a late
+guest drew nothing. A frame that reads back or uses a sync object is
+still never re-run. <code>receiver.pendingDeletes</code> counts the held deletes
+(<a href="https://github.com/pablo-mayrgundter/portal/issues/49">RFC 0003</a> §3;
+<a href="https://github.com/pablo-mayrgundter/portal/pull/54">#54</a>). DESIGN.md,
+<a href="https://github.com/pablo-mayrgundter/portal/blob/main/packages/portal-netgl/DESIGN.md#findings-from-cesium-integration">Findings from Cesium integration</a>.</li>
+<li><strong>Behaviour change:</strong> <code>canRerun</code> is now true after a frame that deleted
+objects (a three.js guest&#39;s first frame), so the deck.gl adapter no
+longer asks again for an unchanged view after the first frame.</li>
+<li><strong>Built for:</strong> celestiary&#39;s Cesium guest pages, whose late frames during
+tile loads were blank (118 of 503 drains headless with every frame late).</li>
+</ul>
+<h2 id="after-068s-bump">After 0.6.8&#39;s bump</h2>
 <p>On <code>main</code> after 0.6.8, with no version bump: docs and the site, no
 protocol change. <code>history.json</code> counts the docs site in 0.6.8&#39;s snapshot,
 since the version didn&#39;t move.</p>
@@ -310,7 +330,7 @@ proxy and a share proxy for social previews
 </ul>
 
 </main>
-<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.8. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
+<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.9. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
 <script>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
