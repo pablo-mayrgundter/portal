@@ -59,7 +59,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
   <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../changelog.html">Changelog</a><a href="index.html" aria-current="page">RFCs</a></nav>
   <a class="demos" href="../three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.9" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.9</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.10" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.10</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
@@ -220,9 +220,17 @@ Cesium demo is asked for them (<code>?imagery=osm</code>).</p>
 <td><a href="https://pablo-mayrgundter.github.io/portal/v/0.6.7/"><code>v/0.6.7/</code></a></td>
 </tr>
 <tr>
+<td>0.6.10</td>
+<td>2026-10-28</td>
+<td><code>8e75125</code></td>
+<td><strong>Named screen targets.</strong> A guest that draws into targets of its own names them on its frame-end, with the view and projection it drew with, and a host corrects the draws into them: reprojection for Cesium&#39;s full-screen composite. RFC 0003&#39;s second step.</td>
+<td></td>
+<td><a href="https://pablo-mayrgundter.github.io/portal/v/0.6.10/"><code>v/0.6.10/</code></a></td>
+</tr>
+<tr>
 <td>0.6.9</td>
 <td>2026-10-28</td>
-<td><code>9bdde98</code></td>
+<td><code>d7c2706</code></td>
 <td><strong>Deferred deletes.</strong> Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place. RFC 0003&#39;s first step.</td>
 <td></td>
 <td><a href="https://pablo-mayrgundter.github.io/portal/v/0.6.9/"><code>v/0.6.9/</code></a></td>
@@ -300,7 +308,7 @@ one or two of six axes, and the axes are the protocol.</p>
 <td></td>
 <td></td>
 <td>one view in flight; <code>canRerun</code></td>
-<td>redraw folding (0.6.1); reprojection and <code>viewId</code> (0.6.3, 0.6.4, 0.6.7); deletes deferred, any frame re-run (0.6.9)</td>
+<td>redraw folding (0.6.1); reprojection and <code>viewId</code> (0.6.3, 0.6.4, 0.6.7); deletes deferred, any frame re-run (0.6.9); named screen targets and the guest&#39;s own projection (0.6.10)</td>
 </tr>
 <tr>
 <td><strong>Who is talking</strong></td>
@@ -358,7 +366,7 @@ so in <code>history.json</code>.</li>
 </ul>
 
 </main>
-<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.9. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
+<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.10. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
 <script>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;

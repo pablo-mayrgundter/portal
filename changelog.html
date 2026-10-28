@@ -59,7 +59,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
   <nav class="pages" aria-label="Pages"><a href="./">Summary</a><a href="changelog.html" aria-current="page">Changelog</a><a href="rfcs/index.html">RFCs</a></nav>
   <a class="demos" href="three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.9" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.9</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.10" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.10</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
@@ -76,6 +76,29 @@ Every version&#39;s demos are kept at
 <code>https://pablo-mayrgundter.github.io/portal/v/&lt;version&gt;/</code>; the ones before
 0.6.8 are reconstructions built from that version&#39;s last commit. The
 package is pre-1.0: pin an exact version.</p>
+<h2 id="0610-named-screen-targets-2026-10-28">0.6.10: Named screen targets (2026-10-28)</h2>
+<ul>
+<li><strong>Protocol:</strong> a guest that draws its scene into targets of its own and
+copies them to the screen (Cesium) names them on its frame-end
+(<code>screenTargets</code>), with the view and projection it drew with
+(<code>viewMatrix</code>, <code>projectionMatrix</code>). With <code>reproject.targets: &#39;named&#39;</code>
+the receiver corrects the draws into those targets as it does screen
+draws, with C only (not the viewport remap or the pixel scales), and
+<code>correction(viewId, end)</code> gets the frame-end to correct from the guest&#39;s
+own projection. The copies are exempt by declaring <code>netgl_reproject</code>
+without applying it
+(<a href="https://github.com/pablo-mayrgundter/portal/issues/49">RFC 0003</a> §4.2,
+§4.3). DESIGN.md,
+<a href="https://github.com/pablo-mayrgundter/portal/blob/main/packages/portal-netgl/DESIGN.md#named-screen-targets-0610">Named screen targets</a>.</li>
+<li><strong>Cesium shim:</strong> <code>cesiumFrameEnd(scene)</code> names Cesium&#39;s globe-depth and
+scene framebuffers and, for a one-frustum frame, its view and projection;
+<code>attach()</code> sends them on every frame-end. Cesium itself needs a patch for
+its viewport quads and log depth before a host turns this on (the
+celestiary fork, next).</li>
+<li><strong>Guest:</strong> <code>guest.idOf(handle)</code>, the id the recorder gave a GL object.</li>
+<li><strong>Built for:</strong> celestiary&#39;s Cesium guest pages, whose late frames hold
+still while the host&#39;s atmosphere and labels move on.</li>
+</ul>
 <h2 id="069-deferred-deletes-2026-10-28">0.6.9: Deferred deletes (2026-10-28)</h2>
 <ul>
 <li><strong>Any frame can be re-run.</strong> The receiver holds every delete back until
@@ -330,7 +353,7 @@ proxy and a share proxy for social previews
 </ul>
 
 </main>
-<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.9. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
+<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.10. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
 <script>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;

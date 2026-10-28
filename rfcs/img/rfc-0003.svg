@@ -59,8 +59,8 @@
 <text x="680" y="332.80000000000007" font-size="12" fill="#52514e">patch, before czm_vertexLogDepth</text>
 <rect x="668" y="356" width="474" height="64" rx="8" fill="#e0f5ec" stroke="#1baf7a" stroke-width="1"/>
 <text x="680" y="376" font-size="13.5" fill="#1baf7a" font-weight="700">§5 The frame-end carries the frame's metadata</text>
-<text x="680" y="394" font-size="12" fill="#52514e">viewId (0.6.3) · part (0.6.8) · screenTargets · viewProjection, the one</text>
-<text x="680" y="409.6" font-size="12" fill="#52514e">the guest used</text>
+<text x="680" y="394" font-size="12" fill="#52514e">viewId (0.6.3) · part (0.6.8) · screenTargets, viewMatrix +</text>
+<text x="680" y="409.6" font-size="12" fill="#52514e">projectionMatrix, the ones the guest used (0.6.10)</text>
 <rect x="40" y="470" width="580" height="260" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
 <rect x="40" y="470" width="580" height="4" rx="2" fill="#eb6834"/>
 <text x="58" y="502" font-size="16" fill="#0b0b0b" font-weight="700">Measured (celestiary/web #309, #310, #317)</text>
