@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal - NetGL + deck.gl</title>
+    <style>
+      html, body, #globe { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+      #globe { position: absolute; inset: 0; }
+      .label {
+        position: fixed; bottom: 12px; left: 12px; max-width: 380px; z-index: 10;
+        color: #d8e7ff; font: 12px/1.4 Inter, system-ui, sans-serif;
+        background: rgba(4, 9, 18, 0.75); border: 1px solid rgba(216, 231, 255, 0.2);
+        border-radius: 8px; padding: 8px 10px;
+      }
+      .label p { margin: 6px 0 0; }
+      #status { margin-top: 6px; color: #9fb6d8; white-space: pre-wrap; font: 11px/1.35 ui-monospace, monospace; }
+      /* The guest renders on the host's view messages, not its own rAF, so it
+         needs no layout box; it only has to exist. */
+      #guest { position: fixed; width: 1px; height: 1px; left: 0; top: 0; opacity: 0; pointer-events: none; border: 0; }
+    </style>
+    <script type="module" crossorigin src="/portal/v/0.6.10/netgl-deck/assets/main-hKGiUHF2.js"></script>
+    <link rel="modulepreload" crossorigin href="/portal/v/0.6.10/netgl-deck/assets/points-DMwZVvhA.js">
+  </head>
+  <body>
+    <div id="globe"></div>
+    <div class="label">
+      <strong>NetGL + deck.gl</strong>
+      <p>A deck.gl GlobeView host. The dots and the orbit are a three.js guest in an iframe from another
+        origin, replayed into deck's WebGL2 context after deck's layers, in deck's clip space. The rings
+        are deck's own layer at the same points: a dot centred in its ring is alignment. The guest
+        depth-tests against deck's globe, so the orbit's far half is hidden, and Tokyo and Sydney, on the
+        far side, draw nothing.</p>
+      <div id="status">starting…</div>
+    </div>
+  </body>
+</html>
