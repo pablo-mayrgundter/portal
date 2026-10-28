@@ -19,17 +19,20 @@
 //     guest streaming map tiles would otherwise have every one re-uploaded
 //     on every host frame). Trade-off: a frame that rewrites a resource
 //     between two of its own draws re-runs with the final contents.
-//   - A frame that DELETES any GL object is never re-run. Its transient
-//     objects are gone by the end of the frame, so a re-run's bind of one
-//     fails — and every call after it that was meant for that object
-//     (framebufferTexture2D, texParameteri, vertexAttribPointer, draws)
-//     lands on whatever object is still bound instead, permanently
-//     corrupting it. Cesium creates, uses and deletes a scratch framebuffer
-//     in its first frame; re-running that frame reattached its textures to
+//   - Every delete is held back until the next drain with a new frame
+//     (`deferred-deletes.ts`, RFC 0003 §3), so a re-run finds every object
+//     its frame used. Until 0.6.9 a frame that deleted anything was never
+//     re-run: its transient objects were gone, a re-run's bind of one
+//     failed, and the calls meant for it landed on whatever was still
+//     bound. Cesium creates, uses and deletes a scratch framebuffer in its
+//     first frame; re-running that frame reattached its textures to
 //     Cesium's main scene framebuffer, which then stayed incomplete (a
-//     black door) for the rest of the session. Skipping the re-run costs
-//     one host frame without guest content, and only when the guest is
-//     slower than the host.
+//     black door) for the rest of the session. A delete's implicit unbinds
+//     still happen at its position, emitted as calls in its place.
+//   - A frame that reads back (readPixels, getBufferSubData) or uses a
+//     sync object is never re-run: a second read or fence would answer for
+//     a frame the guest never drew. That frame costs one host frame
+//     without guest content when the guest is slower than the host.
 //   - A replay error is reported once per distinct message and the drain
 //     continues with the next call, so one unsupported call can't kill
 //     the host's render loop.
@@ -58,6 +61,7 @@ import {
 } from './messages'
 import type { NetGLReadyAckMessage, NetGLReadyMessage } from './guest-context'
 import type { NetGLTransport } from './renderer'
+import { makeDeleteDeferral } from './deferred-deletes'
 import { makeNetGLReplay, type NetGLReplay, type NetGLReplayConfig, type NetGLViewportRemap } from './replay'
 
 // Skipped when re-running a stale frame: the data is already resident.
@@ -82,6 +86,9 @@ const UPLOADS = new Set<string>([
   'attachShader',
   'linkProgram'
 ])
+
+// A frame with any of these is never re-run (see the buffering rules).
+const REFUSE_RERUN = new Set<string>(['readPixels', 'getBufferSubData', 'fenceSync', 'clientWaitSync', 'waitSync'])
 
 // How long control posts wait for an `'all'` port to open before going on
 // the window after all.
@@ -183,11 +190,16 @@ export type NetGLHostReceiver = {
   readonly hasFrame: boolean
   /**
    * Whether `drain()` with nothing pending would re-run the last frame.
-   * False before the first frame and after one that deleted a GL object
-   * (a three.js guest's first frame deletes its shaders): a host that
-   * renders on demand should then ask the guest for another frame.
+   * False before the first frame and after one that read back or used a
+   * sync object: a host that renders on demand should then ask the guest
+   * for another frame.
    */
   readonly canRerun: boolean
+  /**
+   * Deletes held back until the next drain with a new frame (see the
+   * buffering rules).
+   */
+  readonly pendingDeletes: number
   /**
    * Replay the pending guest frame(s), or re-run the last one if none is
    * pending and the last one is safe to re-run (see the buffering rules
@@ -232,8 +244,11 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
   let inFlight: NetGLCall[] = []
   let pending: NetGLCall[] | null = null
   let last: NetGLCall[] | null = null
-  // Whether `last` may be re-run: false if it deleted any GL object.
+  // Whether `last` may be re-run: false if it read back or used a sync.
   let lastRerunnable = false
+  // The deletes `last` held back, run at the next drain with a new frame.
+  const deferral = makeDeleteDeferral()
+  let heldDeletes: NetGLCall[] = []
   // Where each frame starts in `pending` / `last`, and the view it was
   // drawn for.
   type FrameMark = { at: number; viewId: number | null; end: NetGLFrameEnd }
@@ -414,8 +429,27 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     else config.transport.post(msg, transfer)
   }
 
+  const replayOne = (call: NetGLCall): void => {
+    try {
+      replay(call)
+    } catch (err) {
+      const key = err instanceof Error ? err.message : String(err)
+      if (!seenErrors.has(key)) {
+        seenErrors.add(key)
+        onError(err)
+      }
+    }
+  }
+
   const run = (batch: NetGLCall[], marks: FrameMark[], stale: boolean): void => {
     replay.invalidate()
+    deferral.reset()
+    if (!stale) {
+      // The last batch's deletes: its objects can't be re-run any more.
+      const held = heldDeletes
+      heldDeletes = []
+      for (const call of held) replayOne(call)
+    }
     let m = 0
     for (let i = 0; i < batch.length; i += 1) {
       // Each frame's correction, and the host's own beforeFrame, before
@@ -431,15 +465,15 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       }
       const call = batch[i]
       if (stale && (call.returnId !== undefined || UPLOADS.has(call.name))) continue
-      try {
-        replay(call)
-      } catch (err) {
-        const key = err instanceof Error ? err.message : String(err)
-        if (!seenErrors.has(key)) {
-          seenErrors.add(key)
-          onError(err)
-        }
+      const standIns = deferral.observe(call)
+      if (standIns) {
+        // A delete: its unbinds now, the delete itself at the next drain
+        // with a new frame (a re-run's were held when it first ran).
+        for (const c of standIns) replayOne(c)
+        if (!stale) heldDeletes.push(call)
+        continue
       }
+      replayOne(call)
     }
     // Frames with no calls after the last call.
     if (beforeFrame) for (; m < marks.length; m += 1) beforeFrame(marks[m].end)
@@ -459,6 +493,9 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
     },
     get canRerun() {
       return last !== null && lastRerunnable
+    },
+    get pendingDeletes() {
+      return heldDeletes.length
     },
     replay,
     post,
@@ -499,7 +536,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
         pendingMarks = []
         last = batch
         lastMarks = marks
-        lastRerunnable = !batch.some((c) => c.name.startsWith('delete'))
+        lastRerunnable = !batch.some((c) => REFUSE_RERUN.has(c.name))
         drainedViews = marks.map((mk) => mk.viewId)
         run(batch, marks, false)
         return true

@@ -13,7 +13,27 @@ Every version's demos are kept at
 0.6.8 are reconstructions built from that version's last commit. The
 package is pre-1.0: pin an exact version.
 
-## Unreleased
+## 0.6.9: Deferred deletes (2026-10-28)
+
+- **Any frame can be re-run.** The receiver holds every delete back until
+  it drains a new frame, so a re-run of the last frame finds every object
+  it used; the delete's implicit unbinds (the bound framebuffer back to the
+  screen, a texture off its units, an attachment detached from the bound
+  framebuffer, ...) happen at its position, as calls. Until now a frame that
+  deleted anything was never re-run, and Cesium deletes buffers and
+  textures nearly every frame while tiles load, so a host waiting on a late
+  guest drew nothing. A frame that reads back or uses a sync object is
+  still never re-run. `receiver.pendingDeletes` counts the held deletes
+  ([RFC 0003](https://github.com/pablo-mayrgundter/portal/issues/49) §3;
+  [#54](https://github.com/pablo-mayrgundter/portal/pull/54)). DESIGN.md,
+  [Findings from Cesium integration](./packages/portal-netgl/DESIGN.md#findings-from-cesium-integration).
+- **Behaviour change:** `canRerun` is now true after a frame that deleted
+  objects (a three.js guest's first frame), so the deck.gl adapter no
+  longer asks again for an unchanged view after the first frame.
+- **Built for:** celestiary's Cesium guest pages, whose late frames during
+  tile loads were blank (118 of 503 drains headless with every frame late).
+
+## After 0.6.8's bump
 
 On `main` after 0.6.8, with no version bump: docs and the site, no
 protocol change. `history.json` counts the docs site in 0.6.8's snapshot,

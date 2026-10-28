@@ -188,7 +188,11 @@ const receiver = makeNetGLHostReceiver({
 `receiver.onFrame(cb)` calls back when a guest frame completes (for hosts
 that render on demand), `receiver.post(msg)` sends the guest a control
 message, and `receiver.canRerun` says whether `drain()` would re-run the
-last frame when nothing new has arrived. `receiver.wire` reports what the
+last frame when nothing new has arrived: any frame can, since 0.6.9, but
+one that read back (`readPixels`, `getBufferSubData`) or used a sync
+object. A frame's deletes wait for the next drain with a new frame, so its
+objects exist for a re-run; their implicit unbinds happen in place
+(`receiver.pendingDeletes` counts the held ones). `receiver.wire` reports what the
 guest negotiated (`version`, `port`: `'none' | 'offered' | 'open'`) and
 counts messages, items and batches; `wire: 1` or `messageChannel: false`
 in the config turn batching or the port off.
@@ -557,8 +561,8 @@ and per frame-end. Wire 2 (0.6):
   frame-end) go as one `{ type: 'netgl:batch', batch: [...] }`; calls
   made between frames ride the next batch. Calls are copied when recorded
   so a held call keeps its values. The host handles each item as if it had
-  come alone, so frame buffering, re-runs and the delete rule are as
-  before.
+  come alone, so frame buffering, re-runs and the deferred deletes are as
+  for single calls.
 - A guest that says `port: 'stream' | 'all'` gets one end of a
   `MessageChannel` in the ack (transferred), when the host's transport
   posts to an exact origin. The guest's stream, and what the app posts

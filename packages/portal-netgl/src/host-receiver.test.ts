@@ -36,6 +36,46 @@ const makeMockGl = (): { gl: WebGL2RenderingContext; calls: string[] } => {
 
 const END = { type: 'netgl:frame-end' }
 
+// A mock that records each call's decoded args, hands out a distinct
+// object from each create*, and notes what's deleted.
+type ArgsCall = { name: string; args: unknown[] }
+const makeArgsGl = (): {
+  gl: WebGL2RenderingContext & { handles: object[]; deleted: Set<unknown> }
+  calls: ArgsCall[]
+} => {
+  const calls: ArgsCall[] = []
+  const handles: object[] = []
+  const deleted = new Set<unknown>()
+  const gl = new Proxy({ handles, deleted } as Record<string, unknown>, {
+    get(target, prop: string) {
+      if (prop in target) return target[prop]
+      return (...args: unknown[]) => {
+        calls.push({ name: prop, args })
+        if (prop.startsWith('delete')) deleted.add(args[0])
+        if (prop.startsWith('create') || prop === 'fenceSync') {
+          const h = { __mock: prop, n: handles.length }
+          handles.push(h)
+          return h
+        }
+        return undefined
+      }
+    }
+  }) as unknown as WebGL2RenderingContext & { handles: object[]; deleted: Set<unknown> }
+  return { gl, calls }
+}
+const names = (calls: ArgsCall[]): string[] => calls.map((c) => c.name)
+const H = (id: number) => ({ __netgl_handle: id })
+const FB = 0x8D40
+const DRAW_FB = 0x8CA9
+const RB = 0x8D41
+const COLOR0 = 0x8CE0
+const DEPTH = 0x8D00
+const TEX_2D = 0x0DE1
+const TEXTURE0 = 0x84C0
+const ARRAY = 0x8892
+const ELEMENT = 0x8893
+const UBO = 0x8A11
+
 describe('makeNetGLHostReceiver', () => {
   it('replays nothing until a frame completes', () => {
     const { gl, calls } = makeMockGl()
@@ -96,30 +136,201 @@ describe('makeNetGLHostReceiver', () => {
     expect(host.drainedViews).toEqual([3, 3, 3])
   })
 
-  it('never re-runs a frame that deleted an object', () => {
+  it('re-runs a frame that deleted an object: the delete waits for the next new frame (the black door)', () => {
     // The Cesium black-door bug: frame 1 creates, uses and deletes a
-    // scratch framebuffer. A re-run would bind the deleted FBO (which
-    // fails) and attach textures to whatever FBO is still bound.
-    const { gl, calls } = makeMockGl()
+    // scratch framebuffer. Run at once, the delete left a re-run binding
+    // the deleted FBO (which fails) and attaching textures to whatever FBO
+    // was still bound. Held back, the FBO exists for the re-run.
+    const { gl, calls } = makeArgsGl()
+    const { transport, deliver } = makeTransport()
+    const host = makeNetGLHostReceiver({ gl, transport })
+    deliver({ name: 'createTexture', args: [], returnId: 1 })
+    deliver({ name: 'createFramebuffer', args: [], returnId: 2 })
+    deliver({ name: 'bindFramebuffer', args: [FB, H(2)] })
+    deliver({ name: 'framebufferTexture2D', args: [FB, COLOR0, TEX_2D, H(1), 0] })
+    deliver({ name: 'drawArrays', args: [4, 0, 3] })
+    deliver({ name: 'deleteFramebuffer', args: [H(2)] })
+    deliver(END)
+    expect(host.drain()).toBe(true)
+    // The bound FBO's delete reverts the binding to the screen, there.
+    expect(names(calls)).toEqual(['createTexture', 'createFramebuffer', 'bindFramebuffer', 'framebufferTexture2D', 'drawArrays', 'bindFramebuffer'])
+    expect(calls[5].args).toEqual([FB, null])
+    expect(host.pendingDeletes).toBe(1)
+
+    calls.length = 0
+    expect(host.canRerun).toBe(true)
+    expect(host.drain()).toBe(true)
+    expect(names(calls)).toEqual(['bindFramebuffer', 'framebufferTexture2D', 'drawArrays', 'bindFramebuffer'])
+    // The FBO the re-run binds is frame 1's own, alive.
+    expect(calls[0].args).toEqual([FB, gl.handles[1]])
+    expect(gl.deleted.size).toBe(0)
+
+    // The next new frame runs the held delete before its own calls.
+    deliver({ name: 'createFramebuffer', args: [], returnId: 3 })
+    deliver(END)
+    calls.length = 0
+    expect(host.drain()).toBe(true)
+    expect(names(calls)).toEqual(['deleteFramebuffer', 'createFramebuffer'])
+    expect(host.pendingDeletes).toBe(0)
+  })
+
+  it('sends a draw after deleting the bound framebuffer to the screen, on a re-run too', () => {
+    const { gl, calls } = makeArgsGl()
+    const { transport, deliver } = makeTransport()
+    const screen = { __screen: true }
+    const host = makeNetGLHostReceiver({
+      gl,
+      transport,
+      replay: { screenFramebuffer: () => screen as unknown as WebGLFramebuffer }
+    })
+    deliver({ name: 'createFramebuffer', args: [], returnId: 1 })
+    deliver({ name: 'bindFramebuffer', args: [DRAW_FB, H(1)] })
+    deliver({ name: 'deleteFramebuffer', args: [H(1)] })
+    deliver({ name: 'drawArrays', args: [4, 0, 3] })
+    deliver(END)
+    for (const _ of [0, 1]) {
+      calls.length = 0
+      expect(host.drain()).toBe(true)
+      const at = names(calls).indexOf('drawArrays')
+      expect(calls[at - 1]).toEqual({ name: 'bindFramebuffer', args: [DRAW_FB, screen] })
+    }
+  })
+
+  it('detaches a deleted texture or renderbuffer from the bound framebuffer, per attachment point', () => {
+    const { gl, calls } = makeArgsGl()
     const { transport, deliver } = makeTransport()
     const host = makeNetGLHostReceiver({ gl, transport })
     deliver({ name: 'createFramebuffer', args: [], returnId: 1 })
-    deliver({ name: 'bindFramebuffer', args: [0x8D40, { __netgl_handle: 1 }] })
-    deliver({ name: 'framebufferTexture2D', args: [0x8D40, 0x8CE0, 0x0DE1, null, 0] })
-    deliver({ name: 'deleteFramebuffer', args: [{ __netgl_handle: 1 }] })
+    deliver({ name: 'createTexture', args: [], returnId: 2 })
+    deliver({ name: 'createRenderbuffer', args: [], returnId: 3 })
+    deliver({ name: 'createTexture', args: [], returnId: 4 })
+    deliver({ name: 'bindFramebuffer', args: [FB, H(1)] })
+    deliver({ name: 'framebufferTexture2D', args: [FB, COLOR0, TEX_2D, H(2), 0] })
+    deliver({ name: 'framebufferTexture2D', args: [FB, COLOR0 + 1, TEX_2D, H(2), 0] })
+    deliver({ name: 'framebufferRenderbuffer', args: [FB, DEPTH, RB, H(3)] })
+    // Bound on unit 3 as well, while unit 0 is active.
+    deliver({ name: 'activeTexture', args: [TEXTURE0 + 3] })
+    deliver({ name: 'bindTexture', args: [TEX_2D, H(2)] })
+    deliver({ name: 'activeTexture', args: [TEXTURE0] })
+    deliver({ name: 'bindTexture', args: [TEX_2D, H(4)] })
+    deliver({ name: 'bindRenderbuffer', args: [RB, H(3)] })
     deliver(END)
-    expect(host.drain()).toBe(true)
-    calls.length = 0
-    expect(host.drain()).toBe(false)
-    expect(calls).toEqual([])
-
-    // The next frame without deletes is re-runnable again.
+    host.drain()
+    deliver({ name: 'bindFramebuffer', args: [FB, H(1)] })
+    deliver({ name: 'activeTexture', args: [TEXTURE0 + 3] })
+    deliver({ name: 'bindTexture', args: [TEX_2D, H(2)] })
+    deliver({ name: 'activeTexture', args: [TEXTURE0] })
+    deliver({ name: 'bindRenderbuffer', args: [RB, H(3)] })
+    deliver({ name: 'deleteTexture', args: [H(2)] })
+    deliver({ name: 'deleteRenderbuffer', args: [H(3)] })
     deliver({ name: 'drawArrays', args: [4, 0, 3] })
+    deliver(END)
+    calls.length = 0
+    host.drain()
+    expect(calls.slice(5, -1)).toEqual([
+      { name: 'framebufferTexture2D', args: [FB, COLOR0, TEX_2D, null, 0] },
+      { name: 'framebufferTexture2D', args: [FB, COLOR0 + 1, TEX_2D, null, 0] },
+      { name: 'activeTexture', args: [TEXTURE0 + 3] },
+      { name: 'bindTexture', args: [TEX_2D, null] },
+      { name: 'activeTexture', args: [TEXTURE0] },
+      { name: 'framebufferRenderbuffer', args: [FB, DEPTH, RB, null] },
+      { name: 'bindRenderbuffer', args: [RB, null] }
+    ])
+    expect(host.pendingDeletes).toBe(2)
+  })
+
+  it('unbinds a deleted buffer from its generic, indexed and element bindings', () => {
+    const { gl, calls } = makeArgsGl()
+    const { transport, deliver } = makeTransport()
+    const host = makeNetGLHostReceiver({ gl, transport })
+    deliver({ name: 'createBuffer', args: [], returnId: 1 })
+    deliver({ name: 'createBuffer', args: [], returnId: 2 })
+    deliver(END)
+    host.drain()
+    deliver({ name: 'bindBuffer', args: [ARRAY, H(1)] })
+    deliver({ name: 'bindBuffer', args: [ELEMENT, H(1)] })
+    deliver({ name: 'bindBufferBase', args: [UBO, 2, H(1)] })
+    // The generic UNIFORM_BUFFER binding moves on to buffer 2.
+    deliver({ name: 'bindBuffer', args: [UBO, H(2)] })
+    deliver({ name: 'deleteBuffer', args: [H(1)] })
+    deliver(END)
+    calls.length = 0
+    host.drain()
+    expect(calls.slice(4)).toEqual([
+      { name: 'bindBufferBase', args: [UBO, 2, null] },
+      { name: 'bindBuffer', args: [UBO, gl.handles[1]] },
+      { name: 'bindBuffer', args: [ARRAY, null] },
+      { name: 'bindBuffer', args: [ELEMENT, null] }
+    ])
+  })
+
+  it('emits no unbind for a binding made in an earlier drain (the host has used the context since)', () => {
+    const { gl, calls } = makeArgsGl()
+    const { transport, deliver } = makeTransport()
+    const host = makeNetGLHostReceiver({ gl, transport })
+    deliver({ name: 'createFramebuffer', args: [], returnId: 1 })
+    deliver({ name: 'createTexture', args: [], returnId: 2 })
+    deliver({ name: 'bindFramebuffer', args: [FB, H(1)] })
+    deliver({ name: 'framebufferTexture2D', args: [FB, COLOR0, TEX_2D, H(2), 0] })
+    deliver({ name: 'bindTexture', args: [TEX_2D, H(2)] })
+    deliver(END)
+    host.drain()
+    deliver({ name: 'deleteTexture', args: [H(2)] })
+    deliver({ name: 'deleteFramebuffer', args: [H(1)] })
+    deliver(END)
+    calls.length = 0
+    host.drain()
+    expect(calls).toEqual([])
+    expect(host.pendingDeletes).toBe(2)
+  })
+
+  it('holds a batch\'s deletes past all its frames, so the whole batch re-runs', () => {
+    const { gl, calls } = makeArgsGl()
+    const { transport, deliver } = makeTransport()
+    const host = makeNetGLHostReceiver({ gl, transport })
+    deliver({ name: 'createBuffer', args: [], returnId: 1 })
+    deliver({ name: 'bindBuffer', args: [ARRAY, H(1)] })
+    deliver({ name: 'deleteBuffer', args: [H(1)] })
+    deliver(END)
+    deliver({ name: 'createBuffer', args: [], returnId: 2 })
+    deliver({ name: 'bindBuffer', args: [ARRAY, H(2)] })
     deliver(END)
     host.drain()
     calls.length = 0
-    expect(host.drain()).toBe(true)
-    expect(calls).toEqual(['drawArrays'])
+    host.drain()
+    expect(calls).toEqual([
+      { name: 'bindBuffer', args: [ARRAY, gl.handles[0]] },
+      { name: 'bindBuffer', args: [ARRAY, null] },
+      { name: 'bindBuffer', args: [ARRAY, gl.handles[1]] }
+    ])
+    expect(gl.deleted.size).toBe(0)
+  })
+
+  it('never re-runs a frame that reads back or uses a sync object', () => {
+    for (const call of [
+      { name: 'readPixels', args: [0, 0, 1, 1, 0x1908, 0x1401, 0] },
+      { name: 'fenceSync', args: [0x9117, 0], returnId: 9 }
+    ]) {
+      const { gl, calls } = makeArgsGl()
+      const { transport, deliver } = makeTransport()
+      const host = makeNetGLHostReceiver({ gl, transport })
+      deliver({ name: 'drawArrays', args: [4, 0, 3] })
+      deliver(call)
+      deliver(END)
+      expect(host.drain()).toBe(true)
+      calls.length = 0
+      expect(host.canRerun).toBe(false)
+      expect(host.drain()).toBe(false)
+      expect(calls).toEqual([])
+
+      // The next frame without one is re-runnable again.
+      deliver({ name: 'drawArrays', args: [4, 0, 3] })
+      deliver(END)
+      host.drain()
+      calls.length = 0
+      expect(host.drain()).toBe(true)
+      expect(names(calls)).toEqual(['drawArrays'])
+    }
   })
 
   it('reports a replay error once and keeps draining', () => {

@@ -391,10 +391,8 @@ describe('attachNetGLDeckLayer({ reproject }) — the guest frame follows deck\'
     pair.flush() // ready, hello, acks
 
     deck.frame() // view A goes out
-    pair.flush() // the guest's first frame (it deletes its shaders: never re-run)
-    deck.frame() // drains it, and asks for A again
+    pair.flush() // the guest renders A (its first frame, which deletes its shaders)
     const viewA = layer.lastView!
-    pair.flush() // the guest renders A; its frame lands, undrained
     // The camera moves before deck draws again: a pan and a zoom.
     viewport = makeGlobe({ longitude: 9, latitude: 6, zoom: 0.45, pitch: 0, bearing: 0 })
     deck.frame() // drains the frame drawn for A into deck's view B
@@ -423,9 +421,9 @@ describe('attachNetGLDeckLayer({ reproject }) — the guest frame follows deck\'
     expect(isGreen(atB, ax, ay)).toBe(false)
     expect(isGreen(atC, cx, cy)).toBe(true)
     expect(isGreen(atC, ax, ay)).toBe(false)
-    // The guest tagged its frame: view 2 (1 was the warm-up).
-    expect(receiver.drainedViews).toEqual([2])
-    expect(rB?.viewId).toBe(2)
+    // The guest tagged its frame: view 1, A.
+    expect(receiver.drainedViews).toEqual([1])
+    expect(rB?.viewId).toBe(1)
     expect(rB?.correction).not.toBeNull()
     expect(layer.stats.reprojectedFrames).toBe(2)
   })
@@ -434,7 +432,7 @@ describe('attachNetGLDeckLayer({ reproject }) — the guest frame follows deck\'
     const { target, viewB, atB, receiver } = await run(true, true)
     const [bx, by] = projectToPixels(viewB, target)
     expect(isGreen(atB, bx, by)).toBe(true)
-    expect(receiver.drainedViews).toEqual([2])
+    expect(receiver.drainedViews).toEqual([1])
   })
 
   it('control: without reproject the frame stays at the old view\'s pixels', async () => {
@@ -487,9 +485,7 @@ describe('attachNetGLDeckLayer({ reproject }) — a frame drawn at another viewp
     guest.start()
     pair.flush()
     deck.frame()
-    pair.flush() // the first frame (never re-run)
-    deck.frame()
-    pair.flush() // the frame for A, undrained
+    pair.flush() // the guest's frame for A
     // The drawing buffer changes size before deck draws again (and the
     // camera may move too).
     pr = prB
@@ -654,9 +650,7 @@ describe('attachNetGLDeckLayer({ reproject }) — a guest shader that applies ne
     guest.start()
     pair.flush()
     deck.frame()
-    pair.flush() // the first frame (never re-run)
-    deck.frame()
-    pair.flush() // the frame for A, undrained
+    pair.flush() // the guest's frame for A
     // A pan and a zoom in: the line moves and gets longer, its width doesn't.
     viewport = makeGlobe({ longitude: 4, latitude: 2, zoom: 0.55, pitch: 0, bearing: 0 })
     deck.frame() // A's frame, composed at B
@@ -827,9 +821,7 @@ describe('attachNetGLDeckLayer({ reproject }) — pixel sizes follow deck\'s pix
     guest.start()
     pair.flush()
     deck.frame()
-    pair.flush() // the first frame (never re-run)
-    deck.frame()
-    pair.flush() // the frame for A, undrained
+    pair.flush() // the guest's frame for A
     // deck's canvas changes before it draws again: its size, its pixel
     // ratio, or both (and the camera may move too).
     size = b

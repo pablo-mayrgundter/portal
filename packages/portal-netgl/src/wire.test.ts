@@ -160,7 +160,7 @@ describe('wire 2: batches', () => {
     expect(scratch.byteLength).toBe(16)
   })
 
-  it('keeps the re-run rules: a stale frame skips uploads, a frame that deleted is never re-run', async () => {
+  it('keeps the re-run rules: a stale frame skips uploads, a delete waits for the next new frame', async () => {
     const { host, receiver, guest } = setup({ guest: { messageChannel: false } })
     guest.announce(ANCHOR)
     await settle()
@@ -179,9 +179,21 @@ describe('wire 2: batches', () => {
     guest.gl.deleteBuffer(b)
     guest.endFrame()
     await settle()
+    host.calls.length = 0
     expect(receiver.drain()).toBe(true)
-    expect(receiver.canRerun).toBe(false)
-    expect(receiver.drain()).toBe(false)
+    expect(host.names()).toEqual([])
+    expect(receiver.pendingDeletes).toBe(1)
+    expect(receiver.canRerun).toBe(true)
+    expect(receiver.drain()).toBe(true)
+    expect(receiver.pendingDeletes).toBe(1)
+
+    guest.gl.drawArrays(4, 0, 3)
+    guest.endFrame()
+    await settle()
+    host.calls.length = 0
+    expect(receiver.drain()).toBe(true)
+    expect(host.names()).toEqual(['deleteBuffer', 'drawArrays'])
+    expect(receiver.pendingDeletes).toBe(0)
   })
 
   it('fires onFrame per frame-end in a batch (sub-frames)', async () => {

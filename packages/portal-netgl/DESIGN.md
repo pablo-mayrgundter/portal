@@ -396,6 +396,29 @@ into an offscreen target and composite later (celestiary does).
   on whether the host happened to draw before the guest's second frame.
   Transient objects make a frame unrepeatable; the host now skips the
   re-run and shows no guest content for that one host frame.
+- **Deletes wait for the next frame (0.6.9).** Skipping the re-run cost
+  more than one host frame once guests ran on another page: while tiles
+  stream in, Cesium deletes buffers and textures nearly every frame, so a
+  late frame was almost never re-runnable and celestiary's composite went
+  blank (118 of 503 drains headless, RFC 0003). The receiver now holds
+  every delete back until it drains a new frame (`deferred-deletes.ts`),
+  so a re-run finds all its objects, and emits the delete's implicit
+  unbinds at its position as calls: a bound framebuffer, renderbuffer,
+  VAO or transform feedback back to null, a buffer off its generic,
+  indexed and element bindings, a texture or sampler off every unit, and
+  a texture or renderbuffer detached from each attachment point of the
+  bound framebuffers (with the screen-framebuffer mapping, so a draw after
+  deleting the bound FBO lands on the host's target). Recorder ids are
+  never reused, so a held object can't be confused with a new one; a
+  batch's deletes wait past all its frames, so the whole batch re-runs.
+  Bindings are tracked from the replayed calls and forgotten at each
+  drain's start: the host has used the context since, and an unbind for a
+  stale guest binding could land on the host's own framebuffer. A
+  checkpointing guest rebinds at each frame's head. What still refuses a
+  re-run is a frame that reads back (`readPixels`, `getBufferSubData`) or
+  uses a sync object: a second read or fence would answer for a frame the
+  guest never drew. Not emulated: a buffer the current VAO's attribute
+  pointers name, queries.
 
 ## Findings from deck.gl / luma.gl integration
 
@@ -429,9 +452,11 @@ satellites) and `frameworks/luma.ts` (`attachNetGLDeckLayer`).
   clock needs deck's `_animate` or periodic redraws.
 - **A first frame can't be re-run, and a still view asks for none.** A
   three.js guest's first frame deletes its shaders after linking, so the
-  receiver won't re-run it (see the Cesium findings); with the camera
+  receiver wouldn't re-run it (see the Cesium findings); with the camera
   still, no new view went out, and the guest vanished after one frame.
   `receiver.canRerun` now tells the adapter to ask again for the same view.
+  Since 0.6.9 the deletes wait and that frame re-runs; `canRerun` is false
+  only after a frame that read back or used a sync object.
 - **A still view can still need a frame.** Sending views only when they
   change left guest-side changes unseen while the camera and clock were
   still (celestiary's DSN feed arriving, a new anchor subscription). The
@@ -824,7 +849,8 @@ any calls made between frames (async uploads), the frame's calls, its
 frame-end. The receiver hands each item to the same code a lone message
 went to, so every buffering rule above holds unchanged: frames concatenate
 between drains, a stale frame re-runs without uploads or handle-minting
-calls, a frame that deleted anything is never re-run, `onFrame` fires per
+calls, a frame's deletes wait for the next new frame (0.6.9; before, a
+frame that deleted anything was never re-run), `onFrame` fires per
 frame-end (a batch with several sub-frames fires several times).
 
 What changes for the guest is lifetime: a queued call outlives the GL call

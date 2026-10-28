@@ -43,7 +43,7 @@ build and why; the open questions are where the argument is.
 | Host adapter | luma.gl: restore (`pushState` / `popState`) | Cesium (fork): invalidate (`Context.resetState()`) | three.js: invalidate (`resetState()`) |
 | What it stresses | the control plane, time, anchors, trust, the wire's cost | nesting, GPU and memory cost, light and colour, terrain, frames on the Earth | frames that arrive late, re-runs, reprojection of a guest with its own targets |
 | Where it lives | [`0001-globe-orbit-layers.md`](../0001-globe-orbit-layers.md), discussion in [#39](https://github.com/pablo-mayrgundter/portal/issues/39) | [#38](https://github.com/pablo-mayrgundter/portal/issues/38) | [#49](https://github.com/pablo-mayrgundter/portal/issues/49) |
-| Built | portal-netgl 0.5.0 to 0.6.8; celestiary/web #296, #304; netmap #7, #8 | celestiary/web #287, slop-newyork #1, the Cesium fork's external renderers; the library pieces not yet | celestiary/web #309, #310, #317; the two portal steps not yet |
+| Built | portal-netgl 0.5.0 to 0.6.8; celestiary/web #296, #304; netmap #7, #8 | celestiary/web #287, slop-newyork #1, the Cesium fork's external renderers; the library pieces not yet | celestiary/web #309, #310, #317; portal-netgl 0.6.9 (deferred deletes); named targets not yet |
 | Open questions | 22 in the doc, 7 more findings in #39 | 18 | 8 |
 
 ## What they have in common
