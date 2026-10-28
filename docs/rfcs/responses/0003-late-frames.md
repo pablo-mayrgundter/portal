@@ -4,7 +4,7 @@
 |---|---|
 | **RFC** | [#49](https://github.com/pablo-mayrgundter/portal/issues/49) |
 | **Integration** | celestiary drawing Earth's, the Moon's and Mars's Cesium from guest pages on `pablo-mayrgundter.github.io/cesium-portal`, in lockstep: post the view, render the host's scene, wait up to 100 ms for the guest's frame, else re-run the last one |
-| **Built** | celestiary/web #309, #310, #317 (`?cesium=iframe`, the copy fallback), portal-netgl 0.6.3–0.6.8 (reprojection, parts), 0.6.9 (deferred deletes, #54). Named targets (0.6.10) are proposed, not built. |
+| **Built** | celestiary/web #309, #310, #317 (`?cesium=iframe`, the copy fallback), portal-netgl 0.6.3–0.6.8 (reprojection, parts), 0.6.9 (deferred deletes, #54), 0.6.10 (named screen targets, the guest's own view and projection on the frame-end). The Cesium fork's patch and celestiary's steps are next. |
 | **Tracks** | T1 (late frames), with a field for T3 (the view) |
 | **Picture** | [rfc-0003.svg](./img/rfc-0003.svg) |
 
@@ -52,7 +52,7 @@ speaks (T6).
 |---|---|---|
 | §3 | defer every `delete*` to the next drain with a new frame; emit the implicit unbinds at the delete's position; a re-run skips deletes as it skips mints and uploads | **Accept; 0.6.9.** Defer every delete (Q1): simpler, and bounded by one frame's deleted objects. Emulate the detach from the bound framebuffer per attachment (Q2): cheap, and it doesn't depend on reading Cesium's sources. `rerunRefused` stays for a frame with a `readPixels` or a sync object, and the copy fallback with it (Q3). |
 | §4.2 | `reproject.targets: 'named'`; `screenTargets` on the frame-end; quads exempted by declaring the uniform without using it | **Accept; 0.6.10.** Named targets, not a size test: pick, OIT and FXAA buffers are viewport-sized too. The shim reads `scene._view` now and the fork gains a public accessor later (Q4). |
-| §4.3 | `viewProjection` on the frame-end, for a one-frustum frame; no correction with several frusta | **Accept.** It is T3's view, reported back by the guest. Measure how often log depth uses more than one frustum before building per-frustum corrections (Q5); sub-frames are the shape if it's often. |
+| §4.3 | `viewProjection` on the frame-end, for a one-frustum frame; no correction with several frusta | **Accept.** It is T3's view, reported back by the guest (built in 0.6.10 as the pair `viewMatrix`, `projectionMatrix`, which `reprojection()` takes without inverting the product). Measure how often log depth uses more than one frustum before building per-frustum corrections (Q5); sub-frames are the shape if it's often. |
 | §4.4 | the fork's shader builder opts every log-depth vertex shader in, applying the correction before `czm_vertexLogDepth` | **Accept.** Portal changes nothing; the opt-in is 0.6.4's. |
 | §4.5 | uncovered edges: the host's own surface, or overscan | **The host's own surface first** (Q6): host-side only, no fill cost on frames that are already slow. Overscan if the strip is still visible. |
 | §4.6 | correction always on; `cesiumWait` 30 ms | **Accept.** Correction on, since for a frame that is on time it is the identity. Start at 30 ms, then measure 0 (compose the latest, as netmap does) against it (Q7). |

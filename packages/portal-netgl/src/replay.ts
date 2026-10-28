@@ -73,6 +73,16 @@ export type NetGLReplay = ((call: NetGLCall) => void) & {
    * before each draw whose program doesn't hold the value it needs.
    */
   setPixelScale(scale: number | null): void
+  /**
+   * With `reproject` on: the guest's framebuffers that stand for the
+   * screen from here on (recorder handle ids; `NetGLFrameEnd.screenTargets`),
+   * or null for none. Draws into them get the correction as screen draws
+   * do, but not the viewport remap or the pixel and viewport scales: those
+   * targets are their own size, and the guest's copy to the screen is what
+   * the remap scales (RFC 0003 §4.2). Looked up at each draw, so a target
+   * minted later in the frame counts. No GL calls.
+   */
+  setScreenTargets(ids: ReadonlyArray<number> | null): void
   /** With `reproject` on: what the rewrite has done so far. */
   readonly reprojectStats: NetGLReprojectStats
 }
@@ -94,7 +104,7 @@ export type NetGLReprojectStats = {
   skipped: number
   /** Rewritten shaders that failed to compile here and were compiled again from the guest's own source. */
   fallbacks: number
-  /** Screen draws made with a correction other than the identity. */
+  /** Screen draws made with a correction other than the identity (draws into named screen targets included). */
   correctedDraws: number
   /** Screen draws whose program got a pixel or viewport scale other than 1 (the shader has the uniform). */
   scaledDraws: number
@@ -340,11 +350,23 @@ export const makeNetGLReplay = (
     return true
   }
 
+  // The guest's framebuffers that stand for the screen (`setScreenTargets`),
+  // by id: looked up at each draw, so a target the frame itself creates (a
+  // first frame, a resize) counts. Each minted object's id, for that.
+  let screenTargets: Set<number> | null = null
+  const handleIds = new WeakMap<object, number>()
+  const isScreenTarget = (fb: object | null): boolean => {
+    if (!fb || !screenTargets) return false
+    const id = handleIds.get(fb)
+    return id !== undefined && screenTargets.has(id)
+  }
+
   // Before a geometry draw: give the current program the matrix this draw
-  // needs (C for the screen, identity for the guest's own targets), and the
-  // pixel and viewport scales if its shader has them (the frame's for the
-  // screen, 1 for the guest's own targets).
-  const applyReprojection = (toScreen: boolean): void => {
+  // needs (C for the screen and the named screen targets, identity for the
+  // guest's other targets), and the pixel and viewport scales if its
+  // shader has them (the frame's for the screen, 1 for the guest's targets,
+  // named or not).
+  const applyReprojection = (toScreen: boolean, named: boolean): void => {
     const program = currentProgram
     const shader = program ? programVertex.get(program) : undefined
     if (!program || !shader) return
@@ -371,7 +393,7 @@ export const makeNetGLReplay = (
       if (a || b) reprojectStats.scaledDraws += 1
     }
     if (!u.loc) return
-    const version = toScreen && correction ? correctionVersion : 0
+    const version = (toScreen || named) && correction ? correctionVersion : 0
     if (version !== 0) reprojectStats.correctedDraws += 1
     if (u.version === version) return
     receiver.uniformMatrix4fv(u.loc, false, version === 0 ? IDENTITY : correction!)
@@ -616,7 +638,7 @@ export const makeNetGLReplay = (
           else programVertex.delete(program)
         }
       } else if (GEOMETRY_DRAWS.has(call.name)) {
-        applyReprojection(currentDrawFb === null)
+        applyReprojection(currentDrawFb === null, isScreenTarget(currentDrawFb))
       } else if (call.name.startsWith('uniform') && decodedArgs[0] && guestHostLocs.has(decodedArgs[0] as object)) {
         // An opted-in guest sets its own identity and scales of 1 (for
         // hosts that don't reproject); here the host owns the values.
@@ -728,6 +750,7 @@ export const makeNetGLReplay = (
       typeof result === 'object'
     ) {
       idToHandle.set(call.returnId, result)
+      handleIds.set(result, call.returnId)
     }
   }
 
@@ -740,6 +763,13 @@ export const makeNetGLReplay = (
         m && m.from[2] > 0 && m.from[3] > 0 && !sameRect(m.from, m.to)
           ? { from: [m.from[0], m.from[1], m.from[2], m.from[3]], to: [m.to[0], m.to[1], m.to[2], m.to[3]] }
           : null
+    },
+    setScreenTargets(ids: ReadonlyArray<number> | null) {
+      if (!ids || ids.length === 0) {
+        screenTargets = null
+        return
+      }
+      screenTargets = new Set(ids)
     },
     setPixelScale(scale: number | null) {
       pixelScale = scale !== null && Number.isFinite(scale) && scale > 0 ? scale : 1

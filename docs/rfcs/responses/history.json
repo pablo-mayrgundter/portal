@@ -353,6 +353,24 @@
       "prs": [
         54
       ]
+    },
+    {
+      "version": "0.6.10",
+      "ref": "HEAD",
+      "date": "2026-10-28",
+      "label": "Named screen targets",
+      "summary": "A guest that draws into targets of its own names them on its frame-end, with the view and projection it drew with; a host corrects the draws into them (RFC 0003 §4, for Cesium from a guest page).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "prs": []
     }
   ]
 }

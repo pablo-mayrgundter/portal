@@ -408,6 +408,11 @@ export type NetGLRecorderSession = {
    * `NetGLGuestContext.subFrame`.
    */
   deferCheckpoint(): void
+  /**
+   * The id the recorder gave a GL object it minted (a framebuffer, a
+   * texture, ...), as the receiver knows it; null for one it never saw.
+   */
+  idOf(handle: object): number | null
 }
 
 export type NetGLRecorderSessionOptions = {
@@ -741,6 +746,9 @@ export const makeNetGLRecorderSession = (
     },
     deferCheckpoint() {
       checkpointDeferred = true
+    },
+    idOf(handle) {
+      return handleToId.get(handle) ?? null
     }
   }
 }

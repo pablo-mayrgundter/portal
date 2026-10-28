@@ -65,6 +65,24 @@ export type NetGLFrameEnd = {
    * Absent for the main draw.
    */
   part?: string
+  /**
+   * The guest's framebuffers that stand for the screen in this frame
+   * (their recorder handle ids): a guest that draws its scene into targets
+   * of its own and copies them to the screen with full-screen quads names
+   * them here, so a host reprojecting with `targets: 'named'` corrects the
+   * draws into them as it does draws to the screen (RFC 0003 §4.2).
+   */
+  screenTargets?: number[]
+  /**
+   * The view and projection the guest actually drew this frame with
+   * (column-major, world → eye and eye → clip), when it builds its own
+   * from the host's view: Cesium picks its own near and far. A host
+   * corrects the frame from these rather than from the view it sent
+   * (RFC 0003 §4.3). Absent when one projection doesn't describe the frame
+   * (Cesium with several frusta).
+   */
+  viewMatrix?: number[]
+  projectionMatrix?: number[]
 }
 
 /** Union of every stream message kind the NetGL protocol sends on the wire. */

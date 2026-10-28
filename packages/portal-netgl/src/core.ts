@@ -56,6 +56,7 @@ export {
 } from './host-receiver'
 export {
   makeNetGLCesiumGuest,
+  cesiumFrameEnd,
   type NetGLCesiumGuest,
   type NetGLCesiumGuestConfig,
   type CesiumContextOptions,

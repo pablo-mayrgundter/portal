@@ -10,7 +10,10 @@
 //
 // Frame boundaries come from `scene.postRender`. That's the whole shim:
 // no state-cache reset (the checkpoint handles it), no stencil or clear
-// handling (the host's replay `screen` policy handles it).
+// handling (the host's replay `screen` policy handles it). Each frame-end
+// carries what a reprojecting host needs (`cesiumFrameEnd`, RFC 0003 §4):
+// the framebuffers Cesium drew its scene into, which stand for the screen,
+// and the view and projection it drew with, for a one-frustum frame.
 //
 // Adoption, in the embedded Cesium app:
 //
@@ -25,14 +28,65 @@
 // members it touches, so it works with whatever Cesium version the app
 // bundles.
 
-import { makeNetGLGuestContext, type NetGLGuestContext } from '../guest-context'
+import { makeNetGLGuestContext, type NetGLEndFrameOptions, type NetGLGuestContext } from '../guest-context'
 import type { ColorRGB, PortalAnchor } from '../portal-types'
 import type { NetGLTransport } from '../renderer'
 import { windowTransport } from '../window-transport'
 
-/** The slice of `Cesium.Scene` the shim uses. */
+/** A Cesium `Framebuffer`: the WebGL framebuffer it wraps. */
+type CesiumFramebufferLike = { _framebuffer?: object } | undefined
+
+/**
+ * The slice of `Cesium.Scene` the shim uses. All but `postRender` are
+ * optional: without them the frame-end carries no reprojection metadata.
+ */
 export type CesiumSceneLike = {
   postRender: { addEventListener(listener: () => void): () => void }
+  camera?: {
+    viewMatrix: ArrayLike<number>
+    frustum: { clone(): { near: number; far: number; projectionMatrix: ArrayLike<number> } }
+  }
+  frustumCommandsList?: ArrayLike<{ near: number; far: number }>
+  /** Cesium's private view: where its scene framebuffers live. */
+  _view?: {
+    sceneFramebuffer?: { framebuffer?: CesiumFramebufferLike }
+    globeDepth?: { framebuffer?: CesiumFramebufferLike }
+  }
+}
+
+/**
+ * What a Cesium frame's frame-end carries for a reprojecting host, read
+ * after the scene rendered (in `postRender`):
+ *   - `screenTargets`: the framebuffers Cesium drew the scene into before
+ *     copying them to the screen, the globe-depth and scene framebuffers
+ *     (`scene._view`; a public accessor in Cesium would replace the private
+ *     read, RFC 0003 Q4). Not the pick, OIT or FXAA buffers.
+ *   - `viewMatrix`, `projectionMatrix`: the camera's view and the
+ *     projection Cesium drew with, its frustum with the near and far of its
+ *     one frustum. Left out for a frame with several frusta, whose depth
+ *     mapping differs per frustum (RFC 0003 §4.3).
+ * Merge it into the options of `core.endFrame()` in an app that ends its
+ * own frames; `attach()` does it for its own.
+ */
+export const cesiumFrameEnd = (
+  scene: CesiumSceneLike
+): Pick<NetGLEndFrameOptions, 'screenTargets' | 'viewMatrix' | 'projectionMatrix'> => {
+  const out: Pick<NetGLEndFrameOptions, 'screenTargets' | 'viewMatrix' | 'projectionMatrix'> = {}
+  const view = scene._view
+  if (view) {
+    out.screenTargets = [view.globeDepth?.framebuffer?._framebuffer, view.sceneFramebuffer?.framebuffer?._framebuffer].filter(
+      (fb): fb is object => !!fb
+    )
+  }
+  const frusta = scene.frustumCommandsList
+  if (scene.camera && frusta && frusta.length === 1) {
+    const frustum = scene.camera.frustum.clone()
+    frustum.near = frusta[0].near
+    frustum.far = frusta[0].far
+    out.viewMatrix = Array.from(scene.camera.viewMatrix)
+    out.projectionMatrix = Array.from(frustum.projectionMatrix)
+  }
+  return out
 }
 
 /** The slice of Cesium's `ContextOptions` the shim produces. */
@@ -143,7 +197,7 @@ export const makeNetGLCesiumGuest = (config: NetGLCesiumGuestConfig = {}): NetGL
         throw new Error('makeNetGLCesiumGuest: attach() before Cesium created its context — pass guest.contextOptions to the Viewer/Scene first')
       }
       const c = core
-      unsubscribers.push(scene.postRender.addEventListener(() => c.endFrame()))
+      unsubscribers.push(scene.postRender.addEventListener(() => c.endFrame(cesiumFrameEnd(scene))))
       c.announce(config.anchor ?? DEFAULT_ANCHOR, config.background)
     },
     stop() {

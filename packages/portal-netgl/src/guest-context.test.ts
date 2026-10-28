@@ -44,6 +44,28 @@ describe('makeNetGLGuestContext announce()', () => {
 })
 
 describe('makeNetGLGuestContext frame-ends', () => {
+  it('carry the screen targets by recorder id, and the view and projection together', () => {
+    const { transport, posted } = makeTransport()
+    const canvas = { getContext: () => ({ createFramebuffer: () => ({}) }) } as unknown as HTMLCanvasElement
+    const guest = makeNetGLGuestContext({ canvas, transport, checkpoints: false })
+    const a = guest.gl.createFramebuffer()!
+    const b = guest.gl.createFramebuffer()!
+    expect([guest.idOf(a), guest.idOf(b), guest.idOf({})]).toEqual([1, 2, null])
+    const V = Array.from({ length: 16 }, (_, i) => i)
+    const P = Array.from({ length: 16 }, (_, i) => 16 - i)
+    // Unknown and missing targets are left out, duplicates once.
+    guest.endFrame({ viewId: 2, screenTargets: [b, {}, undefined, a, b], viewMatrix: Float64Array.from(V), projectionMatrix: P })
+    // One matrix without the other, or a malformed one: neither.
+    guest.endFrame({ viewMatrix: V })
+    guest.subFrame({ screenTargets: [], viewMatrix: V, projectionMatrix: [1, 2, 3] })
+    const ends = posted.filter((m) => (m as { type?: string }).type === 'netgl:frame-end')
+    expect(ends).toEqual([
+      { type: 'netgl:frame-end', viewId: 2, screenTargets: [2, 1], viewMatrix: V, projectionMatrix: P },
+      { type: 'netgl:frame-end' },
+      { type: 'netgl:frame-end', screenTargets: [] }
+    ])
+  })
+
   it('carry the view and the part they were drawn for', () => {
     const { transport, posted } = makeTransport()
     const guest = makeNetGLGuestContext({ canvas: fakeCanvas, transport, checkpoints: false })
