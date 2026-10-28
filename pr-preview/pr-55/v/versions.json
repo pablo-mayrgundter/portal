@@ -1,0 +1,286 @@
+{
+  "latest": "0.6.10",
+  "versions": [
+    "0.6.10",
+    "0.6.9",
+    "0.6.8",
+    "0.6.7",
+    "0.6.6",
+    "0.6.5",
+    "0.6.4",
+    "0.6.3",
+    "0.6.2",
+    "0.6.1",
+    "0.6.0",
+    "0.5.0",
+    "0.4.0",
+    "0.3.0",
+    "0.2.0",
+    "0.1.0",
+    "0.0.0-frame-rpc"
+  ],
+  "meta": {
+    "0.6.10": {
+      "date": "2026-10-28",
+      "label": "Named screen targets",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "reconstructed": false
+    },
+    "0.6.9": {
+      "date": "2026-10-28",
+      "label": "Deferred deletes",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "reconstructed": false
+    },
+    "0.6.8": {
+      "date": "2026-10-27",
+      "label": "Parts",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "reconstructed": false,
+      "layout": "demo-root"
+    },
+    "0.6.7": {
+      "date": "2026-10-27",
+      "label": "Pixel sizes",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.6": {
+      "date": "2026-10-26",
+      "label": "Cesium shim passthrough",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.5": {
+      "date": "2026-10-26",
+      "label": "Viewport map",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.4": {
+      "date": "2026-10-24",
+      "label": "Opt-in shaders",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.3": {
+      "date": "2026-10-24",
+      "label": "Host reprojection",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.2": {
+      "date": "2026-10-24",
+      "label": "No-draw shadow",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.1": {
+      "date": "2026-10-24",
+      "label": "Redraw folding",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.6.0": {
+      "date": "2026-10-24",
+      "label": "Wire 2",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.5.0": {
+      "date": "2026-10-23",
+      "label": "Overlay, the view, cross-origin",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.4.0": {
+      "date": "2026-10-23",
+      "label": "Inside the host's pass",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.3.0": {
+      "date": "2026-10-22",
+      "label": "Tracked state",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.2.0": {
+      "date": "2026-09-29",
+      "label": "Checkpoint, screen policy, Cesium",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.1.0": {
+      "date": "2026-07-09",
+      "label": "The command stream",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    },
+    "0.0.0-frame-rpc": {
+      "date": "2026-04-30",
+      "label": "Frame-RPC portals, before NetGL",
+      "demos": [
+        "three",
+        "iframe",
+        "worker"
+      ],
+      "docs": false,
+      "reconstructed": true,
+      "layout": "demo-root"
+    }
+  },
+  "updated": "2026-10-28T20:17:37.145Z"
+}
