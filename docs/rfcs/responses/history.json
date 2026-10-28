@@ -313,7 +313,7 @@
     },
     {
       "version": "0.6.8",
-      "ref": "42e507c",
+      "ref": "a7e912f",
       "date": "2026-10-27",
       "label": "Parts",
       "summary": "Several draws for one view, each to its own target: part on the frame-end and beforeFrame on the receiver (celestiary's night lights from a guest page). The RFC responses and this site.",
@@ -329,7 +329,8 @@
       "docs": true,
       "prs": [
         48,
-        50
+        50,
+        51
       ],
       "layout": "demo-root"
     }

@@ -104,7 +104,12 @@ were tried and dropped.
   (`.github/workflows/snapshot.yml`, run from the Actions tab with the
   version); its commit, date and demos come from
   `docs/rfcs/responses/history.json`, which also feeds the pulldowns'
-  labels and the Evolution page's timeline. A new release gets a row there,
+  labels and the Evolution page's timeline. A version's `ref` is the last
+  commit of the site at that version, not the commit that bumped it: a
+  rebuild from the bump's commit leaves out what the version's later PRs
+  added (0.6.8 rebuilt from its bump had no docs site, since that came in
+  a later PR at the same version), and `docs: true` then points the
+  pulldown at a `rfcs/` that isn't there. A new release gets a row there,
   and a `## <version>: ...` section in CHANGELOG.md: the site renders that
   section as `versions/<version>.html` at the site root, the page the docs' pulldown
   shows for a version that predates the responses (they start at 0.6.8).
@@ -114,6 +119,14 @@ were tried and dropped.
   `gh workflow run` fails, since it looks the default branch up over
   GraphQL, which the session's proxy refuses. `gh run list` and `gh run
   view` work for watching it.
+- **The main deploy must never ship a `v/` directory.** The deploy action
+  turns `clean-exclude` entries into rsync `P` (protect) filters, which
+  shield `v` only while the deployed tree has no `v/` of its own; with one,
+  rsync descends into it and `--delete` removes every snapshot (it happened
+  once; the snapshots came back from the *Snapshot a version* workflow,
+  dispatched with the JSON array of all versions). `pages.yml` removes
+  `dist/v` (the preview's versions list) before deploying and also protects
+  `v/**`. The same holds for anything else that must survive a deploy.
 - **Static servers and rebuilds.** A build that deletes and recreates
   its output directory leaves a server started inside it serving
   nothing. Restart the server after rebuilding.
