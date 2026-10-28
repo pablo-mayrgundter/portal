@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="890" viewBox="0 0 1200 890" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<defs><marker id="arr-8a8984" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8a8984"/></marker><marker id="arr-eb6834" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#eb6834"/></marker><marker id="arr-2a78d6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2a78d6"/></marker></defs>
+<rect width="1200" height="890" fill="#fcfcfb"/>
+<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">Portal / NetGL: link independent 3D web renderers at the GL layer</text>
+<text x="40" y="78" font-size="15" fill="#52514e">Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.</text>
+<rect x="40" y="100" width="340" height="300" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="100" width="340" height="4" rx="2" fill="#52514e"/>
+<text x="58" y="132" font-size="16" fill="#0b0b0b" font-weight="700">The problem</text>
+<text x="58" y="156" font-size="13" fill="#52514e">3D on the web is split across engines that</text>
+<text x="58" y="173.55" font-size="13" fill="#52514e">don't compose. Each owns its scene graph,</text>
+<text x="58" y="191.10000000000002" font-size="13" fill="#52514e">camera, frame loop and GL state.</text>
+<rect x="58" y="206" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="106" y="224" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">three.js</text>
+<rect x="162" y="206" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="210" y="224" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">CesiumJS</text>
+<rect x="266" y="206" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="314" y="224" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">deck.gl</text>
+<rect x="58" y="242" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="106" y="260" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">Babylon.js</text>
+<rect x="162" y="242" width="96" height="28" rx="14" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="210" y="260" font-size="12" fill="#0b0b0b" font-weight="700" text-anchor="middle">WebGPU / splats</text>
+<text x="58" y="296" font-size="13" fill="#0b0b0b">Scene graphs are the wrong layer to</text>
+<text x="58" y="313.55" font-size="13" fill="#0b0b0b">standardise. One layer down, every engine</text>
+<text x="58" y="331.1" font-size="13" fill="#0b0b0b">emits WebGL2 draws.</text>
+<text x="58" y="356.65000000000003" font-size="13" fill="#0b0b0b" font-weight="700">NetGL links GL contexts: full fidelity,</text>
+<text x="58" y="374.20000000000005" font-size="13" fill="#0b0b0b" font-weight="700">no bitmap round-trip, occlusion both</text>
+<text x="58" y="391.75000000000006" font-size="13" fill="#0b0b0b" font-weight="700">ways.</text>
+<rect x="410" y="100" width="750" height="300" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="410" y="100" width="750" height="4" rx="2" fill="#2a78d6"/>
+<text x="428" y="132" font-size="16" fill="#0b0b0b" font-weight="700">How NetGL works</text>
+<rect x="428" y="166" width="118" height="98" rx="8" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="440" y="186" font-size="13.5" fill="#eb6834" font-weight="700">Guest renderer</text>
+<text x="440" y="204" font-size="12.5" fill="#52514e">three.js,</text>
+<text x="440" y="220.25" font-size="12.5" fill="#52514e">Cesium,</text>
+<text x="440" y="236.5" font-size="12.5" fill="#52514e">deck.gl,</text>
+<text x="440" y="252.75" font-size="12.5" fill="#52514e">unmodified</text>
+<rect x="570" y="166" width="140" height="98" rx="8" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="582" y="186" font-size="13.5" fill="#eb6834" font-weight="700">Recorder (Proxy)</text>
+<text x="582" y="204" font-size="12.5" fill="#52514e">intercepts WebGL2</text>
+<text x="582" y="220.25" font-size="12.5" fill="#52514e">calls, interns</text>
+<text x="582" y="236.5" font-size="12.5" fill="#52514e">handles, slices</text>
+<text x="582" y="252.75" font-size="12.5" fill="#52514e">uploads</text>
+<rect x="734" y="166" width="124" height="98" rx="8" fill="#f1f0ec" stroke="#9c9b96" stroke-width="1"/>
+<text x="746" y="186" font-size="13.5" fill="#0b0b0b" font-weight="700">Transport</text>
+<text x="746" y="204" font-size="12.5" fill="#52514e">same page</text>
+<text x="746" y="220.25" font-size="12.5" fill="#52514e">(sync),</text>
+<text x="746" y="236.5" font-size="12.5" fill="#52514e">postMessage +</text>
+<text x="746" y="252.75" font-size="12.5" fill="#52514e">port, worker</text>
+<rect x="882" y="166" width="118" height="98" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="894" y="186" font-size="13.5" fill="#2a78d6" font-weight="700">Replay</text>
+<text x="894" y="204" font-size="12.5" fill="#52514e">into the</text>
+<text x="894" y="220.25" font-size="12.5" fill="#52514e">host's WebGL2</text>
+<text x="894" y="236.5" font-size="12.5" fill="#52514e">context,</text>
+<text x="894" y="252.75" font-size="12.5" fill="#52514e">checkpointed</text>
+<rect x="1024" y="166" width="118" height="98" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1036" y="186" font-size="13.5" fill="#2a78d6" font-weight="700">Screen policy</text>
+<text x="1036" y="204" font-size="12.5" fill="#52514e">stencil,</text>
+<text x="1036" y="220.25" font-size="12.5" fill="#52514e">clears, blend,</text>
+<text x="1036" y="236.5" font-size="12.5" fill="#52514e">viewport,</text>
+<text x="1036" y="252.75" font-size="12.5" fill="#52514e">target</text>
+<line x1="548" y1="215" x2="568" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<line x1="712" y1="215" x2="732" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<line x1="860" y1="215" x2="880" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<line x1="1002" y1="215" x2="1022" y2="215" stroke="#8a8984" stroke-width="2" marker-end="url(#arr-8a8984)"/>
+<rect x="570" y="286" width="140" height="46" rx="8" fill="#ffffff" stroke="#eb6834" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="640" y="305" font-size="12" fill="#eb6834" font-weight="700" text-anchor="middle">shadow GL context</text>
+<text x="640" y="321" font-size="11" fill="#52514e" text-anchor="middle">sync answers; no draws needed</text>
+<line x1="640" y1="266" x2="640" y2="284" stroke="#eb6834" stroke-width="1.5" marker-end="url(#arr-eb6834)"/>
+<rect x="882" y="286" width="260" height="46" rx="8" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1012" y="305" font-size="12" fill="#2a78d6" font-weight="700" text-anchor="middle">the host's canvas, one GPU</text>
+<text x="1012" y="321" font-size="11" fill="#52514e" text-anchor="middle">host depth and stencil bound the guest</text>
+<line x1="1083" y1="266" x2="1083" y2="284" stroke="#2a78d6" stroke-width="1.5" marker-end="url(#arr-2a78d6)"/>
+<text x="428" y="356" font-size="12" fill="#52514e">A guest frame is ~100–500 calls. The state checkpoint restores the guest's GL state at each frame boundary; the</text>
+<text x="428" y="372.2" font-size="12" fill="#52514e">host's framework restores or invalidates its own cache after the replay.</text>
+<rect x="40" y="430" width="560" height="230" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="430" width="560" height="4" rx="2" fill="#52514e"/>
+<text x="58" y="462" font-size="16" fill="#0b0b0b" font-weight="700">Three ways to compose</text>
+<rect x="58" y="486" width="70" height="50" rx="4" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<rect x="80" y="496" width="26" height="40" rx="2" fill="#fdeae2" stroke="#eb6834" stroke-width="1"/>
+<text x="58" y="562" font-size="14" fill="#0b0b0b" font-weight="700">Door</text>
+<text x="58" y="582" font-size="12" fill="#52514e">a stencilled quad; the</text>
+<text x="58" y="598.2" font-size="12" fill="#52514e">host camera carried</text>
+<text x="58" y="614.4000000000001" font-size="12" fill="#52514e">through it; real parallax</text>
+<rect x="236" y="486" width="70" height="50" rx="4" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<circle cx="271" cy="511" r="17" fill="#fdeae2" stroke="#eb6834"/>
+<circle cx="294" cy="500" r="6" fill="#e3eefb" stroke="#2a78d6"/>
+<text x="236" y="562" font-size="14" fill="#0b0b0b" font-weight="700">In place</text>
+<text x="236" y="582" font-size="12" fill="#52514e">a shape (ellipsoid, mesh)</text>
+<text x="236" y="598.2" font-size="12" fill="#52514e">stencils where the</text>
+<text x="236" y="614.4000000000001" font-size="12" fill="#52514e">guest's pixels belong;</text>
+<text x="236" y="630.6000000000001" font-size="12" fill="#52514e">depth-tested against the</text>
+<text x="236" y="646.8000000000002" font-size="12" fill="#52514e">host</text>
+<rect x="414" y="486" width="70" height="50" rx="4" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<circle cx="449" cy="516" r="16" fill="#e3eefb" stroke="#2a78d6"/>
+<circle cx="422" cy="498" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="434" cy="494" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="464" cy="500" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="474" cy="516" r="3" fill="#eb6834" stroke="none"/>
+<circle cx="428" cy="526" r="3" fill="#eb6834" stroke="none"/>
+<text x="414" y="562" font-size="14" fill="#0b0b0b" font-weight="700">Overlay</text>
+<text x="414" y="582" font-size="12" fill="#52514e">no shape: the host's</text>
+<text x="414" y="598.2" font-size="12" fill="#52514e">exact clip space, tested</text>
+<text x="414" y="614.4000000000001" font-size="12" fill="#52514e">against the host's depth;</text>
+<text x="414" y="630.6000000000001" font-size="12" fill="#52514e">corrected if late</text>
+<rect x="630" y="430" width="530" height="230" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="630" y="430" width="530" height="4" rx="2" fill="#1baf7a"/>
+<text x="648" y="462" font-size="16" fill="#0b0b0b" font-weight="700">Where it stands</text>
+<circle cx="655" cy="482" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="668" y="486" font-size="13" fill="#0b0b0b" font-weight="700">Works</text>
+<text x="668" y="503.55" font-size="12" fill="#52514e">WebGL2 guests: three.js, Cesium</text>
+<text x="668" y="519.75" font-size="12" fill="#52514e">unmodified. Hosts: three.js,</text>
+<text x="668" y="535.95" font-size="12" fill="#52514e">deck.gl / luma.gl. Same-page,</text>
+<text x="668" y="552.1500000000001" font-size="12" fill="#52514e">iframe and cross-origin transports;</text>
+<text x="668" y="568.3500000000001" font-size="12" fill="#52514e">one batch per frame; host</text>
+<text x="668" y="584.5500000000002" font-size="12" fill="#52514e">reprojection; parts.</text>
+<circle cx="655" cy="606.7500000000002" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="668" y="610.7500000000002" font-size="13" fill="#0b0b0b" font-weight="700">In production</text>
+<text x="668" y="628.3000000000002" font-size="12" fill="#52514e">celestiary draws Cesium's Earth,</text>
+<text x="668" y="644.5000000000002" font-size="12" fill="#52514e">Moon and Mars in place of its own.</text>
+<circle cx="915" cy="482" r="5.5" fill="#6250d6" stroke="none"/>
+<text x="928" y="486" font-size="13" fill="#0b0b0b" font-weight="700">Not yet</text>
+<text x="928" y="503.55" font-size="12" fill="#52514e">Untrusted guests (no sandbox).</text>
+<text x="928" y="519.75" font-size="12" fill="#52514e">WebRTC. Non-affine host views.</text>
+<text x="928" y="535.95" font-size="12" fill="#52514e">Resource lifecycle. Extension</text>
+<text x="928" y="552.1500000000001" font-size="12" fill="#52514e">objects. WebGPU.</text>
+<circle cx="915" cy="574.3500000000001" r="5.5" fill="#eda100" stroke="none"/>
+<text x="928" y="578.3500000000001" font-size="13" fill="#0b0b0b" font-weight="700">Status</text>
+<text x="928" y="595.9000000000001" font-size="12" fill="#52514e">Early prototype, pre-1.0. Pin exact</text>
+<text x="928" y="612.1000000000001" font-size="12" fill="#52514e">versions. Looking for testers, RFCs</text>
+<text x="928" y="628.3000000000002" font-size="12" fill="#52514e">and adopters.</text>
+<rect x="40" y="690" width="1120" height="170" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="690" width="1120" height="4" rx="2" fill="#6250d6"/>
+<text x="58" y="722" font-size="16" fill="#0b0b0b" font-weight="700">Three RFCs, from three real integrations, and the maintainers' responses</text>
+<a href="rfcs/0001-globe-orbit-layers.html">
+<text x="58" y="750" font-size="14" fill="#6250d6" font-weight="700">RFC 0001 · Globe + orbit layers</text>
+</a>
+<text x="58" y="770" font-size="12" fill="#52514e">netmap (deck.gl globe) hosts celestiary's orbits from</text>
+<text x="58" y="786.2" font-size="12" fill="#52514e">another origin. Overlay kind, shared depth, the view,</text>
+<text x="58" y="802.4000000000001" font-size="12" fill="#52514e">time, anchors, trust.</text>
+<text x="58" y="824.6000000000001" font-size="11.5" fill="#8a8984" font-weight="700">built 0.5–0.6.8 · 29 questions</text>
+<a href="rfcs/0002-nested-in-place-guests.html">
+<text x="430" y="750" font-size="14" fill="#6250d6" font-weight="700">RFC 0002 · Nested in-place guests</text>
+</a>
+<text x="430" y="770" font-size="12" fill="#52514e">celestiary → Cesium → Slop New York on one page. Flat</text>
+<text x="430" y="786.2" font-size="12" fill="#52514e">chains, in-frame contract, light, ground, the enu</text>
+<text x="430" y="802.4000000000001" font-size="12" fill="#52514e">frame, lean, staging.</text>
+<text x="430" y="824.6000000000001" font-size="11.5" fill="#8a8984" font-weight="700">shipped composed · library pieces for 0.7</text>
+<a href="rfcs/0003-late-frames.html">
+<text x="802" y="750" font-size="14" fill="#6250d6" font-weight="700">RFC 0003 · Late frames</text>
+</a>
+<text x="802" y="770" font-size="12" fill="#52514e">celestiary's Cesium from a guest page. Deferred</text>
+<text x="802" y="786.2" font-size="12" fill="#52514e">deletes, reprojecting a guest's own targets, its</text>
+<text x="802" y="802.4000000000001" font-size="12" fill="#52514e">projection on the frame-end.</text>
+<text x="802" y="824.6000000000001" font-size="11.5" fill="#8a8984" font-weight="700">built 0.6.9 · 0.6.10 proposed</text>
+<a href="rfcs/index.html">
+<text x="1142" y="750" font-size="13" fill="#6250d6" font-weight="700" text-anchor="end">the responses →</text>
+</a>
+<text x="40" y="872" font-size="11" fill="#8a8984">docs/rfcs/responses · the README, DESIGN.md and portal-layers.md have the detail · github.com/pablo-mayrgundter/portal</text>
+</svg>

@@ -1,0 +1,196 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="1132" viewBox="0 0 1260 1132" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<defs></defs>
+<rect width="1260" height="1132" fill="#fcfcfb"/>
+<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">How NetGL got here: the releases up to 0.6.9</text>
+<text x="40" y="78" font-size="15" fill="#52514e">Read down a column: each release moved one or two of six axes, and the axes are the protocol. Every version is a snapshot of the site, demos included.</text>
+<rect x="1106" y="30" width="114" height="28" rx="14" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1163" y="49" font-size="13" fill="#2a78d6" font-weight="700" text-anchor="middle">Apr–Oct 2026</text>
+<rect x="244" y="104" width="132" height="36" rx="8" fill="#eb6834" opacity="0.12"/>
+<text x="250" y="120" font-size="11.5" fill="#eb6834" font-weight="700">What crosses the</text>
+<text x="250" y="133.8" font-size="11.5" fill="#eb6834" font-weight="700">wire</text>
+<rect x="384" y="104" width="132" height="36" rx="8" fill="#6250d6" opacity="0.12"/>
+<text x="390" y="120" font-size="11.5" fill="#6250d6" font-weight="700">Whose state the</text>
+<text x="390" y="133.8" font-size="11.5" fill="#6250d6" font-weight="700">guest's is</text>
+<rect x="524" y="104" width="132" height="36" rx="8" fill="#2a78d6" opacity="0.12"/>
+<text x="530" y="120" font-size="11.5" fill="#2a78d6" font-weight="700">What the host may</text>
+<text x="530" y="133.8" font-size="11.5" fill="#2a78d6" font-weight="700">override</text>
+<rect x="664" y="104" width="132" height="36" rx="8" fill="#1baf7a" opacity="0.12"/>
+<text x="670" y="120" font-size="11.5" fill="#1baf7a" font-weight="700">How two scenes</text>
+<text x="670" y="133.8" font-size="11.5" fill="#1baf7a" font-weight="700">compose</text>
+<rect x="804" y="104" width="132" height="36" rx="8" fill="#e34948" opacity="0.12"/>
+<text x="810" y="120" font-size="11.5" fill="#e34948" font-weight="700">When a frame is</text>
+<text x="810" y="133.8" font-size="11.5" fill="#e34948" font-weight="700">late</text>
+<rect x="944" y="104" width="132" height="36" rx="8" fill="#eda100" opacity="0.12"/>
+<text x="950" y="120" font-size="11.5" fill="#eda100" font-weight="700">Who is talking</text>
+<text x="1090" y="128" font-size="11.5" fill="#52514e" font-weight="700">Demos</text>
+<rect x="40" y="150" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="202" x2="1220" y2="202" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="169" font-size="12" fill="#0b0b0b" font-weight="700">before NetGL  ·  2026-04-30</text>
+<text x="48" y="185" font-size="10.5" fill="#52514e">Frame-RPC portals, before NetGL</text>
+<circle cx="250" cy="166" r="4" fill="#eb6834" stroke="none"/>
+<text x="259" y="170" font-size="10.5" fill="#0b0b0b">colour +</text>
+<text x="259" y="182.6" font-size="10.5" fill="#0b0b0b">packed-depth bitmaps</text>
+<circle cx="390" cy="166" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="170" font-size="10.5" fill="#0b0b0b">the endpoint's own</text>
+<text x="399" y="182.6" font-size="10.5" fill="#0b0b0b">context</text>
+<circle cx="530" cy="166" r="4" fill="#2a78d6" stroke="none"/>
+<text x="539" y="170" font-size="10.5" fill="#0b0b0b">stencil + oblique</text>
+<text x="539" y="182.6" font-size="10.5" fill="#0b0b0b">clip, by hand</text>
+<circle cx="670" cy="166" r="4" fill="#1baf7a" stroke="none"/>
+<text x="679" y="170" font-size="10.5" fill="#0b0b0b">a door</text>
+<circle cx="950" cy="166" r="4" fill="#eda100" stroke="none"/>
+<text x="959" y="170" font-size="10.5" fill="#0b0b0b">same origin</text>
+<text x="1090" y="170" font-size="10.5" fill="#52514e" font-weight="700">Local, iframe, Worker</text>
+<rect x="40" y="202" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="254" x2="1220" y2="254" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="221" font-size="12" fill="#0b0b0b" font-weight="700">v0.1.0  ·  2026-07-09</text>
+<text x="48" y="237" font-size="10.5" fill="#52514e">The command stream</text>
+<circle cx="250" cy="218" r="4" fill="#eb6834" stroke="none"/>
+<text x="259" y="222" font-size="10.5" fill="#0b0b0b">GL calls, one</text>
+<text x="259" y="234.6" font-size="10.5" fill="#0b0b0b">message each</text>
+<circle cx="390" cy="218" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="222" font-size="10.5" fill="#0b0b0b">a shadow context</text>
+<text x="399" y="234.6" font-size="10.5" fill="#0b0b0b">answers sync</text>
+<circle cx="530" cy="218" r="4" fill="#2a78d6" stroke="none"/>
+<text x="539" y="222" font-size="10.5" fill="#0b0b0b">door-fit viewport</text>
+<text x="539" y="234.6" font-size="10.5" fill="#0b0b0b">remap</text>
+<circle cx="670" cy="218" r="4" fill="#1baf7a" stroke="none"/>
+<text x="679" y="222" font-size="10.5" fill="#0b0b0b">a door; a real app</text>
+<text x="679" y="234.6" font-size="10.5" fill="#0b0b0b">through it</text>
+<circle cx="810" cy="218" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="222" font-size="10.5" fill="#0b0b0b">batches</text>
+<text x="819" y="234.6" font-size="10.5" fill="#0b0b0b">concatenated; stale</text>
+<text x="819" y="247.2" font-size="10.5" fill="#0b0b0b">re-run</text>
+<circle cx="950" cy="218" r="4" fill="#eda100" stroke="none"/>
+<text x="959" y="222" font-size="10.5" fill="#0b0b0b">netgl:ready</text>
+<text x="1090" y="222" font-size="10.5" fill="#52514e" font-weight="700">+ NetGL, celestiary</text>
+<rect x="40" y="254" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="306" x2="1220" y2="306" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="273" font-size="12" fill="#0b0b0b" font-weight="700">v0.2.0  ·  2026-09-29</text>
+<text x="48" y="289" font-size="10.5" fill="#52514e">Checkpoint, screen policy, Cesium</text>
+<circle cx="390" cy="270" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="274" font-size="10.5" fill="#0b0b0b">the checkpoint, per</text>
+<text x="399" y="286.6" font-size="10.5" fill="#0b0b0b">frame</text>
+<circle cx="530" cy="270" r="4" fill="#2a78d6" stroke="none"/>
+<text x="539" y="274" font-size="10.5" fill="#0b0b0b">screen policy:</text>
+<text x="539" y="286.6" font-size="10.5" fill="#0b0b0b">stencil, clears,</text>
+<text x="539" y="299.20000000000005" font-size="10.5" fill="#0b0b0b">blend, target</text>
+<circle cx="670" cy="270" r="4" fill="#1baf7a" stroke="none"/>
+<text x="679" y="274" font-size="10.5" fill="#0b0b0b">in place: Cesium's</text>
+<text x="679" y="286.6" font-size="10.5" fill="#0b0b0b">Earth</text>
+<circle cx="810" cy="270" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="274" font-size="10.5" fill="#0b0b0b">a deleting frame</text>
+<text x="819" y="286.6" font-size="10.5" fill="#0b0b0b">never re-run</text>
+<circle cx="950" cy="270" r="4" fill="#eda100" stroke="none"/>
+<text x="959" y="274" font-size="10.5" fill="#0b0b0b">same-page link;</text>
+<text x="959" y="286.6" font-size="10.5" fill="#0b0b0b">ready until acked</text>
+<text x="1090" y="274" font-size="10.5" fill="#52514e" font-weight="700">+ Cesium</text>
+<rect x="40" y="306" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="358" x2="1220" y2="358" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="325" font-size="12" fill="#0b0b0b" font-weight="700">v0.3.0  ·  2026-10-22</text>
+<text x="48" y="341" font-size="10.5" fill="#52514e">Tracked state</text>
+<circle cx="390" cy="322" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="326" font-size="10.5" fill="#0b0b0b">tracked: no queries</text>
+<rect x="40" y="358" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="410" x2="1220" y2="410" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="377" font-size="12" fill="#0b0b0b" font-weight="700">v0.4.0  ·  2026-10-23</text>
+<text x="48" y="393" font-size="10.5" fill="#52514e">Inside the host's pass</text>
+<circle cx="390" cy="374" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="378" font-size="10.5" fill="#0b0b0b">deferred across</text>
+<text x="399" y="390.6" font-size="10.5" fill="#0b0b0b">sub-frames</text>
+<circle cx="530" cy="374" r="4" fill="#2a78d6" stroke="none"/>
+<text x="539" y="378" font-size="10.5" fill="#0b0b0b">clear: none</text>
+<circle cx="670" cy="374" r="4" fill="#1baf7a" stroke="none"/>
+<text x="679" y="378" font-size="10.5" fill="#0b0b0b">inside the host's</text>
+<text x="679" y="390.6" font-size="10.5" fill="#0b0b0b">pass, per frustum</text>
+<rect x="40" y="410" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="462" x2="1220" y2="462" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="429" font-size="12" fill="#0b0b0b" font-weight="700">v0.5.0  ·  2026-10-23</text>
+<text x="48" y="445" font-size="10.5" fill="#52514e">Overlay, the view, cross-origin</text>
+<circle cx="670" cy="426" r="4" fill="#1baf7a" stroke="none"/>
+<text x="679" y="430" font-size="10.5" fill="#0b0b0b">overlay in the</text>
+<text x="679" y="442.6" font-size="10.5" fill="#0b0b0b">host's clip space</text>
+<circle cx="810" cy="426" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="430" font-size="10.5" fill="#0b0b0b">one view in flight;</text>
+<text x="819" y="442.6" font-size="10.5" fill="#0b0b0b">canRerun</text>
+<circle cx="950" cy="426" r="4" fill="#eda100" stroke="none"/>
+<text x="959" y="430" font-size="10.5" fill="#0b0b0b">layer:view,</text>
+<text x="959" y="442.6" font-size="10.5" fill="#0b0b0b">hello-ack; origins</text>
+<text x="959" y="455.20000000000005" font-size="10.5" fill="#0b0b0b">pinned</text>
+<text x="1090" y="430" font-size="10.5" fill="#52514e" font-weight="700">+ deck.gl</text>
+<rect x="40" y="462" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="514" x2="1220" y2="514" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="481" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.0  ·  2026-10-24</text>
+<text x="48" y="497" font-size="10.5" fill="#52514e">Wire 2</text>
+<circle cx="250" cy="478" r="4" fill="#eb6834" stroke="none"/>
+<text x="259" y="482" font-size="10.5" fill="#0b0b0b">one batch per frame;</text>
+<text x="259" y="494.6" font-size="10.5" fill="#0b0b0b">sliced; transferred</text>
+<circle cx="950" cy="478" r="4" fill="#eda100" stroke="none"/>
+<text x="959" y="482" font-size="10.5" fill="#0b0b0b">the port, negotiated</text>
+<rect x="40" y="514" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="566" x2="1220" y2="566" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="533" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.1  ·  2026-10-24</text>
+<text x="48" y="549" font-size="10.5" fill="#52514e">Redraw folding</text>
+<circle cx="810" cy="530" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="534" font-size="10.5" fill="#0b0b0b">redraw folding</text>
+<rect x="40" y="566" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="618" x2="1220" y2="618" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="585" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.2  ·  2026-10-24</text>
+<text x="48" y="601" font-size="10.5" fill="#52514e">No-draw shadow</text>
+<circle cx="390" cy="582" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="586" font-size="10.5" fill="#0b0b0b">the shadow stops</text>
+<text x="399" y="598.6" font-size="10.5" fill="#0b0b0b">drawing</text>
+<rect x="40" y="618" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="670" x2="1220" y2="670" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="637" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.3  ·  2026-10-24</text>
+<text x="48" y="653" font-size="10.5" fill="#52514e">Host reprojection</text>
+<circle cx="810" cy="634" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="638" font-size="10.5" fill="#0b0b0b">reprojection; viewId</text>
+<text x="819" y="650.6" font-size="10.5" fill="#0b0b0b">on frame-end</text>
+<rect x="40" y="670" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="722" x2="1220" y2="722" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="689" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.4  ·  2026-10-24</text>
+<text x="48" y="705" font-size="10.5" fill="#52514e">Opt-in shaders</text>
+<circle cx="810" cy="686" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="690" font-size="10.5" fill="#0b0b0b">shaders opt in</text>
+<rect x="40" y="722" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="774" x2="1220" y2="774" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="741" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.5  ·  2026-10-26</text>
+<text x="48" y="757" font-size="10.5" fill="#52514e">Viewport map</text>
+<circle cx="530" cy="738" r="4" fill="#2a78d6" stroke="none"/>
+<text x="539" y="742" font-size="10.5" fill="#0b0b0b">viewport map on</text>
+<text x="539" y="754.6" font-size="10.5" fill="#0b0b0b">resize</text>
+<rect x="40" y="774" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="826" x2="1220" y2="826" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="793" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.6  ·  2026-10-26</text>
+<text x="48" y="809" font-size="10.5" fill="#52514e">Cesium shim passthrough</text>
+<rect x="40" y="826" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="878" x2="1220" y2="878" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="845" font-size="12" fill="#0b0b0b" font-weight="700">v0.6.7  ·  2026-10-27</text>
+<text x="48" y="861" font-size="10.5" fill="#52514e">Pixel sizes</text>
+<circle cx="810" cy="842" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="846" font-size="10.5" fill="#0b0b0b">pixel sizes follow</text>
+<text x="819" y="858.6" font-size="10.5" fill="#0b0b0b">the host</text>
+<rect x="40" y="878" width="1180" height="52" fill="#ffffff"/>
+<line x1="40" y1="930" x2="1220" y2="930" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="897" font-size="12" fill="#6250d6" font-weight="700">v0.6.8  ·  2026-10-27</text>
+<text x="48" y="913" font-size="10.5" fill="#52514e">Parts</text>
+<circle cx="530" cy="894" r="4" fill="#2a78d6" stroke="none"/>
+<text x="539" y="898" font-size="10.5" fill="#0b0b0b">parts to their own</text>
+<text x="539" y="910.6" font-size="10.5" fill="#0b0b0b">targets</text>
+<circle cx="950" cy="894" r="4" fill="#eda100" stroke="none"/>
+<text x="959" y="898" font-size="10.5" fill="#0b0b0b">part on the</text>
+<text x="959" y="910.6" font-size="10.5" fill="#0b0b0b">frame-end</text>
+<rect x="40" y="930" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="982" x2="1220" y2="982" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="949" font-size="12" fill="#6250d6" font-weight="700">v0.6.9  ·  2026-10-28</text>
+<text x="48" y="965" font-size="10.5" fill="#52514e">Deferred deletes</text>
+<circle cx="810" cy="946" r="4" fill="#e34948" stroke="none"/>
+<text x="819" y="950" font-size="10.5" fill="#0b0b0b">deletes deferred:</text>
+<text x="819" y="962.6" font-size="10.5" fill="#0b0b0b">any frame re-runs</text>
+<text x="40" y="1018" font-size="12.5" fill="#0b0b0b">Three moves explain most of it: the seam moved down a layer (pixels → calls), then the unit moved up (a call → a frame); the guest's state became something the protocol carries</text>
+<text x="40" y="1034.875" font-size="12.5" fill="#0b0b0b">(shadow → checkpoint → tracked → deferred); and the host's say over the guest's draws became a policy that grows a clause per integration.</text>
+<text x="40" y="1072" font-size="12.5" fill="#52514e">Composition modes and lateness follow from the integrations: a door needs a door, an Earth needs a shape, orbits need neither, a city needs the host's pass; a guest on another</text>
+<text x="40" y="1088.875" font-size="12.5" fill="#52514e">origin is a frame late, so the host corrects what it has.</text>
+<text x="40" y="1114" font-size="11" fill="#8a8984">docs/rfcs/responses/evolution.md · snapshots at /portal/v/&lt;version&gt;/ · history.json names each version's commit</text>
+</svg>
