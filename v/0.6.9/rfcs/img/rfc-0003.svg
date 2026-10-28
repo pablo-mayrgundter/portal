@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="980" viewBox="0 0 1200 980" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<defs></defs>
+<rect width="1200" height="980" fill="#fcfcfb"/>
+<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">RFC 0003 · Late frames from a guest on another page</text>
+<text x="40" y="78" font-size="15" fill="#52514e">celestiary's Cesium from a guest page on cesium-portal, in lockstep: when the guest falls behind, re-runs are refused and the surface holds still.</text>
+<rect x="1053.5" y="30" width="106.5" height="28" rx="14" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
+<text x="1106.75" y="49" font-size="13" fill="#2a78d6" font-weight="700" text-anchor="middle">Draft · #49</text>
+<rect x="40" y="100" width="580" height="340" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="100" width="580" height="4" rx="2" fill="#e34948"/>
+<text x="58" y="132" font-size="16" fill="#0b0b0b" font-weight="700">What goes wrong</text>
+<text x="58" y="170" font-size="11" fill="#52514e">host frames</text>
+<line x1="58" y1="180" x2="598" y2="180" stroke="#8a8984" stroke-width="1"/>
+<line x1="58" y1="174" x2="58" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<line x1="148" y1="174" x2="148" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<line x1="238" y1="174" x2="238" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<line x1="328" y1="174" x2="328" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<line x1="418" y1="174" x2="418" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<line x1="508" y1="174" x2="508" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<line x1="598" y1="174" x2="598" y2="186" stroke="#2a78d6" stroke-width="2"/>
+<text x="58" y="222" font-size="11" fill="#52514e">guest frames</text>
+<line x1="58" y1="232" x2="598" y2="232" stroke="#8a8984" stroke-width="1"/>
+<line x1="88" y1="226" x2="88" y2="238" stroke="#eb6834" stroke-width="2"/>
+<line x1="178" y1="226" x2="178" y2="238" stroke="#eb6834" stroke-width="2"/>
+<line x1="338" y1="226" x2="338" y2="238" stroke="#eb6834" stroke-width="2"/>
+<line x1="518" y1="226" x2="518" y2="238" stroke="#eb6834" stroke-width="2"/>
+<path d="M238 186 L338 226" stroke="#eb6834" stroke-width="1.2" fill="none" stroke-dasharray="3 3"/>
+<text x="308" y="212" font-size="10.5" fill="#eb6834">late: tiles streaming</text>
+<rect x="248" y="244" width="70" height="16" rx="4" fill="#fbe3e3" stroke="#e34948" stroke-width="1"/>
+<text x="283" y="256" font-size="10" fill="#e34948" text-anchor="middle">re-run</text>
+<rect x="338" y="244" width="70" height="16" rx="4" fill="#fbe3e3" stroke="#e34948" stroke-width="1"/>
+<text x="373" y="256" font-size="10" fill="#e34948" text-anchor="middle">refused</text>
+<rect x="58" y="268" width="262" height="130" rx="8" fill="#fbe3e3" stroke="#e34948" stroke-width="1"/>
+<text x="70" y="288" font-size="13.5" fill="#e34948" font-weight="700">1 · Re-runs refused → blank</text>
+<text x="70" y="306" font-size="12" fill="#52514e">a frame that deleted a GL object is</text>
+<text x="70" y="321.6" font-size="12" fill="#52514e">never re-run; Cesium's tile frames</text>
+<text x="70" y="337.20000000000005" font-size="12" fill="#52514e">delete all the time</text>
+<text x="70" y="352.80000000000007" font-size="12" fill="#52514e">the atmosphere shows sky where the</text>
+<text x="70" y="368.4000000000001" font-size="12" fill="#52514e">ground was: white flashes</text>
+<rect x="340" y="268" width="262" height="130" rx="8" fill="#fbe3e3" stroke="#e34948" stroke-width="1"/>
+<text x="352" y="288" font-size="13.5" fill="#e34948" font-weight="700">2 · Re-runs hold still</text>
+<text x="352" y="306" font-size="12" fill="#52514e">the old view's frame, unchanged, while</text>
+<text x="352" y="321.6" font-size="12" fill="#52514e">the atmosphere and labels move on</text>
+<text x="352" y="337.20000000000005" font-size="12" fill="#52514e">netmap fixed this for overlays; Cesium</text>
+<text x="352" y="352.80000000000007" font-size="12" fill="#52514e">draws into its own targets and copies</text>
+<text x="352" y="368.4000000000001" font-size="12" fill="#52514e">them with full-screen quads</text>
+<rect x="650" y="100" width="510" height="340" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="650" y="100" width="510" height="4" rx="2" fill="#1baf7a"/>
+<text x="668" y="132" font-size="16" fill="#0b0b0b" font-weight="700">What it proposes</text>
+<rect x="668" y="156" width="474" height="80" rx="8" fill="#e0f5ec" stroke="#1baf7a" stroke-width="1"/>
+<text x="680" y="176" font-size="13.5" fill="#1baf7a" font-weight="700">§3 Deferred deletes: a re-run is never refused</text>
+<text x="680" y="194" font-size="12" fill="#52514e">the delete runs as its implicit unbinds now, and as a delete at the next</text>
+<text x="680" y="209.6" font-size="12" fill="#52514e">drain with a new frame; a re-run skips deletes, as it skips mints and</text>
+<text x="680" y="225.2" font-size="12" fill="#52514e">uploads</text>
+<rect x="668" y="248" width="474" height="96" rx="8" fill="#e0f5ec" stroke="#1baf7a" stroke-width="1"/>
+<text x="680" y="268" font-size="13.5" fill="#1baf7a" font-weight="700">§4 Reproject a guest with its own targets</text>
+<text x="680" y="286" font-size="12" fill="#52514e">C = VP_now · VP_frame⁻¹ goes to draws into the targets the guest names</text>
+<text x="680" y="301.6" font-size="12" fill="#52514e">as screen-equivalent (reproject.targets: 'named'); the copy quads opt</text>
+<text x="680" y="317.20000000000005" font-size="12" fill="#52514e">out by declaring the uniform; log-depth shaders opt in through a fork</text>
+<text x="680" y="332.80000000000007" font-size="12" fill="#52514e">patch, before czm_vertexLogDepth</text>
+<rect x="668" y="356" width="474" height="64" rx="8" fill="#e0f5ec" stroke="#1baf7a" stroke-width="1"/>
+<text x="680" y="376" font-size="13.5" fill="#1baf7a" font-weight="700">§5 The frame-end carries the frame's metadata</text>
+<text x="680" y="394" font-size="12" fill="#52514e">viewId (0.6.3) · part (0.6.8) · screenTargets · viewProjection, the one</text>
+<text x="680" y="409.6" font-size="12" fill="#52514e">the guest used</text>
+<rect x="40" y="470" width="580" height="260" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="470" width="580" height="4" rx="2" fill="#eb6834"/>
+<text x="58" y="502" font-size="16" fill="#0b0b0b" font-weight="700">Measured (celestiary/web #309, #310, #317)</text>
+<rect x="58" y="526" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="58" y="536" width="4" height="56" rx="2" fill="#eb6834"/>
+<text x="74" y="560" font-size="22" fill="#0b0b0b" font-weight="700">27.8 vs 33.0 fps</text>
+<text x="74" y="580" font-size="11.5" fill="#52514e">cross-site guest vs same-page Cesium,</text>
+<text x="74" y="594.95" font-size="11.5" fill="#52514e">Earth at the Grand Canyon (M2)</text>
+<rect x="334" y="526" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="334" y="536" width="4" height="56" rx="2" fill="#eb6834"/>
+<text x="350" y="560" font-size="22" fill="#0b0b0b" font-weight="700">14.3 ms</text>
+<text x="350" y="580" font-size="11.5" fill="#52514e">round trip: 1.1 to the guest, 9.9 its</text>
+<text x="350" y="594.95" font-size="11.5" fill="#52514e">frame, 3.3 back</text>
+<rect x="58" y="610" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="58" y="620" width="4" height="56" rx="2" fill="#e34948"/>
+<text x="74" y="644" font-size="22" fill="#0b0b0b" font-weight="700">118 of 503 → 0</text>
+<text x="74" y="664" font-size="11.5" fill="#52514e">blank drains, headless with every frame</text>
+<text x="74" y="678.95" font-size="11.5" fill="#52514e">late (the copy fallback, #317)</text>
+<rect x="334" y="610" width="266" height="76" rx="8" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="334" y="620" width="4" height="56" rx="2" fill="#eb6834"/>
+<text x="350" y="644" font-size="22" fill="#0b0b0b" font-weight="700">3,919 / 115,680 px</text>
+<text x="350" y="664" font-size="11.5" fill="#52514e">differ by 1: the night lights as a</text>
+<text x="350" y="678.95" font-size="11.5" fill="#52514e">second part, vs same-page</text>
+<rect x="650" y="470" width="510" height="260" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="650" y="470" width="510" height="4" rx="2" fill="#eda100"/>
+<text x="668" y="502" font-size="16" fill="#0b0b0b" font-weight="700">Our take</text>
+<circle cx="675" cy="522" r="5.5" fill="#1baf7a" stroke="none"/>
+<text x="688" y="526" font-size="13" fill="#0b0b0b" font-weight="700">Accept all of it</text>
+<text x="688" y="543.55" font-size="12" fill="#52514e">deferred deletes in 0.6.9; named targets and viewProjection in 0.6.10;</text>
+<text x="688" y="559.75" font-size="12" fill="#52514e">the fork patch; then celestiary.</text>
+<circle cx="675" cy="577.95" r="5.5" fill="#eda100" stroke="none"/>
+<text x="688" y="581.95" font-size="13" fill="#0b0b0b" font-weight="700">Choices</text>
+<text x="688" y="599.5" font-size="12" fill="#52514e">defer every delete; emulate the detach; keep rerunRefused for readback</text>
+<text x="688" y="615.7" font-size="12" fill="#52514e">and sync objects; targets named, not sized; the host's own surface under</text>
+<text x="688" y="631.9000000000001" font-size="12" fill="#52514e">uncovered edges; correction always on, wait 30 ms then try 0.</text>
+<circle cx="675" cy="650.1000000000001" r="5.5" fill="#6250d6" stroke="none"/>
+<text x="688" y="654.1000000000001" font-size="13" fill="#0b0b0b" font-weight="700">Standalone</text>
+<text x="688" y="671.6500000000001" font-size="12" fill="#52514e">any full-screen guest on another page, not nesting; it amends 0001 Q18</text>
+<text x="688" y="687.8500000000001" font-size="12" fill="#52514e">and DESIGN.md's reprojection and buffering rules.</text>
+<rect x="40" y="760" width="1120" height="190" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
+<rect x="40" y="760" width="1120" height="4" rx="2" fill="#6250d6"/>
+<text x="58" y="792" font-size="16" fill="#0b0b0b" font-weight="700">How to proceed</text>
+<rect x="58" y="810" width="63" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="89.5" y="826" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">0.6.9</text>
+<text x="58" y="856" font-size="12" fill="#52514e">deferred deletes, with the black-door</text>
+<text x="58" y="872.2" font-size="12" fill="#52514e">regression and four more tests</text>
+<rect x="336" y="810" width="70.4" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="371.2" y="826" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">0.6.10</text>
+<text x="336" y="856" font-size="12" fill="#52514e">reproject.targets: named; screenTargets</text>
+<text x="336" y="872.2" font-size="12" fill="#52514e">and viewProjection on the frame-end; the</text>
+<text x="336" y="888.4000000000001" font-size="12" fill="#52514e">Cesium shim sends both for one frustum</text>
+<rect x="614" y="810" width="151.8" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="689.9" y="826" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">celestiary/cesium</text>
+<text x="614" y="856" font-size="12" fill="#52514e">exempt the viewport quads; opt log-depth</text>
+<text x="614" y="872.2" font-size="12" fill="#52514e">shaders in</text>
+<rect x="892" y="810" width="100" height="24" rx="12" fill="#ebe8fa" stroke="#6250d6" stroke-width="1"/>
+<text x="942" y="826" font-size="12" fill="#6250d6" font-weight="700" text-anchor="middle">celestiary</text>
+<text x="892" y="856" font-size="12" fill="#52514e">correction on, a shorter wait, a pan</text>
+<text x="892" y="872.2" font-size="12" fill="#52514e">test, the host's surface under uncovered</text>
+<text x="892" y="888.4000000000001" font-size="12" fill="#52514e">edges; 'lights' → 'emission'</text>
+<text x="58" y="924" font-size="12.5" fill="#0b0b0b" font-weight="700">Open for comment:</text>
+<text x="186" y="924" font-size="12.5" fill="#52514e">Q1 every delete, or only same-frame ones · Q3 what still refuses a re-run · Q5 several frusta under log depth · Q7 lockstep or latest</text>
+<text x="40" y="962" font-size="11" fill="#8a8984">docs/rfcs/responses/0003-late-frames.md · RFC text and discussion: portal #49 · integration: celestiary/web #309, #310, #317; cesium-portal</text>
+</svg>
