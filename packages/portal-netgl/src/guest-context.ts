@@ -164,9 +164,14 @@ export type NetGLGuestContext = {
    * rather than being cloned into the link's queue. Works across host
    * frames too: a guest drawn only in sub-frames can call it every time.
    */
-  subFrame(options?: Pick<NetGLEndFrameOptions, 'viewId' | 'part'>): void
+  subFrame(options?: Omit<NetGLEndFrameOptions, 'checkpoint'>): void
   /** Post the `netgl:ready` handshake. */
   announce(anchor: PortalAnchor, background?: ColorRGB): void
+  /**
+   * The id the recorder gave a GL object the guest created through `gl`,
+   * as the host's receiver knows it; null for one it never saw.
+   */
+  idOf(handle: object): number | null
 }
 
 export type NetGLEndFrameOptions = {
@@ -185,6 +190,18 @@ export type NetGLEndFrameOptions = {
    * draws more than once for it (`NetGLFrameEnd.part`).
    */
   part?: string
+  /**
+   * The framebuffers that stand for the screen in this frame, as the
+   * guest's own handles (`NetGLFrameEnd.screenTargets`). Ones the recorder
+   * never saw are left out.
+   */
+  screenTargets?: ReadonlyArray<object | null | undefined>
+  /**
+   * The view and projection the frame was drawn with
+   * (`NetGLFrameEnd.viewMatrix`, `projectionMatrix`): both or neither.
+   */
+  viewMatrix?: ArrayLike<number>
+  projectionMatrix?: ArrayLike<number>
 }
 
 /** Host → guest: the `netgl:ready` handshake arrived. */
@@ -200,10 +217,30 @@ export type NetGLReadyAckMessage = {
 
 const READY_RESEND_MS = 500
 
-const frameEndOf = (options: Pick<NetGLEndFrameOptions, 'viewId' | 'part'>): NetGLFrameEnd => {
+const mat4Of = (m: ArrayLike<number> | undefined): number[] | null => {
+  if (!m || m.length !== 16) return null
+  const out = Array.from({ length: 16 }, (_, i) => Number(m[i]))
+  return out.every(Number.isFinite) ? out : null
+}
+
+const frameEndOf = (options: Omit<NetGLEndFrameOptions, 'checkpoint'>, idOf: (h: object) => number | null): NetGLFrameEnd => {
   const frameEnd: NetGLFrameEnd = { type: 'netgl:frame-end' }
   if (typeof options.viewId === 'number') frameEnd.viewId = options.viewId
   if (typeof options.part === 'string') frameEnd.part = options.part
+  if (options.screenTargets) {
+    const ids: number[] = []
+    for (const t of options.screenTargets) {
+      const id = t ? idOf(t) : null
+      if (id !== null && !ids.includes(id)) ids.push(id)
+    }
+    frameEnd.screenTargets = ids
+  }
+  const view = mat4Of(options.viewMatrix)
+  const projection = mat4Of(options.projectionMatrix)
+  if (view && projection) {
+    frameEnd.viewMatrix = view
+    frameEnd.projectionMatrix = projection
+  }
   return frameEnd
 }
 
@@ -351,7 +388,7 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       }
     },
     endFrame(options = {}) {
-      const frameEnd = frameEndOf(options)
+      const frameEnd = frameEndOf(options, recorder.idOf)
       postItem(frameEnd)
       flush()
       // The checkpoint starts the next frame: in wire 2 it waits in the
@@ -359,7 +396,7 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       if (checkpoints && options.checkpoint !== false) recorder.checkpoint()
     },
     subFrame(options = {}) {
-      const frameEnd = frameEndOf(options)
+      const frameEnd = frameEndOf(options, recorder.idOf)
       postItem(frameEnd)
       flush()
       if (checkpoints) recorder.deferCheckpoint()
@@ -393,7 +430,8 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       }
       base.post(ready())
       if (!acked) timer = setInterval(() => base.post(ready()), READY_RESEND_MS)
-    }
+    },
+    idOf: recorder.idOf
   }
 }
 

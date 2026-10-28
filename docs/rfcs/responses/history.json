@@ -336,7 +336,7 @@
     },
     {
       "version": "0.6.9",
-      "ref": "9bdde98",
+      "ref": "d7c2706",
       "date": "2026-10-28",
       "label": "Deferred deletes",
       "summary": "Any frame can be re-run: deletes wait for the next new frame, their implicit unbinds happen in place (RFC 0003's first step, for celestiary's late Cesium frames).",
@@ -353,6 +353,24 @@
       "prs": [
         54
       ]
+    },
+    {
+      "version": "0.6.10",
+      "ref": "8e75125",
+      "date": "2026-10-28",
+      "label": "Named screen targets",
+      "summary": "A guest that draws into targets of its own names them on its frame-end, with the view and projection it drew with; a host corrects the draws into them (RFC 0003 §4, for Cesium from a guest page).",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "prs": []
     }
   ]
 }

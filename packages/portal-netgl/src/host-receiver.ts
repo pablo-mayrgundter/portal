@@ -147,9 +147,23 @@ export type NetGLReceiverReprojectConfig = {
   /**
    * The correction for a frame drawn for `viewId` (the guest's old clip
    * space → the host's current one, column-major), or null for none.
-   * Called at drain time, once per frame in the batch.
+   * Called at drain time, once per frame in the batch, with the frame's
+   * frame-end: a guest that builds its own projection reports the view and
+   * projection it drew with there (`end.viewMatrix`, `end.projectionMatrix`),
+   * and the host corrects from those (`reprojection(from, to)`).
    */
-  correction: (viewId: number | null) => ArrayLike<number> | null
+  correction: (viewId: number | null, end: NetGLFrameEnd) => ArrayLike<number> | null
+  /**
+   * Which draws get the correction: `'screen'` (default), draws to the
+   * screen; `'named'`, those and the draws into the framebuffers the frame
+   * names as screen-equivalent (`NetGLFrameEnd.screenTargets`), for a guest
+   * that draws its scene into targets of its own and copies them to the
+   * screen. Its copies must then be exempt: a vertex shader that declares
+   * `netgl_reproject` and doesn't apply it is never moved (RFC 0003 §4.2).
+   * Inside the named targets only the correction applies, not the viewport
+   * remap or the pixel scales.
+   */
+  targets?: 'screen' | 'named'
   /**
    * The viewport a frame drawn for `viewId` was drawn at, and the host's
    * current one, when they differ (the drawing buffer was resized, or its
@@ -234,6 +248,7 @@ export type NetGLHostReceiver = {
 
 export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHostReceiver => {
   const reprojectConfig = config.reproject ?? null
+  const namedTargets = reprojectConfig?.targets === 'named'
   const beforeFrame = config.beforeFrame
   const replay = makeNetGLReplay(config.gl, reprojectConfig ? { ...config.replay, reproject: true } : config.replay)
   const frameView = reprojectConfig?.frameView ?? ((end: NetGLFrameEnd) => (typeof end.viewId === 'number' ? end.viewId : null))
@@ -456,7 +471,8 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       // its first call.
       while ((reprojectConfig || beforeFrame) && m < marks.length && marks[m].at <= i) {
         if (reprojectConfig) {
-          replay.setReprojection(reprojectConfig.correction(marks[m].viewId))
+          replay.setReprojection(reprojectConfig.correction(marks[m].viewId, marks[m].end))
+          if (namedTargets) replay.setScreenTargets(marks[m].end.screenTargets ?? null)
           if (reprojectConfig.viewport) replay.setViewportRemap(reprojectConfig.viewport(marks[m].viewId))
           if (reprojectConfig.pixelScale) replay.setPixelScale(reprojectConfig.pixelScale(marks[m].viewId))
         }
@@ -481,6 +497,7 @@ export const makeNetGLHostReceiver = (config: NetGLHostReceiverConfig): NetGLHos
       replay.setReprojection(null)
       replay.setViewportRemap(null)
       replay.setPixelScale(null)
+      replay.setScreenTargets(null)
     }
   }
 

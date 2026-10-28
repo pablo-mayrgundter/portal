@@ -302,8 +302,9 @@ the view in flight when it arrived (one in flight at a time). What it
 can't correct: screen-space extrusion (wide lines, sprites built in clip
 space: scaled slightly during the lag), choices the guest made from the
 old eye (a far-side cull), depth written in the fragment shader
-(logarithmic depth), and a guest that composites a full-screen
-pass to the screen (its quad would be moved; leave `reproject` off). A
+(logarithmic depth), and, with the default `targets: 'screen'`, a guest
+that composites a full-screen pass to the screen (its quad would be moved;
+see named targets below). A
 vertex outside the old clip volume on every axis, in front of the camera
 (the `gl_Position = vec4(2.0, 2.0, 2.0, 1.0)` "hide this one" idiom), is
 left alone. A rewrite that doesn't compile on the host falls back to the
@@ -382,6 +383,38 @@ layer.lastReprojection.pixelScale // 0.5 for a 2× frame composed at 1×, or nul
 receiver.replay.setPixelScale(0.5) // the replay's seam
 receiver.replay.reprojectStats.scaledDraws
 ```
+
+**Named screen targets** (0.6.10, receiver; RFC 0003 §4). A guest that
+draws its scene into targets of its own and copies them to the screen with
+full-screen quads (Cesium) names those targets on its frame-end, with the
+view and projection it actually drew with:
+
+```js
+guest.endFrame({ viewId, screenTargets: [sceneFbo], viewMatrix, projectionMatrix })
+// Cesium: the shim's attach() does it; an app that ends its own frames
+guest.core.endFrame({ viewId, ...cesiumFrameEnd(scene) })
+
+const receiver = makeNetGLHostReceiver({ gl, transport, reproject: {
+  targets: 'named',
+  // the frame-end's own view and projection, to the host's view now
+  correction: (viewId, end) => end.viewMatrix
+    ? reprojection(end, { viewMatrix: viewNow(), projectionMatrix: end.projectionMatrix })
+    : null
+} })
+```
+
+With `targets: 'named'` the draws into the named framebuffers get the
+correction as screen draws do, and only it: not the viewport remap or the
+pixel scales, since those targets are their own size and the copy to the
+screen is what the remap scales. The copies must be exempt: a vertex shader
+that declares `uniform mat4 netgl_reproject;` and doesn't apply it is never
+moved (the opt-in, used as an exemption). `cesiumFrameEnd(scene)` names
+Cesium's globe-depth and scene framebuffers and, for a frame with one
+frustum, its view and the projection with that frustum's near and far;
+for several frusta it leaves the matrices out, and the host should
+correct nothing. Cesium's viewport-quad shaders and its log depth need a
+patch to Cesium for this (the celestiary fork). `guest.idOf(handle)` is the
+id the recorder gave a GL object.
 
 The adapter also speaks the rest of the layer control plane (shapes from
 RFC 0001, `docs/rfcs/0001-globe-orbit-layers.md`):

@@ -13,6 +13,29 @@ Every version's demos are kept at
 0.6.8 are reconstructions built from that version's last commit. The
 package is pre-1.0: pin an exact version.
 
+## 0.6.10: Named screen targets (2026-10-28)
+
+- **Protocol:** a guest that draws its scene into targets of its own and
+  copies them to the screen (Cesium) names them on its frame-end
+  (`screenTargets`), with the view and projection it drew with
+  (`viewMatrix`, `projectionMatrix`). With `reproject.targets: 'named'`
+  the receiver corrects the draws into those targets as it does screen
+  draws, with C only (not the viewport remap or the pixel scales), and
+  `correction(viewId, end)` gets the frame-end to correct from the guest's
+  own projection. The copies are exempt by declaring `netgl_reproject`
+  without applying it
+  ([RFC 0003](https://github.com/pablo-mayrgundter/portal/issues/49) §4.2,
+  §4.3). DESIGN.md,
+  [Named screen targets](./packages/portal-netgl/DESIGN.md#named-screen-targets-0610).
+- **Cesium shim:** `cesiumFrameEnd(scene)` names Cesium's globe-depth and
+  scene framebuffers and, for a one-frustum frame, its view and projection;
+  `attach()` sends them on every frame-end. Cesium itself needs a patch for
+  its viewport quads and log depth before a host turns this on (the
+  celestiary fork, next).
+- **Guest:** `guest.idOf(handle)`, the id the recorder gave a GL object.
+- **Built for:** celestiary's Cesium guest pages, whose late frames hold
+  still while the host's atmosphere and labels move on.
+
 ## 0.6.9: Deferred deletes (2026-10-28)
 
 - **Any frame can be re-run.** The receiver holds every delete back until

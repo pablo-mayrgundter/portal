@@ -621,3 +621,50 @@ void main() {
     expect(runWith(true)).not.toContain('uniform1f')
   })
 })
+
+describe('makeNetGLReplay({ reproject: true }) — setScreenTargets (RFC 0003 §4.2)', () => {
+  const C = [1.01, 0, 0, 0, 0, 0.99, 0, 0, 0, 0, 1, 0, 0.02, -0.01, 0, 1]
+  const matrices = (log: Logged[]) => log.filter((l) => l.name === 'uniformMatrix4fv').map((l) => Array.from(l.args[2] as Float32Array))
+  const scales = (log: Logged[]) => log.filter((l) => l.name === 'uniform1f').map((l) => l.args[1])
+
+  it('draws into a named target get C but a pixel scale of 1; other targets the identity', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    for (const c of setup) replay(c)
+    replay(({ name: 'createFramebuffer', args: [], returnId: 5 }))
+    replay.setReprojection(C)
+    replay.setPixelScale(0.5)
+    replay.setScreenTargets([4])
+    log.length = 0
+    for (const c of draws) replay(c)
+    replay({ name: 'bindFramebuffer', args: [0x8d40, h(5)] })
+    replay({ name: 'drawArrays', args: [0, 0, 3] })
+    const c32 = Array.from(Float32Array.from(C))
+    // Screen, named target, screen: C (set once, the program holds it);
+    // the unnamed target: the identity.
+    const sets = matrices(log)
+    expect(sets).toHaveLength(2)
+    expect(sets[0]).toEqual(c32)
+    expect(isIdentity(sets[1])).toBe(true)
+    // The pixel scale is the screen's alone.
+    expect(scales(log)).toEqual([0.5, 1, 0.5, 1])
+    expect(replay.reprojectStats.correctedDraws).toBe(3)
+  })
+
+  it('a target the frame mints after naming it counts; null names none again', () => {
+    const { gl, log } = mockGl()
+    const replay = makeNetGLReplay(gl, { reproject: true })
+    replay.setScreenTargets([4])
+    for (const c of setup) replay(c)
+    replay.setReprojection(C)
+    log.length = 0
+    replay({ name: 'useProgram', args: [h(3)] })
+    replay({ name: 'bindFramebuffer', args: [0x8d40, h(4)] })
+    replay({ name: 'drawArrays', args: [0, 0, 3] })
+    replay.setScreenTargets(null)
+    replay({ name: 'drawArrays', args: [0, 0, 3] })
+    const sets = matrices(log)
+    expect(sets[0]).toEqual(Array.from(Float32Array.from(C)))
+    expect(isIdentity(sets[1])).toBe(true)
+  })
+})

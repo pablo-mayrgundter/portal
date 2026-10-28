@@ -168,7 +168,7 @@ const overview = ({ tag, links }) => {
   const rf = [
     ['RFC 0001 · Globe + orbit layers', 'netmap (deck.gl globe) hosts celestiary\'s orbits from another origin. Overlay kind, shared depth, the view, time, anchors, trust.', 'built 0.5–0.6.8 · 29 questions'],
     ['RFC 0002 · Nested in-place guests', 'celestiary → Cesium → Slop New York on one page. Flat chains, in-frame contract, light, ground, the enu frame, lean, staging.', 'shipped composed · library pieces for 0.7'],
-    ['RFC 0003 · Late frames', 'celestiary\'s Cesium from a guest page. Deferred deletes, reprojecting a guest\'s own targets, its projection on the frame-end.', 'built 0.6.9 · 0.6.10 proposed'],
+    ['RFC 0003 · Late frames', 'celestiary\'s Cesium from a guest page. Deferred deletes, reprojecting a guest\'s own targets, its projection on the frame-end.', 'built 0.6.9–0.6.10 · the fork patch next'],
   ]
   const rfcHref = ['rfcs/0001-globe-orbit-layers.html', 'rfcs/0002-nested-in-place-guests.html', 'rfcs/0003-late-frames.html']
   rf.forEach(([t, d, st], i) => {
@@ -296,7 +296,7 @@ writeFileSync(OUT + 'portal-netgl-inline.svg', overview({ tag: false, links: tru
   p = s.panel(650, 100, 510, 340, 'What it proposes', { accent: C.built })
   s.box(p.x, p.y, p.w, 80, '§3 Deferred deletes: a re-run is never refused', ['the delete runs as its implicit unbinds now, and as a delete at the next drain with a new frame; a re-run skips deletes, as it skips mints and uploads'], { fill: C.builtBg, stroke: C.built, titleFill: C.built, size: 12 })
   s.box(p.x, p.y + 92, p.w, 96, '§4 Reproject a guest with its own targets', ['C = VP_now · VP_frame⁻¹ goes to draws into the targets the guest names as screen-equivalent (reproject.targets: \'named\'); the copy quads opt out by declaring the uniform; log-depth shaders opt in through a fork patch, before czm_vertexLogDepth'], { fill: C.builtBg, stroke: C.built, titleFill: C.built, size: 12 })
-  s.box(p.x, p.y + 200, p.w, 64, '§5 The frame-end carries the frame\'s metadata', ['viewId (0.6.3) · part (0.6.8) · screenTargets · viewProjection, the one the guest used'], { fill: C.builtBg, stroke: C.built, titleFill: C.built, size: 12 })
+  s.box(p.x, p.y + 200, p.w, 64, '§5 The frame-end carries the frame\'s metadata', ['viewId (0.6.3) · part (0.6.8) · screenTargets, viewMatrix + projectionMatrix, the ones the guest used (0.6.10)'], { fill: C.builtBg, stroke: C.built, titleFill: C.built, size: 12 })
 
   p = s.panel(40, 470, 580, 260, 'Measured (celestiary/web #309, #310, #317)', { accent: C.guest })
   const st = [['27.8 vs 33.0 fps', 'cross-site guest vs same-page Cesium, Earth at the Grand Canyon (M2)'], ['14.3 ms', 'round trip: 1.1 to the guest, 9.9 its frame, 3.3 back'], ['118 of 503 → 0', 'blank drains, headless with every frame late (the copy fallback, #317)'], ['3,919 / 115,680 px', 'differ by 1: the night lights as a second part, vs same-page']]
@@ -338,6 +338,7 @@ writeFileSync(OUT + 'portal-netgl-inline.svg', overview({ tag: false, links: tru
     '0.6.7': ['', '', '', '', 'pixel sizes follow the host', ''],
     '0.6.8': ['', '', 'parts to their own targets', '', '', 'part on the frame-end'],
     '0.6.9': ['', '', '', '', 'deletes deferred: any frame re-runs', ''],
+    '0.6.10': ['', '', 'named screen targets', '', 'the guest\'s own projection', 'screenTargets, view on the frame-end'],
   }
   const DEMO_LABEL = { three: 'Local', iframe: 'iframe', worker: 'Worker', netgl: 'NetGL', 'netgl-celestiary': 'celestiary', 'netgl-cesium': 'Cesium', 'netgl-deck': 'deck.gl' }
   const AXIS_COL = [C.guest, C.open, C.host, C.built, C.risk, C.next]

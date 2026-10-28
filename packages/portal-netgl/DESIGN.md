@@ -419,6 +419,18 @@ into an offscreen target and composite later (celestiary does).
   uses a sync object: a second read or fence would answer for a frame the
   guest never drew. Not emulated: a buffer the current VAO's attribute
   pointers name, queries.
+  - **A guest without checkpoints owns no GL state across drains**, so a
+    binding it made in one drain and deletes in a later one gets no
+    emulated unbind: the host's render in between may have rebound it
+    anyway, and an unbind that changes an object (detaching an attachment,
+    a VAO's element binding) against a stale binding would land on the
+    host's own framebuffer or VAO (netmap's question on #49).
+  - **A receiver nested inside a recorded context** (a middle guest that
+    replays a leaf into its own recorded GL) should not re-run its leaf's
+    frame, or must resync the middle's recorder after one, until nesting is
+    flat (RFC 0002, T2). None does today: New York is an immediate link in
+    both celestiary's page and its Cesium guest page, and a root re-run
+    replays into the root's context only, unseen by the guest's recorder.
 
 ## Findings from deck.gl / luma.gl integration
 
@@ -705,7 +717,8 @@ the screen draws made with a scale other than 1, and
   a wrapped shader's own clip-space extrusion). `gl.blitFramebuffer` and
   `readPixels` rects aren't mapped either.
 - A guest that composites a full-screen pass to the screen would have its
-  quad moved and its offscreen image left as it was: leave `reproject` off.
+  quad moved and its offscreen image left as it was, with the default
+  `targets: 'screen'`. Name its targets instead (below).
 - The "hide this vertex" idiom (`gl_Position = vec4(2.0, 2.0, 2.0, 1.0)`)
   is a homogeneous point too, and a large C could bring it on screen, so
   the wrapper leaves alone a vertex in front of the camera (w > 0) and
@@ -714,6 +727,49 @@ the screen draws made with a scale other than 1, and
   from that corner keeps its old position.
 - A compile check per rewritten vertex shader is one synchronous query at
   set-up, not per frame.
+
+### Named screen targets (0.6.10)
+
+RFC 0003 §4, for celestiary's Cesium from a guest page. Cesium draws its
+scene into framebuffers of its own (globe depth, the scene framebuffer),
+then copies them to the screen and derives passes from them with
+full-screen quads. Correcting the screen moved the quads and left the
+image; correcting nothing left a late frame still while the host moved.
+
+- **Which draws.** The frame-end names the guest's screen-equivalent
+  targets (`screenTargets`, recorder ids; `guest.idOf`). With
+  `reproject.targets: 'named'` the receiver hands them to the replay before
+  each frame (`setScreenTargets`), and draws into them get C. They are
+  looked up by id at each draw, so a target the frame itself creates (its
+  first frame, a resize) counts. Named, not by size: Cesium's pick, OIT and
+  FXAA buffers are viewport-sized too, and shouldn't always move.
+- **Only C inside them.** The viewport remap and the pixel and viewport
+  scales are the screen's: the named targets are their own size, and the
+  copy to the screen is what the remap scales. A 2× frame composed at 1× is
+  scaled once (netmap's review on #49; `reproject-named.test.ts`).
+- **The copies are exempt** by the opt-in: a vertex shader that declares
+  `netgl_reproject` and doesn't apply it isn't wrapped and isn't moved. For
+  Cesium that is a patch to its viewport-quad shader (the celestiary fork),
+  as is the log-depth opt-in: Cesium writes `gl_FragDepth` from a varying
+  `czm_vertexLogDepth()` fills inside `main`, before the wrapper's multiply,
+  so its log-depth shaders must apply C themselves.
+- **Whose projection.** Cesium builds its own frustum from the view (its
+  near and far), so C from the host's projection would be wrong in z. The
+  guest reports the view and projection it drew with on the frame-end
+  (`viewMatrix`, `projectionMatrix`), and the host corrects from those:
+  `reprojection(end, { viewMatrix: now, projectionMatrix: end.projectionMatrix })`.
+  The RFC proposed the product (`viewProjection`); the pair needs no
+  inversion of it, composes with `reprojection`, and is T3's view
+  reported back. The host's view now must be in the same world frame as
+  the guest's (the content's: ECEF for Cesium), not its own scene frame,
+  or the body's rotation reads as a camera move. `correction` gets the
+  frame-end as its second argument.
+- **Several frusta.** Each frustum has its own depth mapping, so one C is
+  wrong in z. `cesiumFrameEnd` sends the matrices only for a one-frustum
+  frame; without them the host corrects nothing, as lockstep does today.
+  The environment pass (sky, sun, moon) draws with the camera's own near
+  and far, not the frustum's: under C its x and y are right for a rotation
+  and its depth is not, which the sky doesn't test.
 
 ## Cross-origin iframes
 
@@ -1551,6 +1607,8 @@ unchanged.
 - `packages/portal-netgl/src/host-receiver.ts` — host frame buffering +
   drain; the host's side of wire 2 (the port offer, ordering across the
   switch).
+- `packages/portal-netgl/src/deferred-deletes.ts` — the deletes the
+  receiver holds back, and the unbinds it emits in their place (0.6.9).
 - `packages/portal-netgl/src/frameworks/cesium.ts` — Cesium shim.
 - `packages/portal-netgl/src/frameworks/luma.ts` — deck.gl / luma.gl host
   adapter: `attachNetGLDeckLayer`, `globeLayerView`, `withLumaState`.
