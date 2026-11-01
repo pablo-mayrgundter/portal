@@ -727,6 +727,25 @@ the screen draws made with a scale other than 1, and
   from that corner keeps its old position.
 - A compile check per rewritten vertex shader is one synchronous query at
   set-up, not per frame.
+- C is applied in float32, and a camera move with a tiny near plane makes
+  it ill-conditioned. P⁻¹ rebuilds the point's homogeneous weight from
+  z_clip, and with a near of 0.1 m and an almost infinite far (Cesium low
+  over the ground) z_clip carries almost nothing beyond w_clip: the weight
+  is about (w − z) / (2·near). A camera move t then enters C's columns for
+  clip z and w scaled by about t / (2·near), and those columns cancel
+  catastrophically in float32. Measured from celestiary's Cesium guest
+  ([celestiary/web#335](https://github.com/celestiary/web/pull/335)): a 1°
+  turn about Earth's centre at 3.4 Mm altitude (a camera move of ~110 km)
+  gave entries of 6.6×10⁵ (662541·z − 662542·w), and every pixel of the
+  frame was more than 16 levels off. A frame's usual lag, ~100 m, gives
+  entries ~500 and stays well under a pixel. A turn in place (a pure
+  rotation) isn't amplified: the near and far row cancels. The replay
+  doesn't guard against this. celestiary refuses a correction with any
+  entry over 10⁴ and draws the frame as it came (`GuestPages._correction`,
+  `MAX_CORRECTION`), and when the frame in hand couldn't be corrected it
+  waits 100 ms for a guest frame instead of 30 ms. Hosts should guard on
+  C's magnitude the same way; the guard could move into `reprojection()`
+  later.
 
 ### Named screen targets (0.6.10)
 
@@ -763,7 +782,15 @@ image; correcting nothing left a late frame still while the host moved.
   reported back. The host's view now must be in the same world frame as
   the guest's (the content's: ECEF for Cesium), not its own scene frame,
   or the body's rotation reads as a camera move. `correction` gets the
-  frame-end as its second argument.
+  frame-end as its second argument. When the host's canvas changed size
+  since the frame, the target projection is the host's current one (its
+  current aspect), not the frame's: the copy to the screen stretches the
+  frame to the new size, which keeps clip space as it was
+  (celestiary's `CesiumLayers._ecefProjection`).
+- **Its float32 limit.** Cesium's near of 0.1 m makes C ill-conditioned
+  for a large camera move: a 110 km move gave entries of 6.6×10⁵ and a
+  garbage frame, so a host refuses a C with large entries and draws the
+  frame as it came (Limits, above).
 - **Several frusta.** Each frustum has its own depth mapping, so one C is
   wrong in z. `cesiumFrameEnd` sends the matrices only for a one-frustum
   frame; without them the host corrects nothing, as lockstep does today.

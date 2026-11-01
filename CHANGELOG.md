@@ -13,6 +13,21 @@ Every version's demos are kept at
 0.6.8 are reconstructions built from that version's last commit. The
 package is pre-1.0: pin an exact version.
 
+## After 0.6.10's bump
+
+On `main` after 0.6.10, with no version bump: docs only, no protocol
+change.
+
+- **`history.json`:** 0.6.10's snapshot is built from the last commit of
+  the site at that version (`59d75e0`, #55's merge), not a commit from its
+  PR branch, as 0.6.9's was fixed to `d7c2706`.
+- **The correction's float32 limit:** a camera move with Cesium's tiny
+  near plane makes C ill-conditioned, and a large one draws garbage;
+  celestiary refuses a C with entries over 10⁴. And after a resize, the
+  correction's target projection is the host's current one. DESIGN.md,
+  [Host reprojection](./packages/portal-netgl/DESIGN.md#host-reprojection)
+  (Limits, and Named screen targets).
+
 ## 0.6.10: Named screen targets (2026-10-28)
 
 - **Protocol:** a guest that draws its scene into targets of its own and
