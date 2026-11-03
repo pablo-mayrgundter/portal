@@ -374,7 +374,7 @@
     },
     {
       "version": "0.6.11",
-      "ref": "HEAD",
+      "ref": "100e773",
       "date": "2026-11-03",
       "label": "The shadow draws when asked",
       "summary": "shadowDraws is settable at run time: a guest that reads its own pixels on some frames only (celestiary's sky, metering one in four) draws the others once, on the host.",
