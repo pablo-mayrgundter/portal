@@ -1,6 +1,7 @@
 {
-  "latest": "0.6.10",
+  "latest": "0.6.11",
   "versions": [
+    "0.6.11",
     "0.6.10",
     "0.6.9",
     "0.6.8",
@@ -20,6 +21,21 @@
     "0.0.0-frame-rpc"
   ],
   "meta": {
+    "0.6.11": {
+      "date": "2026-11-03",
+      "label": "The shadow draws when asked",
+      "demos": [
+        "three",
+        "iframe",
+        "worker",
+        "netgl",
+        "netgl-celestiary",
+        "netgl-cesium",
+        "netgl-deck"
+      ],
+      "docs": true,
+      "reconstructed": false
+    },
     "0.6.10": {
       "date": "2026-10-28",
       "label": "Named screen targets",
@@ -282,5 +298,5 @@
       "layout": "demo-root"
     }
   },
-  "updated": "2026-10-28T20:26:58.207Z"
+  "updated": "2026-11-03T21:15:18.695Z"
 }
