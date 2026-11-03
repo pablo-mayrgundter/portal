@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="1184" viewBox="0 0 1260 1184" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="1236" viewBox="0 0 1260 1236" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
 <defs></defs>
-<rect width="1260" height="1184" fill="#fcfcfb"/>
-<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">How NetGL got here: the releases up to 0.6.10</text>
+<rect width="1260" height="1236" fill="#fcfcfb"/>
+<text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">How NetGL got here: the releases up to 0.6.11</text>
 <text x="40" y="78" font-size="15" fill="#52514e">Read down a column: each release moved one or two of six axes, and the axes are the protocol. Every version is a snapshot of the site, demos included.</text>
 <rect x="1106" y="30" width="114" height="28" rx="14" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
 <text x="1163" y="49" font-size="13" fill="#2a78d6" font-weight="700" text-anchor="middle">Apr–Oct 2026</text>
@@ -200,9 +200,16 @@
 <circle cx="950" cy="998" r="4" fill="#eda100" stroke="none"/>
 <text x="959" y="1002" font-size="10.5" fill="#0b0b0b">screenTargets, view</text>
 <text x="959" y="1014.6" font-size="10.5" fill="#0b0b0b">on the frame-end</text>
-<text x="40" y="1070" font-size="12.5" fill="#0b0b0b">Three moves explain most of it: the seam moved down a layer (pixels → calls), then the unit moved up (a call → a frame); the guest's state became something the protocol carries</text>
-<text x="40" y="1086.875" font-size="12.5" fill="#0b0b0b">(shadow → checkpoint → tracked → deferred); and the host's say over the guest's draws became a policy that grows a clause per integration.</text>
-<text x="40" y="1124" font-size="12.5" fill="#52514e">Composition modes and lateness follow from the integrations: a door needs a door, an Earth needs a shape, orbits need neither, a city needs the host's pass; a guest on another</text>
-<text x="40" y="1140.875" font-size="12.5" fill="#52514e">origin is a frame late, so the host corrects what it has.</text>
-<text x="40" y="1166" font-size="11" fill="#8a8984">docs/rfcs/responses/evolution.md · snapshots at /portal/v/&lt;version&gt;/ · history.json names each version's commit</text>
+<rect x="40" y="1034" width="1180" height="52" fill="#f7f6f2"/>
+<line x1="40" y1="1086" x2="1220" y2="1086" stroke="#e3e2dd" stroke-width="1"/>
+<text x="48" y="1053" font-size="12" fill="#6250d6" font-weight="700">v0.6.11  ·  2026-11-03</text>
+<text x="48" y="1069" font-size="10.5" fill="#52514e">The shadow draws when asked</text>
+<circle cx="390" cy="1050" r="4" fill="#6250d6" stroke="none"/>
+<text x="399" y="1054" font-size="10.5" fill="#0b0b0b">the shadow draws</text>
+<text x="399" y="1066.6" font-size="10.5" fill="#0b0b0b">when asked</text>
+<text x="40" y="1122" font-size="12.5" fill="#0b0b0b">Three moves explain most of it: the seam moved down a layer (pixels → calls), then the unit moved up (a call → a frame); the guest's state became something the protocol carries</text>
+<text x="40" y="1138.875" font-size="12.5" fill="#0b0b0b">(shadow → checkpoint → tracked → deferred); and the host's say over the guest's draws became a policy that grows a clause per integration.</text>
+<text x="40" y="1176" font-size="12.5" fill="#52514e">Composition modes and lateness follow from the integrations: a door needs a door, an Earth needs a shape, orbits need neither, a city needs the host's pass; a guest on another</text>
+<text x="40" y="1192.875" font-size="12.5" fill="#52514e">origin is a frame late, so the host corrects what it has.</text>
+<text x="40" y="1218" font-size="11" fill="#8a8984">docs/rfcs/responses/evolution.md · snapshots at /portal/v/&lt;version&gt;/ · history.json names each version's commit</text>
 </svg>

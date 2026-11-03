@@ -59,7 +59,7 @@ footer { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; font-size: 
   <nav class="pages" aria-label="Pages"><a href="../">Summary</a><a href="../changelog.html">Changelog</a><a href="index.html" aria-current="page">RFCs</a></nav>
   <a class="demos" href="../three/" target="_blank" rel="noopener" title="The demos, in a new tab">Demos <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></a>
   <div class="right">
-    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.10" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.10</option></select></span>
+    <span class="version" id="version-wrap"><select id="version-select" data-version="0.6.11" data-here="latest" data-snapshots-root="/portal/" aria-label="Version"><option value="latest" selected>latest · 0.6.11</option></select></span>
     <a href="https://github.com/pablo-mayrgundter/portal">GitHub</a>
   </div>
 </div></header>
@@ -220,6 +220,14 @@ Cesium demo is asked for them (<code>?imagery=osm</code>).</p>
 <td><a href="https://pablo-mayrgundter.github.io/portal/v/0.6.7/"><code>v/0.6.7/</code></a></td>
 </tr>
 <tr>
+<td>0.6.11</td>
+<td>2026-11-03</td>
+<td></td>
+<td><strong>The shadow draws when asked.</strong> <code>shadowDraws</code> is settable at run time, so a guest that reads its pixels on some frames only draws the rest once, on the host.</td>
+<td></td>
+<td><a href="https://pablo-mayrgundter.github.io/portal/v/0.6.11/"><code>v/0.6.11/</code></a></td>
+</tr>
+<tr>
 <td>0.6.10</td>
 <td>2026-10-28</td>
 <td><code>8e75125</code></td>
@@ -278,7 +286,7 @@ one or two of six axes, and the axes are the protocol.</p>
 <td>tracked, no queries</td>
 <td>deferred across sub-frames</td>
 <td></td>
-<td>the shadow stops drawing (0.6.2)</td>
+<td>the shadow stops drawing (0.6.2), and draws when asked (0.6.11)</td>
 </tr>
 <tr>
 <td><strong>What the host may override</strong></td>
@@ -366,7 +374,7 @@ so in <code>history.json</code>.</li>
 </ul>
 
 </main>
-<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.10. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
+<footer>Built from <a href="https://github.com/pablo-mayrgundter/portal/tree/main/docs/rfcs/responses">docs/rfcs/responses</a> at portal-netgl 0.6.11. Each release keeps a snapshot of these pages and the demos under <code>v/&lt;version&gt;/</code>; the pulldown in the header switches between them.</footer>
 <script>
 (function () {
   var sel = document.getElementById('version-select'); if (!sel) return;
