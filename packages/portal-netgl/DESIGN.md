@@ -1355,6 +1355,16 @@ framebuffer at a draw) aren't raised on the shadow. Default true; Cesium
 guests keep it, since they pick. `shadow-draws.test.ts` checks the host's
 pixels are byte-equal either way and the shadow stays undrawn.
 
+It is settable at run time (0.6.11): `guest.shadowDraws`, and the recorder
+session's, holds from the next call. A guest that reads its own pixels on
+some frames only turns it on for those frames and off for the rest.
+celestiary's sky guest (exo.cafe's abode) meters one frame in four, reading
+its scene buffer back, and the shadow now draws only that one: the other
+three are drawn once, by the host. Whatever a frame reads must be drawn in
+that frame with draws on; anything it reads from an earlier frame (a
+target accumulated over frames, a feedback buffer) needs those frames drawn
+too.
+
 The replay reverses the encoding and re-executes against the host's
 context. The host owns when to drain: the sender emits a `NetGLFrameEnd`
 marker after each frame; the host buffers calls between markers and drains
@@ -1555,9 +1565,11 @@ unchanged.
 - **No-draw shadow, for guests that read back.** `shadowDraws: false`
   (0.6.2) skips the shadow's draws for a guest that never reads its
   pixels. Cesium does read them (picking, camera collision), so it still
-  draws everything twice: 2× GPU for a globe. A mode that executes draws
-  only when a readback is pending (or replays the last frame onto the
-  shadow before one) would halve that, and it matters most for guests
+  draws everything twice: 2× GPU for a globe. A guest that knows which
+  frames it reads can now say so (`guest.shadowDraws`, 0.6.11); for
+  Cesium, whose picks come from input at any time, a mode that executes
+  draws only when a readback is pending (or replays the last frame onto
+  the shadow before one) would halve that, and it matters most for guests
   warming up unseen.
 
 - **Colour contract.** Host and guest must agree on colour space and

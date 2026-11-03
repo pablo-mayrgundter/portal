@@ -4,7 +4,7 @@
 <text x="40" y="52" font-size="28" fill="#0b0b0b" font-weight="700">Portal / NetGL: link independent 3D web renderers at the GL layer</text>
 <text x="40" y="78" font-size="15" fill="#52514e">Engines stay sovereign. The seam is the WebGL2 command stream, replayed into one host context.</text>
 <rect x="993.5" y="30" width="166.5" height="28" rx="14" fill="#e3eefb" stroke="#2a78d6" stroke-width="1"/>
-<text x="1076.75" y="49" font-size="13" fill="#2a78d6" font-weight="700" text-anchor="middle">portal-netgl 0.6.10</text>
+<text x="1076.75" y="49" font-size="13" fill="#2a78d6" font-weight="700" text-anchor="middle">portal-netgl 0.6.11</text>
 <rect x="40" y="100" width="340" height="300" rx="10" fill="#ffffff" stroke="#e3e2dd" stroke-width="1"/>
 <rect x="40" y="100" width="340" height="4" rx="2" fill="#52514e"/>
 <text x="58" y="132" font-size="16" fill="#0b0b0b" font-weight="700">The problem</text>

@@ -389,6 +389,15 @@ export type NetGLRecorderSession = {
    */
   snapshot: boolean
   /**
+   * Whether draws and clears run on the shadow too
+   * (`NetGLRecorderSessionOptions.shadowDraws`), settable at any time: it
+   * holds from the next call. A guest that reads its own pixels only on
+   * some frames (a meter sampling one frame in four) turns it on for those
+   * frames and off for the rest, so the others' pixel work is done once,
+   * by the host. The recorded stream is the same either way.
+   */
+  shadowDraws: boolean
+  /**
    * Post a state checkpoint: the calls that re-establish the shadow's
    * current GL state on the receiver. Call at every frame boundary (after
    * the frame-end marker) so each replayed batch starts from the guest's
@@ -468,7 +477,7 @@ export const makeNetGLRecorderSession = (
   const state = (options.scalarState ?? 'tracked') === 'tracked' ? makeScalarStateTracker(shadow) : undefined
   let checkpointDeferred = false
   let snapshot = false
-  const shadowDraws = options.shadowDraws ?? true
+  let shadowDraws = options.shadowDraws ?? true
   // Per call: the buffers the encoder made (transferable), and whether an
   // argument is an app object that must be serialised now.
   let owned: ArrayBuffer[] = []
@@ -739,6 +748,12 @@ export const makeNetGLRecorderSession = (
     },
     set snapshot(on: boolean) {
       snapshot = on
+    },
+    get shadowDraws() {
+      return shadowDraws
+    },
+    set shadowDraws(on: boolean) {
+      shadowDraws = on
     },
     checkpoint() {
       checkpointDeferred = false

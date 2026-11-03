@@ -13,6 +13,17 @@ Every version's demos are kept at
 0.6.8 are reconstructions built from that version's last commit. The
 package is pre-1.0: pin an exact version.
 
+## 0.6.11: The shadow draws when asked (2026-11-03)
+
+- **Guest:** `shadowDraws` is settable at run time, on the guest context
+  (`guest.shadowDraws = on`) and the recorder session, from the next call.
+  A guest that reads its own pixels on some frames only sets it for those
+  and clears it for the rest, which are then drawn once, by the host's
+  replay. The stream is the same either way. DESIGN.md, *No-draw shadow*
+  ([the guest's layers](./packages/portal-netgl/DESIGN.md)).
+- **Built for:** celestiary's sky guest in exo.cafe's abode, whose meter
+  reads one frame in four: the other three no longer draw on the shadow.
+
 ## 0.6.10: Named screen targets (2026-10-28)
 
 - **Protocol:** a guest that draws its scene into targets of its own and

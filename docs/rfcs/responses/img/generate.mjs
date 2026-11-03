@@ -339,6 +339,7 @@ writeFileSync(OUT + 'portal-netgl-inline.svg', overview({ tag: false, links: tru
     '0.6.8': ['', '', 'parts to their own targets', '', '', 'part on the frame-end'],
     '0.6.9': ['', '', '', '', 'deletes deferred: any frame re-runs', ''],
     '0.6.10': ['', '', 'named screen targets', '', 'the guest\'s own projection', 'screenTargets, view on the frame-end'],
+    '0.6.11': ['', 'the shadow draws when asked', '', '', '', ''],
   }
   const DEMO_LABEL = { three: 'Local', iframe: 'iframe', worker: 'Worker', netgl: 'NetGL', 'netgl-celestiary': 'celestiary', 'netgl-cesium': 'Cesium', 'netgl-deck': 'deck.gl' }
   const AXIS_COL = [C.guest, C.open, C.host, C.built, C.risk, C.next]

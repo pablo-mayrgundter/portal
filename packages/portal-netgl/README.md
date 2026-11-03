@@ -577,6 +577,9 @@ over a MessageChannel the host hands the guest):
   and queries still run on the shadow, and the stream is unchanged. The
   cost: `readPixels`, picking and occlusion queries on the guest answer
   nothing meaningful, and draw-time GL errors aren't raised there.
+  `guest.shadowDraws` is settable at any time (0.6.11), from the next
+  call: a guest that reads its pixels on some frames only (a meter that
+  samples one in four) turns it on for those frames and off for the rest.
 - **Control** (host ↔ guest): `netgl:ready` handshake announcing the
   guest's anchor + background; `netgl:setPose` from the host with the
   coupled camera state (door portals), or `layer:view` with the host's
