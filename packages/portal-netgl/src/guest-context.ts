@@ -146,6 +146,14 @@ export type NetGLGuestContext = {
   /** The negotiated wire. */
   readonly wire: NetGLGuestWire
   /**
+   * Whether draws and clears run on the shadow too: the `shadowDraws`
+   * option's value at creation, settable at any time, from the next call.
+   * A guest that reads its own pixels on some frames only (a meter that
+   * samples one in four) sets it for those frames and clears it for the
+   * rest, so they're drawn once, by the host. The stream is the same.
+   */
+  shadowDraws: boolean
+  /**
    * Mark the end of a frame: posts frame-end, then a checkpoint (when the
    * context was made with `checkpoints`). `{ checkpoint: false }` posts
    * the frame-end alone: the next frame then replays from whatever state
@@ -386,6 +394,12 @@ export const makeNetGLGuestContext = (config: NetGLGuestContextConfig = {}): Net
       get batches() {
         return batches
       }
+    },
+    get shadowDraws() {
+      return recorder.shadowDraws
+    },
+    set shadowDraws(on: boolean) {
+      recorder.shadowDraws = on
     },
     endFrame(options = {}) {
       const frameEnd = frameEndOf(options, recorder.idOf)

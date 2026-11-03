@@ -104,6 +104,47 @@ describe('shadowDraws: false (recorder)', () => {
   })
 })
 
+describe('shadowDraws switched at run time', () => {
+  it('draws on the shadow only while on, and records the same stream', () => {
+    const { shadow, ran } = loggingShadow()
+    const calls: NetGLCall[] = []
+    const session = makeNetGLRecorderSession(shadow, (call) => calls.push(call), { scalarState: 'queried',
+      shadowDraws: false })
+    expect(session.shadowDraws).toBe(false)
+    frame(session.gl)
+    expect(ran.filter((n) => DRAWS.includes(n))).toEqual([])
+    session.shadowDraws = true
+    expect(session.shadowDraws).toBe(true)
+    ran.length = 0
+    frame(session.gl)
+    expect(ran.filter((n) => DRAWS.includes(n)).sort()).toEqual([...DRAWS].sort())
+    session.shadowDraws = false
+    ran.length = 0
+    frame(session.gl)
+    expect(ran.filter((n) => DRAWS.includes(n))).toEqual([])
+    // Three frames' worth, each the same, whichever way the shadow drew.
+    const one = calls.length / 3
+    const names = calls.map((c) => c.name)
+    expect(names.slice(one, 2 * one)).toEqual(names.slice(0, one))
+    expect(names.slice(2 * one)).toEqual(names.slice(0, one))
+  })
+
+  it('is the guest context\'s too', () => {
+    const { shadow, ran } = loggingShadow()
+    const guest = makeNetGLGuestContext({ canvas: { getContext: () => shadow } as unknown as HTMLCanvasElement,
+      transport: { post: () => {}, onMessage: () => () => {} },
+      checkpoints: false, messageChannel: false, wire: 1 })
+    expect(guest.shadowDraws).toBe(true)
+    guest.shadowDraws = false
+    expect(guest.shadowDraws).toBe(false)
+    guest.gl.drawArrays(0x0004, 0, 3)
+    expect(ran).not.toContain('drawArrays')
+    guest.shadowDraws = true
+    guest.gl.drawArrays(0x0004, 0, 3)
+    expect(ran).toContain('drawArrays')
+  })
+})
+
 // A three.js guest over headless-gl, replayed into a host context.
 
 const W = 32
